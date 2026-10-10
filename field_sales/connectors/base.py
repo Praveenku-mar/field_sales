@@ -157,12 +157,14 @@ class BaseConnector:
 		Push a submitted Field Order to the store.
 
 		The retailer must already exist on the store (``external_customer_id``).
-		If ``field_order.external_draft_id`` is set (a retry), that draft is
-		reused instead of creating another. Whether the draft is confirmed into
-		an order follows ``Store Connection.order_mode``.
+		``Store Connection.order_mode`` decides whether a draft or a confirmed
+		order (payment pending) is created. Totals must match the Field Order:
+		its tax and discount are sent explicitly, not recalculated by the store.
 
-		On failure after the draft was created, the ``ConnectorError`` carries
-		``partial={"draft_id": str}``.
+		Must be safe to retry: if ``field_order.external_draft_id`` is set, or
+		an order for it already exists, reuse it instead of creating another.
+		On failure after something was created, the ``ConnectorError`` carries
+		it in ``partial`` (e.g. ``{"draft_id": str}``).
 
 		:param field_order: ``Field Order`` document.
 		:return: ``{"draft_id": str | None, "order_id": str | None, "order_name": str | None}``

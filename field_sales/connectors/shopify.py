@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import frappe
 import requests
@@ -83,19 +83,28 @@ mutation($input: DraftOrderInput!) {
 }
 """ % DRAFT_ORDER_FIELDS
 
-DRAFT_ORDER_COMPLETE = """
-mutation($id: ID!) {
-  draftOrderComplete(id: $id) { draftOrder { %s } userErrors { field message } }
-}
-""" % DRAFT_ORDER_FIELDS
-
 DRAFT_ORDER_QUERY = """
 query($id: ID!) { draftOrder(id: $id) { %s } }
 """ % DRAFT_ORDER_FIELDS
 
-# Orders are confirmed with payment still to be collected (field sales are
-# paid on delivery): "Due on receipt" payment terms leave them payment pending.
-PAYMENT_TERMS_QUERY = "{ shop { currencyCode } paymentTermsTemplates { id paymentTermsType } }"
+DRAFT_ORDER_DELETE = """
+mutation($id: ID!) { draftOrderDelete(input: {id: $id}) { deletedId userErrors { field message } } }
+"""
+
+ORDER_CREATE = """
+mutation($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
+  orderCreate(order: $order, options: $options) { order { id name } userErrors { field message code } }
+}
+"""
+
+ORDER_SEARCH = """
+query($q: String!) { orders(first: 1, query: $q) { nodes { id name } } }
+"""
+
+SHOP_CURRENCY_QUERY = "{ shop { currencyCode } }"
+
+# Shopify needs a code for an order-level fixed discount; this one is shown on the order.
+ORDER_DISCOUNT_CODE = "FIELD-ORDER"
 
 
 class ShopifyConnector(BaseConnector):
@@ -127,8 +136,8 @@ class ShopifyConnector(BaseConnector):
 		# True once this instance has requested a token itself, so it carries
 		# the store's current scopes and a scope error is not worth a retry.
 		self._token_is_fresh = False
-		# Shop currency and "Due on receipt" terms id, looked up once per instance.
-		self._order_settings: dict | None = None
+		# Shop currency (order prices are sent in it), looked up once per instance.
+		self._currency: str | None = None
 
 	# ------------------------------------------------------------------
 	# Public API
@@ -277,12 +286,18 @@ class ShopifyConnector(BaseConnector):
 
 	def create_order(self, field_order) -> dict:
 		"""
-		Push a submitted Field Order as a draft order, then complete it into an
-		order when Store Connection's Order Mode is "Confirmed".
+		Push a submitted Field Order according to Store Connection's Order Mode.
 
-		A draft already linked to the Field Order (a retry) is reused: if it was
-		completed meanwhile its order is returned; if it was deleted on
-		Shopify a new draft is created.
+		- Confirmed: a real order (``orderCreate``) with the Field Order's tax as
+		  an explicit tax line and payment pending, so Shopify shows the same
+		  subtotal, discount, tax and total.
+		- Draft: a draft order. Drafts take no tax amount (Shopify only
+		  estimates tax from its own settings), so the tax is added as a
+		  non-taxable line item to keep the total equal.
+
+		Retries never duplicate: a linked draft is reused (or its completed
+		order returned), and an order already created for this Field Order is
+		found by its tag.
 
 		:return: ``{"draft_id", "order_id", "order_name"}`` (plain ids; order fields ``None`` in Draft mode).
 		"""
@@ -294,22 +309,17 @@ class ShopifyConnector(BaseConnector):
 			)
 
 		draft = self._get_draft(field_order.external_draft_id, field_order) if field_order.external_draft_id else None
-		if not draft:
-			draft = self._create_draft(field_order, retailer)
-
-		draft_id = from_gid(draft["id"])
-		if draft.get("status") == "COMPLETED" or self.settings.order_mode != "Confirmed":
+		if draft and draft.get("status") == "COMPLETED":
 			return _order_result(draft)
 
-		try:
-			data = self._graphql(
-				DRAFT_ORDER_COMPLETE, {"id": draft["id"]}, operation="Confirm Order", ref=field_order
-			)
-		except ConnectorError as e:
-			e.partial = {"draft_id": draft_id}
-			raise
+		if self.settings.order_mode != "Confirmed":
+			return _order_result(draft or self._create_draft(field_order, retailer))
 
-		return _order_result(data["draftOrderComplete"]["draftOrder"])
+		order = self._find_order(field_order) or self._create_confirmed_order(field_order, retailer)
+		if draft:
+			# Left over from an earlier push in Draft mode; the order replaces it.
+			self._delete_draft(draft["id"], field_order)
+		return {"draft_id": None, "order_id": from_gid(order["id"]), "order_name": order.get("name")}
 
 	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
 		if order_id:
@@ -317,6 +327,68 @@ class ShopifyConnector(BaseConnector):
 		if draft_id:
 			return f"https://{self.shop_domain}/admin/draft_orders/{from_gid(draft_id)}"
 		return None
+
+	def _create_confirmed_order(self, field_order, retailer) -> dict:
+		"""``orderCreate`` with explicit tax, discount and payment pending; returns ``{"id", "name"}``."""
+		currency = self._get_currency(field_order)
+		address = _customer_address(retailer, to_e164_india(retailer.phone))
+
+		order_input = {
+			"customer": {"toAssociate": {"id": to_gid("Customer", retailer.external_customer_id)}},
+			"lineItems": [_order_line_item(row, currency) for row in field_order.items],
+			"taxesIncluded": False,
+			"financialStatus": "PENDING",
+			"note": _order_note(field_order),
+			"tags": _order_tags(field_order),
+			"sourceIdentifier": field_order.name,
+			"shippingAddress": address,
+			"billingAddress": address,
+		}
+
+		tax_amount = flt(field_order.tax_amount, 2)
+		if tax_amount > 0:
+			# Order-level, so the amount is exactly the Field Order's (per-line tax could round differently).
+			order_input["taxLines"] = [
+				{
+					"title": _("Tax"),
+					"rate": str(flt(field_order.tax_percent) / 100),
+					"priceSet": _money(tax_amount, currency),
+				}
+			]
+
+		if flt(field_order.discount_amount) > 0:
+			order_input["discountCode"] = {
+				"itemFixedDiscountCode": {
+					"code": ORDER_DISCOUNT_CODE,
+					"amountSet": _money(field_order.discount_amount, currency),
+				}
+			}
+
+		data = self._graphql(
+			ORDER_CREATE,
+			{
+				"order": order_input,
+				"options": {
+					"inventoryBehaviour": "DECREMENT_OBEYING_POLICY",
+					"sendReceipt": False,
+					"sendFulfillmentReceipt": False,
+				},
+			},
+			operation="Confirm Order",
+			ref=field_order,
+		)
+		return data["orderCreate"]["order"]
+
+	def _find_order(self, field_order) -> dict | None:
+		"""An order already created for this Field Order (a retry after a lost response)."""
+		data = self._graphql(
+			ORDER_SEARCH,
+			{"q": f'tag:"{_field_order_tag(field_order)}"'},
+			operation="Confirm Order",
+			ref=field_order,
+		)
+		nodes = (data.get("orders") or {}).get("nodes") or []
+		return nodes[0] if nodes else None
 
 	def _get_draft(self, draft_id: str, field_order) -> dict | None:
 		"""The linked draft order, or ``None`` if it no longer exists on Shopify."""
@@ -328,16 +400,29 @@ class ShopifyConnector(BaseConnector):
 		)
 		return data.get("draftOrder")
 
+	def _delete_draft(self, draft_gid: str, field_order) -> None:
+		"""Best effort: a stale draft left behind is harmless, so a failure here is only logged."""
+		try:
+			self._graphql(DRAFT_ORDER_DELETE, {"id": draft_gid}, operation="Other", ref=field_order)
+		except ConnectorError:
+			pass
+
 	def _create_draft(self, field_order, retailer) -> dict:
-		settings = self._get_order_settings(field_order)
-		currency = settings["currency"]
+		currency = self._get_currency(field_order)
 		address = _customer_address(retailer, to_e164_india(retailer.phone))
+
+		line_items = [_draft_line_item(row, currency) for row in field_order.items]
+		tax_line = _tax_line_item(field_order, currency)
+		if tax_line:
+			line_items.append(tax_line)
 
 		draft_input = {
 			"purchasingEntity": {"customerId": to_gid("Customer", retailer.external_customer_id)},
-			"lineItems": [_draft_line_item(row, currency) for row in field_order.items],
-			"note": f"Field Order {field_order.name} · Rep {field_order.sales_rep}",
-			"tags": [t for t in ("field-sales", field_order.sales_rep) if t],
+			"lineItems": line_items,
+			# Tax comes from the Field Order (as its own line); Shopify must not add its own on top.
+			"taxExempt": True,
+			"note": _order_note(field_order),
+			"tags": _order_tags(field_order),
 			"shippingAddress": address,
 			"billingAddress": address,
 		}
@@ -347,29 +432,18 @@ class ShopifyConnector(BaseConnector):
 				"value": flt(field_order.discount_amount),
 				"title": _("Field Order discount"),
 			}
-		if self.settings.order_mode == "Confirmed" and settings["due_on_receipt_id"]:
-			draft_input["paymentTerms"] = {
-				"paymentTermsTemplateId": settings["due_on_receipt_id"],
-				"paymentSchedules": [{"issuedAt": datetime.now(timezone.utc).isoformat()}],
-			}
 
 		data = self._graphql(
 			DRAFT_ORDER_CREATE, {"input": draft_input}, operation="Create Order", ref=field_order
 		)
 		return data["draftOrderCreate"]["draftOrder"]
 
-	def _get_order_settings(self, field_order) -> dict:
-		"""Shop currency (prices are overridden in it) and the "Due on receipt" terms template id."""
-		if self._order_settings is None:
-			data = self._graphql(PAYMENT_TERMS_QUERY, operation="Create Order", ref=field_order)
-			templates = data.get("paymentTermsTemplates") or []
-			self._order_settings = {
-				"currency": (data.get("shop") or {}).get("currencyCode"),
-				"due_on_receipt_id": next(
-					(t["id"] for t in templates if t.get("paymentTermsType") == "RECEIPT"), None
-				),
-			}
-		return self._order_settings
+	def _get_currency(self, field_order) -> str:
+		"""The shop's currency; order prices are sent in it."""
+		if self._currency is None:
+			data = self._graphql(SHOP_CURRENCY_QUERY, operation="Create Order", ref=field_order)
+			self._currency = (data.get("shop") or {}).get("currencyCode")
+		return self._currency
 
 	# ------------------------------------------------------------------
 	# Auth
@@ -624,6 +698,26 @@ def _customer_address(retailer, phone: str | None) -> dict:
 
 def _draft_line_item(row, currency: str) -> dict:
 	"""Field Order Item -> DraftOrderLineItemInput, at the order's rate."""
+	_check_line_item(row)
+	return {
+		"variantId": to_gid("ProductVariant", row.external_variant_id),
+		"quantity": cint(row.qty),
+		"priceOverride": {"amount": str(flt(row.rate, 2)), "currencyCode": currency},
+	}
+
+
+def _order_line_item(row, currency: str) -> dict:
+	"""Field Order Item -> OrderCreateLineItemInput, at the order's rate."""
+	_check_line_item(row)
+	return {
+		"variantId": to_gid("ProductVariant", row.external_variant_id),
+		"quantity": cint(row.qty),
+		"priceSet": _money(row.rate, currency),
+		"taxable": True,
+	}
+
+
+def _check_line_item(row) -> None:
 	if not row.external_variant_id:
 		raise ConnectorError(
 			_("Row {0}: {1} is not linked to a Shopify variant").format(row.idx, row.product_title or row.product),
@@ -634,10 +728,44 @@ def _draft_line_item(row, currency: str) -> dict:
 			_("Row {0}: Shopify only accepts whole quantities, not {1}").format(row.idx, flt(row.qty)),
 			code="CONFIG_ERROR",
 		)
+
+
+def _money(amount, currency: str) -> dict:
+	"""MoneyBagInput in the shop currency."""
+	return {"shopMoney": {"amount": str(flt(amount, 2)), "currencyCode": currency}}
+
+
+def _field_order_tag(field_order) -> str:
+	"""Tag that identifies the Field Order's order on Shopify, used to find it again on retry."""
+	return f"field-order-{field_order.name}"
+
+
+def _order_tags(field_order) -> list[str]:
+	return [t for t in ("field-sales", field_order.sales_rep, _field_order_tag(field_order)) if t]
+
+
+def _order_note(field_order) -> str:
+	return f"Field Order {field_order.name} \u00b7 Rep {field_order.sales_rep}"
+
+
+def _tax_line_item(field_order, currency: str) -> dict | None:
+	"""
+	The Field Order's tax as a custom, non-taxable line item.
+
+	Draft orders take no explicit tax amount (Shopify only calculates tax from
+	its own settings), so this is how the order total on the store matches
+	the Field Order's grand total. The order-level discount then applies to
+	net + tax, as it does on the Field Order.
+	"""
+	tax_amount = flt(field_order.tax_amount, 2)
+	if tax_amount <= 0:
+		return None
 	return {
-		"variantId": to_gid("ProductVariant", row.external_variant_id),
-		"quantity": cint(row.qty),
-		"priceOverride": {"amount": str(flt(row.rate, 2)), "currencyCode": currency},
+		"title": _("Tax ({0}%)").format(f"{flt(field_order.tax_percent):g}"),
+		"quantity": 1,
+		"originalUnitPriceWithCurrency": {"amount": str(tax_amount), "currencyCode": currency},
+		"taxable": False,
+		"requiresShipping": False,
 	}
 
 

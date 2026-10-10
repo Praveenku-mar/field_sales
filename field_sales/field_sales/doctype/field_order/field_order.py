@@ -104,7 +104,7 @@ class FieldOrder(Document):
 			}
 
 		for row in self.items:
-			row.amount = flt(row.qty) * flt(row.rate)
+			row.amount = flt(flt(row.qty) * flt(row.rate), row.precision("amount"))
 
 			tracks = track_map.get(row.product, 0)
 			row.stock_warning = (
@@ -112,12 +112,17 @@ class FieldOrder(Document):
 			)
 
 	def _compute_totals(self):
-		"""Roll up item amounts into order-level totals."""
+		"""
+		Roll up item amounts into order-level totals, rounded to currency
+		precision so they match what the store calculates from the same order.
+		"""
 		self.total_qty = sum(flt(r.qty) for r in self.items)
-		self.net_total = sum(flt(r.amount) for r in self.items)
-		self.tax_amount = flt(self.net_total) * flt(self.tax_percent) / 100
-		self.grand_total = (
-			flt(self.net_total)
-			+ flt(self.tax_amount)
-			- flt(self.discount_amount)
+		self.net_total = flt(sum(flt(r.amount) for r in self.items), self.precision("net_total"))
+		self.tax_amount = flt(
+			flt(self.net_total) * flt(self.tax_percent) / 100, self.precision("tax_amount")
 		)
+		self.grand_total = flt(
+			flt(self.net_total) + flt(self.tax_amount) - flt(self.discount_amount),
+			self.precision("grand_total"),
+		)
+

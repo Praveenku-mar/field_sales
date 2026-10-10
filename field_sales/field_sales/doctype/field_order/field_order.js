@@ -247,8 +247,13 @@ function _recalc_totals(frm) {
 		net_total += flt(row.amount);
 	});
 
-	var tax_amount = net_total * flt(frm.doc.tax_percent) / 100;
-	var grand_total = net_total + tax_amount - flt(frm.doc.discount_amount);
+	// Rounded like the server does, so the form shows what will be saved.
+	net_total = flt(net_total, precision("net_total"));
+	var tax_amount = flt(net_total * flt(frm.doc.tax_percent) / 100, precision("tax_amount"));
+	var grand_total = flt(
+		net_total + tax_amount - flt(frm.doc.discount_amount),
+		precision("grand_total")
+	);
 
 	frm.set_value("total_qty", total_qty);
 	frm.set_value("net_total", net_total);

@@ -72,7 +72,7 @@ def push_retailer(retailer_name: str):
 	start = time.monotonic()
 
 	try:
-		customer_id = conn.create_customer(doc)
+		result = conn.create_customer(doc)
 	except Exception as e:
 		frappe.db.rollback()
 		message = e.message if isinstance(e, ConnectorError) else str(e)
@@ -96,11 +96,12 @@ def push_retailer(retailer_name: str):
 	_record_result(
 		retailer_name,
 		{
-			"external_customer_id": customer_id,
+			"external_customer_id": result["id"],
 			"platform": platform,
 			"sync_status": "Synced",
 			"last_synced": now_datetime(),
-			"sync_error": "",
+			# Synced, but with a caveat worth showing (e.g. email left out).
+			"sync_error": result.get("warning") or "",
 		},
 	)
 	log_sync(
@@ -110,7 +111,8 @@ def push_retailer(retailer_name: str):
 		reference_name=retailer_name,
 		status="Success",
 		duration_ms=_elapsed_ms(start),
-		external_id=customer_id,
+		external_id=result["id"],
+		error_message=result.get("warning"),
 	)
 	frappe.db.commit()
 

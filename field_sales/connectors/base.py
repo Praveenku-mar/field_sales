@@ -140,13 +140,15 @@ class BaseConnector:
 		"""
 		raise NotImplementedError
 
-	def create_customer(self, retailer: Document) -> str:
+	def create_customer(self, retailer: Document) -> dict:
 		"""
 		Create the retailer as a customer on the store, or update it if it has
 		an ``external_customer_id`` already.
 
 		:param retailer: ``Retailer`` document.
-		:return: The platform's customer id (stored as ``external_customer_id``).
+		:return: ``{"id": str, "warning": str | None}``: the platform's customer id
+			(stored as ``external_customer_id``), and a note if the customer was
+			synced with some data left out (stored as ``sync_error``).
 		"""
 		raise NotImplementedError
 

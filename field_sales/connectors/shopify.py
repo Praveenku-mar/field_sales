@@ -194,7 +194,7 @@ class ShopifyConnector(BaseConnector):
 
 		return stock
 
-	def create_customer(self, retailer) -> str:
+	def create_customer(self, retailer) -> dict:
 		"""
 		Create the retailer as a Shopify customer, or update the linked one.
 
@@ -203,13 +203,31 @@ class ShopifyConnector(BaseConnector):
 		linked customer no longer exists (deleted or merged on Shopify), it is
 		created again the same way.
 
+		If Shopify rejects the email itself (e.g. "invalid domain name"), the
+		push is retried once without it and the result carries a warning.
+
 		Addresses are only sent on create: how ``customerUpdate`` treats an
 		``addresses`` list is undocumented, and resending an identical address
 		has been reported to delete it.
 
-		:return: Plain Shopify customer id.
+		:return: ``{"id": plain Shopify customer id, "warning": str | None}``
 		"""
+		try:
+			return {"id": self._push_customer(retailer, with_email=True), "warning": None}
+		except ConnectorError as e:
+			if not (retailer.email and _is_rejected_email(e)):
+				raise
+
+		return {
+			"id": self._push_customer(retailer, with_email=False),
+			"warning": _("Synced without email — email domain rejected by store"),
+		}
+
+	def _push_customer(self, retailer, with_email: bool) -> str:
+		"""One create-or-update attempt; see ``create_customer``."""
 		customer_input = _customer_input(retailer)
+		if not with_email:
+			customer_input.pop("email", None)
 
 		if retailer.external_customer_id:
 			try:
@@ -555,6 +573,19 @@ def _is_missing_customer(error: ConnectorError) -> bool:
 	"""True if ``error`` is Shopify saying the customer id sent does not exist."""
 	return error.code == "USER_ERROR" and any(
 		(e.get("field") or [""])[-1] == "id" and "does not exist" in (e.get("message") or "").lower()
+		for e in error.details
+	)
+
+
+def _is_rejected_email(error: ConnectorError) -> bool:
+	"""
+	True if Shopify refused the email address itself (e.g. "invalid domain name").
+
+	"Has already been taken" is not a rejection: it is resolved by linking the
+	existing customer, so it never reaches here unless that lookup failed.
+	"""
+	return error.code == "USER_ERROR" and any(
+		(e.get("field") or [""])[-1] == "email" and "taken" not in (e.get("message") or "").lower()
 		for e in error.details
 	)
 

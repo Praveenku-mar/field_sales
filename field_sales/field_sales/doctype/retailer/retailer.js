@@ -31,6 +31,9 @@ frappe.ui.form.on("Retailer", {
 				`<div>${__("Store sync failed")}: ${frappe.utils.escape_html(frm.doc.sync_error)}</div>`,
 				"red"
 			);
+		} else if (frm.doc.sync_status === "Synced" && frm.doc.sync_error) {
+			// Synced with a caveat, e.g. the store rejected the email.
+			frm.dashboard.set_headline(`<div>${frappe.utils.escape_html(frm.doc.sync_error)}</div>`, "orange");
 		} else {
 			frm.dashboard.clear_headline();
 		}

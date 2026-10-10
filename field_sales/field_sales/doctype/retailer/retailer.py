@@ -6,6 +6,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import validate_email_address
 
 from field_sales.permissions import get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
@@ -20,6 +21,7 @@ class Retailer(Document):
 
 	def validate(self):
 		self._validate_phone()
+		self._validate_email()
 		self._validate_coordinates()
 
 	def on_update(self):
@@ -52,6 +54,16 @@ class Retailer(Document):
 					self.phone
 				)
 			)
+
+	def _validate_email(self):
+		"""Email is optional; when given it must be a single, well-formed address."""
+		if not self.email:
+			return
+		self.email = self.email.strip()
+		# validate_email_address accepts comma-separated lists; the store takes one address.
+		if "," in self.email or ";" in self.email:
+			frappe.throw(_("Enter a single email address. Received: {0}").format(self.email))
+		validate_email_address(self.email, throw=True)
 
 	def _validate_coordinates(self):
 

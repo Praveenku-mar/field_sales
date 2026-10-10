@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import now_datetime
 
 from field_sales.connectors import ConnectorError, get_connector
+from field_sales.sync.customers import push_retailers
 from field_sales.sync.products import enqueue_sync
 
 
@@ -63,3 +64,23 @@ def enqueue_product_sync() -> dict:
 	if enqueue_sync():
 		return {"queued": True, "message": _("Sync started")}
 	return {"queued": False, "message": _("A product sync is already running")}
+
+
+@frappe.whitelist(methods=["POST"])
+def sync_retailers(names: str | list) -> dict:
+	"""
+	Queue a push to the store for each given Retailer ("Sync to Store").
+
+	:param names: Retailer names (list, or JSON list from the client).
+	:return: ``{"message": str}``
+	"""
+	names = frappe.parse_json(names) if isinstance(names, str) else names
+	if not names:
+		frappe.throw(_("Select at least one Retailer"))
+
+	for name in names:
+		frappe.has_permission("Retailer", "write", name, throw=True)
+
+	get_connector()  # fails fast if Store Connection is disabled
+	push_retailers(names)
+	return {"message": _("Sync to store queued for {0} retailer(s)").format(len(names))}

@@ -4,6 +4,13 @@
 import frappe
 from frappe.model.document import Document
 
+from field_sales.permissions import clear_allowed_reps_cache
+
 
 class SalesRep(Document):
-	pass
+	def on_update(self):
+		# The hierarchy may have changed; later checks in this request must see it.
+		clear_allowed_reps_cache()
+
+	def on_trash(self):
+		clear_allowed_reps_cache()

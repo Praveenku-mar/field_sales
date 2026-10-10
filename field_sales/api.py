@@ -9,6 +9,7 @@ from frappe.utils import flt, get_link_to_form, now_datetime
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
+from field_sales.permissions import get_allowed_reps, is_admin
 from field_sales.sync.customers import push_retailers
 from field_sales.sync.products import enqueue_sync
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
@@ -233,12 +234,14 @@ def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]
 
 
 def _check_visit_access(doc) -> None:
-	"""Only the visit's own sales rep, or a manager, may check in / out."""
+	"""Only the visit's own sales rep, or a manager over that rep, may check in / out."""
 	if frappe.session.user == frappe.db.get_value("Sales Rep", doc.sales_rep, "user"):
 		return
-	if VISIT_MANAGER_ROLES & set(frappe.get_roles()):
+	if is_admin() or (
+		VISIT_MANAGER_ROLES & set(frappe.get_roles()) and doc.sales_rep in get_allowed_reps()
+	):
 		return
 	frappe.throw(
-		_("Only the visit's sales rep or a Sales Manager can check in or out."),
+		_("Only the visit's sales rep or their Sales Manager can check in or out."),
 		frappe.PermissionError,
 	)

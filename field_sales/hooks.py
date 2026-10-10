@@ -169,13 +169,21 @@ use_json_request_body = True
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+# Row-level access by Sales Rep hierarchy (see field_sales/permissions.py).
+
+permission_query_conditions = {
+	"Visit": "field_sales.permissions.visit_query",
+	"Sales Rep": "field_sales.permissions.sales_rep_query",
+	"Field Order": "field_sales.permissions.field_order_query",
+	"Retailer": "field_sales.permissions.retailer_query",
+}
+
+has_permission = {
+	"Visit": "field_sales.permissions.visit_has_permission",
+	"Sales Rep": "field_sales.permissions.sales_rep_has_permission",
+	"Field Order": "field_sales.permissions.field_order_has_permission",
+	"Retailer": "field_sales.permissions.retailer_has_permission",
+}
 
 # Document Events
 # ---------------

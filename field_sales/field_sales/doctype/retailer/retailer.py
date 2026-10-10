@@ -7,10 +7,17 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from field_sales.permissions import get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 
 
 class Retailer(Document):
+	def before_insert(self):
+		# Retailers are only visible through their Sales Rep, so one created
+		# without a rep would vanish for its creator: assign it to them.
+		if not self.sales_rep and not is_admin():
+			self.sales_rep = get_own_rep()
+
 	def validate(self):
 		self._validate_phone()
 		self._validate_coordinates()

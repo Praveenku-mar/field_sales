@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import now_datetime
 
 from field_sales.connectors import ConnectorError, get_connector
+from field_sales.sync.products import enqueue_sync
 
 
 @frappe.whitelist(methods=["POST"])
@@ -41,3 +42,24 @@ def get_locations() -> list[dict]:
 		return get_connector().get_locations()
 	except ConnectorError as e:
 		frappe.throw(e.message, title=_("Could not fetch locations"))
+
+
+@frappe.whitelist(methods=["POST"])
+def enqueue_product_sync() -> dict:
+	"""
+	Start a background product sync (the "Sync Products" button).
+
+	Fails fast if Store Connection is disabled or has no default location, so
+	the user sees the problem now rather than in a failed job.
+
+	:return: ``{"queued": bool, "message": str}``; ``queued`` is false if a sync is already running.
+	"""
+	frappe.only_for(["System Manager", "Sales Manager"])
+
+	get_connector()
+	if not frappe.db.get_single_value("Store Connection", "default_location_id"):
+		frappe.throw(_("Set a Default Location on Store Connection before syncing products"))
+
+	if enqueue_sync():
+		return {"queued": True, "message": _("Sync started")}
+	return {"queued": False, "message": _("A product sync is already running")}

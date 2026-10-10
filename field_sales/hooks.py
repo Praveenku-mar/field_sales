@@ -197,6 +197,12 @@ scheduler_events = {
 	"daily": [
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 	],
+	# Ticks every 30 minutes; scheduled_sync itself honours Store Connection's sync frequency.
+	"cron": {
+		"*/30 * * * *": [
+			"field_sales.sync.products.scheduled_sync",
+		],
+	},
 }
 
 # Testing

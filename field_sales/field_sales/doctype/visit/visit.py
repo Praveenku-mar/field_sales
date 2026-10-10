@@ -124,3 +124,8 @@ class Visit(Document):
 
 def get_geofence_radius(retailer: str) -> int:
 	return frappe.db.get_value("Retailer", retailer, "geofence_radius_m") or DEFAULT_GEOFENCE_RADIUS_M
+
+
+def on_doctype_update():
+	# Rep Performance and list filters read visits by rep over a date range.
+	frappe.db.add_index("Visit", ["sales_rep", "visit_date"])

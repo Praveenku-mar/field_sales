@@ -93,7 +93,8 @@
    "fieldtype": "Link",
    "label": "Sales Rep",
    "options": "Sales Rep",
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "search_index": 1
   },
   {
    "fieldname": "retailer_type",
@@ -260,7 +261,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-10 14:00:00.000000",
+ "modified": "2026-10-10 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Retailer",

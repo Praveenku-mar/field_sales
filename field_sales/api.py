@@ -404,6 +404,17 @@ def get_territories(txt: str | None = None) -> list[str]:
 	)
 
 
+@frappe.whitelist()
+def get_retailer_cities(txt: str | None = None) -> list[str]:
+	"""Cities in use on Retailer, for the report's City filter."""
+	filters = {"city": ("is", "set")}
+	if txt:
+		filters["city"] = ("like", f"%{txt}%")
+	return frappe.get_list(
+		"Retailer", filters=filters, pluck="city", distinct=True, order_by="city asc", limit_page_length=50
+	)
+
+
 def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]:
 	"""Validate a browser GPS fix: it comes from the client, so check it is a real point."""
 	if latitude in (None, "") or longitude in (None, ""):

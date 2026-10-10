@@ -12,6 +12,7 @@
   "mobile",
   "col_break_main",
   "territory",
+  "monthly_target",
   "reports_to",
   "active"
  ],
@@ -54,6 +55,12 @@
    "description": "e.g. Coimbatore South"
   },
   {
+   "fieldname": "monthly_target",
+   "fieldtype": "Currency",
+   "label": "Monthly Target",
+   "description": "Order value expected per calendar month; Rep Performance prorates it over the selected period"
+  },
+  {
    "fieldname": "reports_to",
    "fieldtype": "Link",
    "label": "Reports To",
@@ -70,7 +77,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-09 10:50:16.000000",
+ "modified": "2026-10-10 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Sales Rep",

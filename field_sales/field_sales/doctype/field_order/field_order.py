@@ -126,3 +126,7 @@ class FieldOrder(Document):
 			self.precision("grand_total"),
 		)
 
+
+def on_doctype_update():
+	# Rep Performance and list filters read orders by rep over a date range.
+	frappe.db.add_index("Field Order", ["sales_rep", "order_date"])

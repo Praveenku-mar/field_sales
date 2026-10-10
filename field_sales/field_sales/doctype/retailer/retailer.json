@@ -37,6 +37,8 @@
   "sync_status",
   "col_break_sync",
   "last_synced",
+  "last_sync_attempt",
+  "sync_attempts",
   "sync_error",
   "activity_section",
   "last_visit"
@@ -224,6 +226,19 @@
    "read_only": 1
   },
   {
+   "fieldname": "last_sync_attempt",
+   "fieldtype": "Datetime",
+   "label": "Last Sync Attempt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sync_attempts",
+   "fieldtype": "Int",
+   "label": "Sync Attempts",
+   "read_only": 1,
+   "description": "Failed pushes since the last successful sync"
+  },
+  {
    "fieldname": "sync_error",
    "fieldtype": "Small Text",
    "label": "Sync Error",
@@ -245,7 +260,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-09 19:00:00.000000",
+ "modified": "2026-10-10 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Retailer",

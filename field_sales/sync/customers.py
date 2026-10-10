@@ -11,10 +11,11 @@ whether a push is a create or an update.
 import time
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import cint, now_datetime
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
+from field_sales.sync.notify import notify_sync_result
 
 # Retailer fields sent to the store; a change to any of them triggers a push.
 SYNCED_FIELDS = (
@@ -64,7 +65,12 @@ def push_retailer(retailer_name: str):
 	conn = get_connector()
 	platform = conn.settings.platform
 
-	frappe.db.set_value("Retailer", retailer_name, "sync_status", "Pending", update_modified=False)
+	frappe.db.set_value(
+		"Retailer",
+		retailer_name,
+		{"sync_status": "Pending", "last_sync_attempt": now_datetime()},
+		update_modified=False,
+	)
 	frappe.db.commit()
 
 	doc = frappe.get_doc("Retailer", retailer_name)
@@ -76,7 +82,10 @@ def push_retailer(retailer_name: str):
 	except Exception as e:
 		frappe.db.rollback()
 		message = e.message if isinstance(e, ConnectorError) else str(e)
-		_record_result(retailer_name, {"sync_status": "Failed", "sync_error": message})
+		_record_result(
+			retailer_name,
+			{"sync_status": "Failed", "sync_error": message, "sync_attempts": cint(doc.sync_attempts) + 1},
+		)
 		log_sync(
 			platform=platform,
 			operation=operation,
@@ -100,6 +109,7 @@ def push_retailer(retailer_name: str):
 			"platform": platform,
 			"sync_status": "Synced",
 			"last_synced": now_datetime(),
+			"sync_attempts": 0,
 			# Synced, but with a caveat worth showing (e.g. email left out).
 			"sync_error": result.get("warning") or "",
 		},
@@ -128,6 +138,7 @@ def _record_result(retailer_name: str, values: dict):
 	doc.update(values)
 	doc.flags.ignore_sync = True
 	doc.save(ignore_permissions=True)
+	notify_sync_result("retailer_synced", "Retailer", retailer_name, values.get("sync_status"))
 
 
 def _elapsed_ms(start: float) -> int:

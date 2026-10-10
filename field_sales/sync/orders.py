@@ -18,6 +18,7 @@ from frappe.utils import add_to_date, cint, now_datetime
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.sync.customers import push_retailer
+from field_sales.sync.notify import notify_sync_result
 
 # The scheduler stops retrying an order after this many attempts; Retry Sync still works.
 MAX_AUTO_ATTEMPTS = 5
@@ -80,6 +81,7 @@ def push_order(field_order: str):
 		result = conn.create_order(doc)
 	except Exception as e:
 		frappe.db.rollback()
+		_reset_before_save(doc)
 		message = e.message if isinstance(e, ConnectorError) else str(e)
 		values = {"sync_status": "Failed", "sync_error": message}
 		draft_id = getattr(e, "partial", {}).get("draft_id")
@@ -106,6 +108,7 @@ def push_order(field_order: str):
 			raise
 		return
 
+	_reset_before_save(doc)
 	doc.db_set(
 		{
 			"external_draft_id": result.get("draft_id"),
@@ -176,13 +179,22 @@ def _ensure_store_customer(retailer: str):
 
 
 def _notify(doc):
-	"""Tell an open Field Order form to reload."""
-	frappe.publish_realtime(
-		"field_order_synced",
-		{"name": doc.name, "sync_status": frappe.db.get_value("Field Order", doc.name, "sync_status")},
-		doctype="Field Order",
-		docname=doc.name,
-	)
+	"""Tell an open Field Order form and the Sync Failures page to refresh."""
+	notify_sync_result("field_order_synced", "Field Order", doc.name, doc.sync_status)
+
+
+def _reset_before_save(doc):
+	"""
+	Make the next db_set count as a fresh change for Notifications.
+
+	The first db_set (to Pending) both snapshots the "before" values and marks
+	every Notification as evaluated for this doc object. Without a reset, the
+	final db_set would compare against the previous attempt's Failed (no
+	change) and skip Notifications altogether, so "failed to sync" (Value
+	Change on sync_status) would never fire on a retry.
+	"""
+	doc.load_doc_before_save(raise_exception=False)
+	doc.flags.notifications_executed = []
 
 
 def _elapsed_ms(start: float) -> int:

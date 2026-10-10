@@ -11,6 +11,7 @@ from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import get_allowed_reps, is_admin
 from field_sales.sync.customers import push_retailers
+from field_sales.sync.notify import MONITOR_ROLES
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.products import enqueue_sync
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
@@ -310,6 +311,97 @@ def get_store_order_url(field_order: str) -> str | None:
 	if not (doc.external_order_id or doc.external_draft_id):
 		return None
 	return get_connector().get_order_url(doc.external_order_id, doc.external_draft_id)
+
+
+# ----------------------------------------------------------------------
+# Sync Failures page, workspace count, report filters
+# ----------------------------------------------------------------------
+
+SYNC_FAILURE_LIMIT = 500
+
+
+@frappe.whitelist()
+def get_sync_failures() -> dict:
+	"""
+	Failed Field Orders and Retailers visible to the user (Sales Rep hierarchy applies).
+
+	:return: ``{"orders": [...], "retailers": [...]}``, most recent attempt first.
+	"""
+	frappe.only_for(MONITOR_ROLES)
+
+	orders = frappe.get_list(
+		"Field Order",
+		filters={"docstatus": 1, "sync_status": "Failed"},
+		fields=["name", "retailer", "retailer_name", "sales_rep", "last_sync_attempt", "sync_attempts", "sync_error"],
+		order_by="last_sync_attempt desc",
+		limit_page_length=SYNC_FAILURE_LIMIT,
+	)
+	retailers = frappe.get_list(
+		"Retailer",
+		filters={"sync_status": "Failed"},
+		fields=["name", "retailer_name", "sales_rep", "last_sync_attempt", "sync_attempts", "sync_error"],
+		order_by="last_sync_attempt desc",
+		limit_page_length=SYNC_FAILURE_LIMIT,
+	)
+
+	reps = {r.sales_rep for r in orders + retailers if r.sales_rep}
+	rep_names = dict(
+		frappe.get_all("Sales Rep", filters={"name": ("in", list(reps))}, fields=["name", "full_name"], as_list=True)
+	) if reps else {}
+	for row in orders + retailers:
+		row.sales_rep_name = rep_names.get(row.sales_rep)
+
+	return {"orders": orders, "retailers": retailers}
+
+
+@frappe.whitelist(methods=["POST"])
+def retry_all_sync_failures() -> dict:
+	"""
+	Queue a push for every failed Field Order and Retailer the user can see ("Retry All").
+
+	:return: ``{"orders": int, "retailers": int, "message": str}``
+	"""
+	frappe.only_for(MONITOR_ROLES)
+	get_connector()  # fails fast if Store Connection is disabled
+
+	orders = frappe.get_list(
+		"Field Order", filters={"docstatus": 1, "sync_status": "Failed"}, pluck="name", limit_page_length=0
+	)
+	retailers = frappe.get_list("Retailer", filters={"sync_status": "Failed"}, pluck="name", limit_page_length=0)
+
+	for name in orders:
+		enqueue_push_order(name)
+	push_retailers(retailers)
+
+	return {
+		"orders": len(orders),
+		"retailers": len(retailers),
+		"message": _("Retry queued for {0} order(s) and {1} retailer(s)").format(len(orders), len(retailers)),
+	}
+
+
+@frappe.whitelist()
+def get_sync_failure_count(filters=None) -> dict:
+	"""Number card "Sync Failures": failed orders + retailers in the user's scope; opens the page."""
+	count = len(
+		frappe.get_list("Field Order", filters={"docstatus": 1, "sync_status": "Failed"}, pluck="name", limit_page_length=0)
+	) + len(frappe.get_list("Retailer", filters={"sync_status": "Failed"}, pluck="name", limit_page_length=0))
+
+	result = {"value": count, "fieldtype": "Int"}
+	if set(MONITOR_ROLES) & set(frappe.get_roles()):
+		result["route"] = ["sync-failures"]
+	return result
+
+
+@frappe.whitelist()
+def get_territories(txt: str | None = None) -> list[str]:
+	"""Territories in use on Sales Rep (a free-text field), for the report's Territory filter."""
+	filters = {"territory": ("is", "set")}
+	if txt:
+		filters["territory"] = ("like", f"%{txt}%")
+	return frappe.get_list(
+		"Sales Rep", filters=filters, pluck="territory", distinct=True, order_by="territory asc", limit_page_length=50
+	)
 
 
 def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]:

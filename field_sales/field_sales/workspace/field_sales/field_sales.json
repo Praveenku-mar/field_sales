@@ -1,17 +1,17 @@
 {
  "charts": [
   {
-   "chart_name": "Orders by Rep \u2013 Last 7 Days",
+   "chart_name": "Orders by Rep – Last 7 Days",
    "doctype": "Workspace Chart",
-   "label": "Orders by Rep \u2013 Last 7 Days"
+   "label": "Orders by Rep – Last 7 Days"
   },
   {
-   "chart_name": "Order Value \u2013 Last 30 Days",
+   "chart_name": "Order Value – Last 30 Days",
    "doctype": "Workspace Chart",
-   "label": "Order Value \u2013 Last 30 Days"
+   "label": "Order Value – Last 30 Days"
   }
  ],
- "content": "[{\"id\":\"fs-hdr-kpi\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Today</b></span>\",\"col\":12}},{\"id\":\"fs-nc-0\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Today's Visits\",\"col\":4}},{\"id\":\"fs-nc-1\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Orders Today\",\"col\":4}},{\"id\":\"fs-nc-2\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Order Value Today\",\"col\":4}},{\"id\":\"fs-nc-3\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Sync Failures\",\"col\":4}},{\"id\":\"fs-nc-4\",\"type\":\"number_card\",\"data\":{\"number_card_name\":\"Pending Retailers\",\"col\":4}},{\"id\":\"fs-sp-1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"fs-hdr-sc\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\",\"col\":12}},{\"id\":\"fs-sc-0\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"New Visit\",\"col\":3}},{\"id\":\"fs-sc-1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"New Field Order\",\"col\":3}},{\"id\":\"fs-sc-2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sync Products\",\"col\":3}},{\"id\":\"fs-sc-3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Store Connection\",\"col\":3}},{\"id\":\"fs-sp-2\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"fs-ch-1\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Orders by Rep \\u2013 Last 7 Days\",\"col\":12}},{\"id\":\"fs-ch-2\",\"type\":\"chart\",\"data\":{\"chart_name\":\"Order Value \\u2013 Last 30 Days\",\"col\":12}},{\"id\":\"fs-sp-3\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"fs-hdr-rr\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Reports &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"fs-card-0\",\"type\":\"card\",\"data\":{\"card_name\":\"Masters\",\"col\":4}},{\"id\":\"fs-card-1\",\"type\":\"card\",\"data\":{\"card_name\":\"Transactions\",\"col\":4}},{\"id\":\"fs-card-2\",\"type\":\"card\",\"data\":{\"card_name\":\"Settings & Logs\",\"col\":4}},{\"id\":\"fs-card-3\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":4}},{\"id\":\"fs-sp-4\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"fs-ql-1\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Sync Failures\",\"col\":12}}]",
+ "content": "[{\"id\": \"fs-hdr-kpi\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Today</b></span>\", \"col\": 12}}, {\"id\": \"fs-nc-0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Today's Visits\", \"col\": 4}}, {\"id\": \"fs-nc-1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Orders Today\", \"col\": 4}}, {\"id\": \"fs-nc-2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Order Value Today\", \"col\": 4}}, {\"id\": \"fs-nc-3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Sync Failures\", \"col\": 4}}, {\"id\": \"fs-nc-4\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"Pending Retailers\", \"col\": 4}}, {\"id\": \"fs-sp-1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"fs-hdr-sc\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Your Shortcuts</b></span>\", \"col\": 12}}, {\"id\": \"fs-sc-0\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"New Visit\", \"col\": 3}}, {\"id\": \"fs-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"New Field Order\", \"col\": 3}}, {\"id\": \"fs-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sync Products\", \"col\": 3}}, {\"id\": \"fs-sc-3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Store Connection\", \"col\": 3}}, {\"id\": \"fs-sc-4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Sync Failures\", \"col\": 3}}, {\"id\": \"fs-sp-2\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"fs-ch-1\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Orders by Rep \\u2013 Last 7 Days\", \"col\": 12}}, {\"id\": \"fs-ch-2\", \"type\": \"chart\", \"data\": {\"chart_name\": \"Order Value \\u2013 Last 30 Days\", \"col\": 12}}, {\"id\": \"fs-sp-3\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"fs-hdr-rr\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Reports &amp; Masters</b></span>\", \"col\": 12}}, {\"id\": \"fs-card-0\", \"type\": \"card\", \"data\": {\"card_name\": \"Masters\", \"col\": 4}}, {\"id\": \"fs-card-1\", \"type\": \"card\", \"data\": {\"card_name\": \"Transactions\", \"col\": 4}}, {\"id\": \"fs-card-2\", \"type\": \"card\", \"data\": {\"card_name\": \"Settings & Logs\", \"col\": 4}}, {\"id\": \"fs-card-3\", \"type\": \"card\", \"data\": {\"card_name\": \"Reports\", \"col\": 4}}, {\"id\": \"fs-sp-4\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"fs-ql-1\", \"type\": \"quick_list\", \"data\": {\"quick_list_name\": \"Sync Failures\", \"col\": 12}}]",
  "creation": "2026-10-09 12:00:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -168,7 +168,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-10-09 12:00:00.000000",
+ "modified": "2026-10-10 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Sales",
@@ -251,6 +251,15 @@
    "label": "Store Connection",
    "link_to": "Store Connection",
    "type": "DocType"
+  },
+  {
+   "color": "Red",
+   "doc_view": "",
+   "doctype": "Workspace Shortcut",
+   "icon": "alert-triangle",
+   "label": "Sync Failures",
+   "link_to": "sync-failures",
+   "type": "Page"
   }
  ],
  "title": "Field Sales"

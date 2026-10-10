@@ -214,6 +214,10 @@ scheduler_events = {
 		"*/15 * * * *": [
 			"field_sales.sync.orders.retry_failed_orders",
 		],
+		# Daily team summary to each manager, in the system timezone.
+		"0 20 * * *": [
+			"field_sales.daily_summary.send_daily_summary",
+		],
 	},
 }
 

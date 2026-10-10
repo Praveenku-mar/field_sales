@@ -192,23 +192,12 @@ use_json_request_body = True
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"field_sales.tasks.all"
-# 	],
-# 	"daily": [
-# 		"field_sales.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"field_sales.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"field_sales.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"field_sales.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	# Purge Success Sync Logs older than 30 days; Failed logs are kept forever.
+	"daily": [
+		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
+	],
+}
 
 # Testing
 # -------

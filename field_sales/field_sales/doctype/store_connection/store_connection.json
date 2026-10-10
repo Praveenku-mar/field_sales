@@ -1,0 +1,273 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field_sales-store-connection",
+ "creation": "2026-10-09 09:36:35.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "connection_section",
+  "platform",
+  "col_break_connection",
+  "enabled",
+  "store_url",
+  "shopify_section",
+  "shopify_client_id",
+  "col_break_shopify",
+  "shopify_client_secret",
+  "shopify_api_version",
+  "woocommerce_section",
+  "woo_consumer_key",
+  "col_break_woo",
+  "woo_consumer_secret",
+  "woo_api_version",
+  "odoo_section",
+  "odoo_database",
+  "col_break_odoo",
+  "odoo_username",
+  "odoo_api_key",
+  "token_section",
+  "access_token",
+  "col_break_token",
+  "token_expiry",
+  "defaults_section",
+  "default_location_id",
+  "col_break_defaults",
+  "default_location_name",
+  "order_mode",
+  "product_sync_frequency",
+  "status_section",
+  "last_test_status",
+  "col_break_status",
+  "last_tested_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Select",
+   "label": "Platform",
+   "options": "\nShopify\nWooCommerce\nOdoo",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_connection",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "store_url",
+   "fieldtype": "Data",
+   "label": "Store URL",
+   "reqd": 1,
+   "description": "Shopify: kovai-mart.myshopify.com \u00b7 WooCommerce: https://shop.com \u00b7 Odoo: https://company.odoo.com"
+  },
+  {
+   "fieldname": "shopify_section",
+   "fieldtype": "Section Break",
+   "label": "Shopify Credentials",
+   "depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "shopify_client_id",
+   "fieldtype": "Data",
+   "label": "Client ID",
+   "depends_on": "eval:doc.platform=='Shopify'",
+   "mandatory_depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "col_break_shopify",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "shopify_client_secret",
+   "fieldtype": "Password",
+   "label": "Client Secret",
+   "depends_on": "eval:doc.platform=='Shopify'",
+   "mandatory_depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "shopify_api_version",
+   "fieldtype": "Data",
+   "label": "API Version",
+   "default": "2026-10",
+   "depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "woocommerce_section",
+   "fieldtype": "Section Break",
+   "label": "WooCommerce Credentials",
+   "depends_on": "eval:doc.platform=='WooCommerce'"
+  },
+  {
+   "fieldname": "woo_consumer_key",
+   "fieldtype": "Data",
+   "label": "Consumer Key",
+   "depends_on": "eval:doc.platform=='WooCommerce'",
+   "mandatory_depends_on": "eval:doc.platform=='WooCommerce'"
+  },
+  {
+   "fieldname": "col_break_woo",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "woo_consumer_secret",
+   "fieldtype": "Password",
+   "label": "Consumer Secret",
+   "depends_on": "eval:doc.platform=='WooCommerce'",
+   "mandatory_depends_on": "eval:doc.platform=='WooCommerce'"
+  },
+  {
+   "fieldname": "woo_api_version",
+   "fieldtype": "Data",
+   "label": "API Version",
+   "default": "wc/v3",
+   "depends_on": "eval:doc.platform=='WooCommerce'"
+  },
+  {
+   "fieldname": "odoo_section",
+   "fieldtype": "Section Break",
+   "label": "Odoo Credentials",
+   "depends_on": "eval:doc.platform=='Odoo'"
+  },
+  {
+   "fieldname": "odoo_database",
+   "fieldtype": "Data",
+   "label": "Database",
+   "depends_on": "eval:doc.platform=='Odoo'",
+   "mandatory_depends_on": "eval:doc.platform=='Odoo'"
+  },
+  {
+   "fieldname": "col_break_odoo",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "odoo_username",
+   "fieldtype": "Data",
+   "label": "Username",
+   "depends_on": "eval:doc.platform=='Odoo'",
+   "mandatory_depends_on": "eval:doc.platform=='Odoo'"
+  },
+  {
+   "fieldname": "odoo_api_key",
+   "fieldtype": "Password",
+   "label": "API Key",
+   "depends_on": "eval:doc.platform=='Odoo'",
+   "mandatory_depends_on": "eval:doc.platform=='Odoo'"
+  },
+  {
+   "fieldname": "token_section",
+   "fieldtype": "Section Break",
+   "label": "Token",
+   "collapsible": 1,
+   "collapsible_depends_on": "eval:0"
+  },
+  {
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Access Token",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "col_break_token",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "token_expiry",
+   "fieldtype": "Datetime",
+   "label": "Token Expiry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "defaults_section",
+   "fieldtype": "Section Break",
+   "label": "Defaults"
+  },
+  {
+   "fieldname": "default_location_id",
+   "fieldtype": "Data",
+   "label": "Default Location ID",
+   "description": "Shopify location / Odoo warehouse ID; leave blank for WooCommerce"
+  },
+  {
+   "fieldname": "col_break_defaults",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_location_name",
+   "fieldtype": "Data",
+   "label": "Default Location Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "order_mode",
+   "fieldtype": "Select",
+   "label": "Order Mode",
+   "options": "Draft\nConfirmed",
+   "default": "Draft"
+  },
+  {
+   "fieldname": "product_sync_frequency",
+   "fieldtype": "Select",
+   "label": "Product Sync Frequency",
+   "options": "Every 30 minutes\nHourly\nDaily",
+   "default": "Every 30 minutes"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "last_test_status",
+   "fieldtype": "Data",
+   "label": "Last Test Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_tested_on",
+   "fieldtype": "Datetime",
+   "label": "Last Tested On",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-09 09:36:35.000000",
+ "modified_by": "Administrator",
+ "module": "Field Sales",
+ "name": "Store Connection",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

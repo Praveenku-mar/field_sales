@@ -16,8 +16,37 @@ frappe.ui.form.on("Field Order", {
 		});
 	},
 
+	onload: function (frm) {
+		_listen_for_sync(frm);
+	},
+
 	refresh: function (frm) {
 		_highlight_stock_warnings(frm);
+		_add_stock_button(frm);
+		_show_sync_status(frm);
+	},
+
+	// Live stock check right before submit; returning the promise makes the
+	// form wait for it, and frappe.validated = false cancels the submit.
+	before_submit: function (frm) {
+		return _refresh_stock(frm)
+			.then(function (rows) {
+				var short = rows.filter(function (row) {
+					return row.stock_warning;
+				});
+				if (short.length) {
+					frappe.validated = false;
+					frappe.msgprint({
+						title: __("Not Enough Stock"),
+						indicator: "red",
+						message: _stock_shortage_html(short),
+					});
+				}
+			})
+			.catch(function () {
+				// The server error (e.g. store unreachable) is already shown.
+				frappe.validated = false;
+			});
 	},
 
 	retailer: function (frm) {
@@ -71,6 +100,123 @@ frappe.ui.form.on("Field Order Item", {
 		_highlight_stock_warnings(frm);
 	},
 });
+
+// ---------------------------------------------------------------------------
+// Store sync: stock check, sync status, retry
+// ---------------------------------------------------------------------------
+
+function _add_stock_button(frm) {
+	if (frm.is_new() || frm.doc.docstatus !== 0) return;
+
+	frm.add_custom_button(__("Refresh Stock"), function () {
+		var save = frm.is_dirty() ? frm.save() : Promise.resolve();
+		save.then(function () {
+			return _refresh_stock(frm);
+		}).then(function (rows) {
+			var short = rows.filter(function (row) {
+				return row.stock_warning;
+			});
+			frappe.show_alert({
+				message: short.length
+					? __("{0} item(s) exceed available stock", [short.length])
+					: __("Stock is available for all items"),
+				indicator: short.length ? "red" : "green",
+			});
+		});
+	});
+}
+
+/**
+ * Fetch live stock on the server (which saves it on the order), then reload
+ * the form so it holds the saved version. Resolves with the item rows.
+ */
+function _refresh_stock(frm) {
+	return frappe
+		.call({
+			method: "field_sales.api.refresh_stock",
+			args: { field_order: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Checking live stock…"),
+		})
+		.then(function (r) {
+			return frm.reload_doc().then(function () {
+				return r.message || [];
+			});
+		});
+}
+
+function _stock_shortage_html(rows) {
+	var lines = rows.map(function (row) {
+		return __("Row {0}: {1} — ordered {2}, available {3}", [
+			row.idx,
+			frappe.utils.escape_html(row.product_title || row.product),
+			row.qty,
+			row.available_qty,
+		]);
+	});
+	return lines.join("<br>");
+}
+
+function _show_sync_status(frm) {
+	if (frm.doc.docstatus !== 1) return;
+
+	if (frm.doc.sync_status === "Failed") {
+		frm.add_custom_button(__("Retry Sync"), function () {
+			frappe
+				.call({
+					method: "field_sales.api.retry_sync",
+					args: { field_order: frm.doc.name },
+					freeze: true,
+				})
+				.then(function (r) {
+					frappe.show_alert({ message: r.message.message, indicator: "blue" });
+					frm.reload_doc();
+				});
+		}).addClass("btn-primary");
+
+		frm.dashboard.set_headline(
+			"<div>" +
+				__("Store sync failed") +
+				(frm.doc.sync_error ? ": " + frappe.utils.escape_html(frm.doc.sync_error) : "") +
+				"</div>",
+			"red"
+		);
+	} else if (frm.doc.sync_status === "Pending") {
+		frm.dashboard.set_headline(__("Sending to the store…"), "orange");
+	} else if (frm.doc.sync_status === "Synced") {
+		frappe
+			.call({
+				method: "field_sales.api.get_store_order_url",
+				args: { field_order: frm.doc.name },
+			})
+			.then(function (r) {
+				if (!r.message) return;
+				var label = __("Open in {0}", [frm.doc.platform || __("Store")]);
+				frm.dashboard.set_headline(
+					__("Synced to the store.") +
+						' <a href="' +
+						encodeURI(r.message) +
+						'" target="_blank" rel="noopener noreferrer">' +
+						label +
+						"</a>",
+					"green"
+				);
+			});
+	}
+}
+
+// Reload an open order when its background push finishes.
+function _listen_for_sync(frm) {
+	if (frappe._field_order_sync_listener) return;
+	frappe._field_order_sync_listener = true;
+
+	frappe.realtime.on("field_order_synced", function (data) {
+		var open = window.cur_frm;
+		if (open && open.doctype === "Field Order" && open.doc.name === data.name && !open.is_dirty()) {
+			open.reload_doc();
+		}
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Private helpers

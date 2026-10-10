@@ -69,6 +69,8 @@ class ConnectorError(Exception):
 	:param details: Platform error entries behind the message (e.g. Shopify
 		``userErrors`` as ``[{"field": [...], "message": str}]``), for callers
 		that need to react to a specific field.
+	:param partial: What was created on the store before the failure, so a
+		retry can resume instead of duplicating it (e.g. ``{"draft_id": str}``).
 	"""
 
 	def __init__(
@@ -77,12 +79,14 @@ class ConnectorError(Exception):
 		code: str | None = None,
 		http_status: int | None = None,
 		details: list[dict] | None = None,
+		partial: dict | None = None,
 	):
 		super().__init__(message)
 		self.message = message
 		self.code = code
 		self.http_status = http_status
 		self.details = details or []
+		self.partial = partial or {}
 
 	def __str__(self) -> str:
 		return self.message
@@ -150,10 +154,26 @@ class BaseConnector:
 		"""
 		Push a submitted Field Order to the store.
 
+		The retailer must already exist on the store (``external_customer_id``).
+		If ``field_order.external_draft_id`` is set (a retry), that draft is
+		reused instead of creating another. Whether the draft is confirmed into
+		an order follows ``Store Connection.order_mode``.
+
+		On failure after the draft was created, the ``ConnectorError`` carries
+		``partial={"draft_id": str}``.
+
 		:param field_order: ``Field Order`` document.
-		:return: ``{"draft_id": str | None, "order_id": str | None}``
+		:return: ``{"draft_id": str | None, "order_id": str | None, "order_name": str | None}``
 		"""
 		raise NotImplementedError
+
+	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
+		"""
+		Admin URL of an order on the store (or of its draft when not yet confirmed).
+
+		:return: URL, or ``None`` if the platform has no such page.
+		"""
+		return None
 
 	# ------------------------------------------------------------------
 	# Shared helpers

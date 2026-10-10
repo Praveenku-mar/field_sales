@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Your Company and contributors
 # For license information, please see license.txt
 
-"""Whitelisted endpoints used by the Store Connection, Retailer and Visit forms and the Platform Product view."""
+"""Whitelisted endpoints used by the Store Connection, Retailer, Visit and Field Order forms and the Platform Product view."""
 
 import frappe
 from frappe import _
@@ -11,6 +11,7 @@ from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import get_allowed_reps, is_admin
 from field_sales.sync.customers import push_retailers
+from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.products import enqueue_sync
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
 
@@ -221,6 +222,96 @@ def check_out(visit: str, latitude: float, longitude: float, accuracy: float | N
 	}
 
 
+@frappe.whitelist(methods=["POST"])
+def refresh_stock(field_order: str) -> list[dict]:
+	"""
+	Fetch live stock for a draft Field Order's items and save it.
+
+	Updates each row's available_qty and the Platform Product's, then saves the
+	order so stock_warning is recalculated ("Refresh Stock", and before submit).
+
+	:return: ``[{"idx", "product", "product_title", "qty", "available_qty", "stock_warning"}, ...]``
+	"""
+	doc = frappe.get_doc("Field Order", field_order)
+	doc.check_permission("write")
+	if doc.docstatus != 0:
+		frappe.throw(_("Stock can only be refreshed on a draft Field Order"))
+
+	location_id = frappe.db.get_single_value("Store Connection", "default_location_id")
+	if not location_id:
+		frappe.throw(_("Set a Default Location on Store Connection before checking stock"))
+
+	products = frappe.get_all(
+		"Platform Product",
+		filters={"name": ("in", [row.product for row in doc.items if row.product])},
+		fields=["name", "external_inventory_id", "track_inventory"],
+	)
+	# Untracked products are always available; only tracked ones are worth a store call.
+	inventory_ids = {p.name: p.external_inventory_id for p in products if p.track_inventory and p.external_inventory_id}
+
+	if inventory_ids:
+		try:
+			stock = get_connector().get_stock(list(set(inventory_ids.values())), location_id)
+		except ConnectorError as e:
+			frappe.throw(e.message, title=_("Could not fetch live stock"))
+
+		for product, inventory_id in inventory_ids.items():
+			frappe.db.set_value(
+				"Platform Product",
+				product,
+				{"available_qty": stock.get(inventory_id, 0), "location_id": location_id},
+				update_modified=False,
+			)
+		for row in doc.items:
+			if row.product in inventory_ids:
+				row.available_qty = stock.get(inventory_ids[row.product], 0)
+
+	doc.save()  # validate() recalculates stock_warning
+	return [
+		{
+			"idx": row.idx,
+			"product": row.product,
+			"product_title": row.product_title,
+			"qty": row.qty,
+			"available_qty": row.available_qty,
+			"stock_warning": row.stock_warning,
+		}
+		for row in doc.items
+	]
+
+
+@frappe.whitelist(methods=["POST"])
+def retry_sync(field_order: str) -> dict:
+	"""
+	Queue another push of a Failed Field Order to the store ("Retry Sync").
+
+	Allowed for the order's own rep, their Sales Manager, or an admin. Not
+	limited by the scheduler's attempt cap.
+
+	:return: ``{"message": str}``
+	"""
+	doc = frappe.get_doc("Field Order", field_order)
+	doc.check_permission("read")
+	if not _is_rep_or_their_manager(doc.sales_rep):
+		frappe.throw(_("Only the order's sales rep or their Sales Manager can retry the sync."), frappe.PermissionError)
+	if doc.docstatus != 1 or doc.sync_status != "Failed":
+		frappe.throw(_("Only a submitted Field Order whose sync failed can be retried"))
+
+	get_connector()  # fails fast if Store Connection is disabled
+	enqueue_push_order(doc.name)
+	return {"message": _("Sync to store queued")}
+
+
+@frappe.whitelist()
+def get_store_order_url(field_order: str) -> str | None:
+	"""Admin URL of the synced order (or its draft) on the store, for "Open in Store"."""
+	doc = frappe.get_doc("Field Order", field_order)
+	doc.check_permission("read")
+	if not (doc.external_order_id or doc.external_draft_id):
+		return None
+	return get_connector().get_order_url(doc.external_order_id, doc.external_draft_id)
+
+
 def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]:
 	"""Validate a browser GPS fix: it comes from the client, so check it is a real point."""
 	if latitude in (None, "") or longitude in (None, ""):
@@ -235,13 +326,17 @@ def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]
 
 def _check_visit_access(doc) -> None:
 	"""Only the visit's own sales rep, or a manager over that rep, may check in / out."""
-	if frappe.session.user == frappe.db.get_value("Sales Rep", doc.sales_rep, "user"):
-		return
-	if is_admin() or (
-		VISIT_MANAGER_ROLES & set(frappe.get_roles()) and doc.sales_rep in get_allowed_reps()
-	):
-		return
-	frappe.throw(
-		_("Only the visit's sales rep or their Sales Manager can check in or out."),
-		frappe.PermissionError,
+	if not _is_rep_or_their_manager(doc.sales_rep):
+		frappe.throw(
+			_("Only the visit's sales rep or their Sales Manager can check in or out."),
+			frappe.PermissionError,
+		)
+
+
+def _is_rep_or_their_manager(sales_rep: str) -> bool:
+	"""True for the rep's own user, a Sales Manager over that rep, or an admin."""
+	if frappe.session.user == frappe.db.get_value("Sales Rep", sales_rep, "user"):
+		return True
+	return is_admin() or bool(
+		VISIT_MANAGER_ROLES & set(frappe.get_roles()) and sales_rep in get_allowed_reps()
 	)

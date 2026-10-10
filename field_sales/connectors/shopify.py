@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import frappe
 import requests
@@ -75,6 +75,28 @@ query($ids: [ID!]!, $loc: ID!) {
 }
 """
 
+DRAFT_ORDER_FIELDS = "id name status order { id name }"
+
+DRAFT_ORDER_CREATE = """
+mutation($input: DraftOrderInput!) {
+  draftOrderCreate(input: $input) { draftOrder { %s } userErrors { field message } }
+}
+""" % DRAFT_ORDER_FIELDS
+
+DRAFT_ORDER_COMPLETE = """
+mutation($id: ID!) {
+  draftOrderComplete(id: $id) { draftOrder { %s } userErrors { field message } }
+}
+""" % DRAFT_ORDER_FIELDS
+
+DRAFT_ORDER_QUERY = """
+query($id: ID!) { draftOrder(id: $id) { %s } }
+""" % DRAFT_ORDER_FIELDS
+
+# Orders are confirmed with payment still to be collected (field sales are
+# paid on delivery): "Due on receipt" payment terms leave them payment pending.
+PAYMENT_TERMS_QUERY = "{ shop { currencyCode } paymentTermsTemplates { id paymentTermsType } }"
+
 
 class ShopifyConnector(BaseConnector):
 	"""Connector for a single Shopify store configured on Store Connection."""
@@ -105,6 +127,8 @@ class ShopifyConnector(BaseConnector):
 		# True once this instance has requested a token itself, so it carries
 		# the store's current scopes and a scope error is not worth a retry.
 		self._token_is_fresh = False
+		# Shop currency and "Due on receipt" terms id, looked up once per instance.
+		self._order_settings: dict | None = None
 
 	# ------------------------------------------------------------------
 	# Public API
@@ -232,6 +256,102 @@ class ShopifyConnector(BaseConnector):
 					return from_gid(nodes[0]["id"])
 
 		return None
+
+	def create_order(self, field_order) -> dict:
+		"""
+		Push a submitted Field Order as a draft order, then complete it into an
+		order when Store Connection's Order Mode is "Confirmed".
+
+		A draft already linked to the Field Order (a retry) is reused: if it was
+		completed meanwhile its order is returned; if it was deleted on
+		Shopify a new draft is created.
+
+		:return: ``{"draft_id", "order_id", "order_name"}`` (plain ids; order fields ``None`` in Draft mode).
+		"""
+		retailer = frappe.get_doc("Retailer", field_order.retailer)
+		if not retailer.external_customer_id:
+			raise ConnectorError(
+				_("Retailer {0} is not linked to a Shopify customer yet").format(retailer.name),
+				code="CUSTOMER_MISSING",
+			)
+
+		draft = self._get_draft(field_order.external_draft_id, field_order) if field_order.external_draft_id else None
+		if not draft:
+			draft = self._create_draft(field_order, retailer)
+
+		draft_id = from_gid(draft["id"])
+		if draft.get("status") == "COMPLETED" or self.settings.order_mode != "Confirmed":
+			return _order_result(draft)
+
+		try:
+			data = self._graphql(
+				DRAFT_ORDER_COMPLETE, {"id": draft["id"]}, operation="Confirm Order", ref=field_order
+			)
+		except ConnectorError as e:
+			e.partial = {"draft_id": draft_id}
+			raise
+
+		return _order_result(data["draftOrderComplete"]["draftOrder"])
+
+	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
+		if order_id:
+			return f"https://{self.shop_domain}/admin/orders/{from_gid(order_id)}"
+		if draft_id:
+			return f"https://{self.shop_domain}/admin/draft_orders/{from_gid(draft_id)}"
+		return None
+
+	def _get_draft(self, draft_id: str, field_order) -> dict | None:
+		"""The linked draft order, or ``None`` if it no longer exists on Shopify."""
+		data = self._graphql(
+			DRAFT_ORDER_QUERY,
+			{"id": to_gid("DraftOrder", draft_id)},
+			operation="Create Order",
+			ref=field_order,
+		)
+		return data.get("draftOrder")
+
+	def _create_draft(self, field_order, retailer) -> dict:
+		settings = self._get_order_settings(field_order)
+		currency = settings["currency"]
+		address = _customer_address(retailer, to_e164_india(retailer.phone))
+
+		draft_input = {
+			"purchasingEntity": {"customerId": to_gid("Customer", retailer.external_customer_id)},
+			"lineItems": [_draft_line_item(row, currency) for row in field_order.items],
+			"note": f"Field Order {field_order.name} · Rep {field_order.sales_rep}",
+			"tags": [t for t in ("field-sales", field_order.sales_rep) if t],
+			"shippingAddress": address,
+			"billingAddress": address,
+		}
+		if flt(field_order.discount_amount) > 0:
+			draft_input["appliedDiscount"] = {
+				"valueType": "FIXED_AMOUNT",
+				"value": flt(field_order.discount_amount),
+				"title": _("Field Order discount"),
+			}
+		if self.settings.order_mode == "Confirmed" and settings["due_on_receipt_id"]:
+			draft_input["paymentTerms"] = {
+				"paymentTermsTemplateId": settings["due_on_receipt_id"],
+				"paymentSchedules": [{"issuedAt": datetime.now(timezone.utc).isoformat()}],
+			}
+
+		data = self._graphql(
+			DRAFT_ORDER_CREATE, {"input": draft_input}, operation="Create Order", ref=field_order
+		)
+		return data["draftOrderCreate"]["draftOrder"]
+
+	def _get_order_settings(self, field_order) -> dict:
+		"""Shop currency (prices are overridden in it) and the "Due on receipt" terms template id."""
+		if self._order_settings is None:
+			data = self._graphql(PAYMENT_TERMS_QUERY, operation="Create Order", ref=field_order)
+			templates = data.get("paymentTermsTemplates") or []
+			self._order_settings = {
+				"currency": (data.get("shop") or {}).get("currencyCode"),
+				"due_on_receipt_id": next(
+					(t["id"] for t in templates if t.get("paymentTermsType") == "RECEIPT"), None
+				),
+			}
+		return self._order_settings
 
 	# ------------------------------------------------------------------
 	# Auth
@@ -469,6 +589,35 @@ def _customer_address(retailer, phone: str | None) -> dict:
 	if phone:
 		address["phone"] = phone
 	return address
+
+
+def _draft_line_item(row, currency: str) -> dict:
+	"""Field Order Item -> DraftOrderLineItemInput, at the order's rate."""
+	if not row.external_variant_id:
+		raise ConnectorError(
+			_("Row {0}: {1} is not linked to a Shopify variant").format(row.idx, row.product_title or row.product),
+			code="CONFIG_ERROR",
+		)
+	if flt(row.qty) != cint(row.qty):
+		raise ConnectorError(
+			_("Row {0}: Shopify only accepts whole quantities, not {1}").format(row.idx, flt(row.qty)),
+			code="CONFIG_ERROR",
+		)
+	return {
+		"variantId": to_gid("ProductVariant", row.external_variant_id),
+		"quantity": cint(row.qty),
+		"priceOverride": {"amount": str(flt(row.rate, 2)), "currencyCode": currency},
+	}
+
+
+def _order_result(draft: dict) -> dict:
+	"""DraftOrder node -> ``create_order`` result."""
+	order = draft.get("order") or {}
+	return {
+		"draft_id": from_gid(draft.get("id")),
+		"order_id": from_gid(order.get("id")),
+		"order_name": order.get("name"),
+	}
 
 
 def _normalize_variant(variant: dict) -> dict:

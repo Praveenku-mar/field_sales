@@ -210,6 +210,10 @@ scheduler_events = {
 		"*/30 * * * *": [
 			"field_sales.sync.products.scheduled_sync",
 		],
+		# Re-push Field Orders that failed (up to 5 attempts) or lost their job.
+		"*/15 * * * *": [
+			"field_sales.sync.orders.retry_failed_orders",
+		],
 	},
 }
 

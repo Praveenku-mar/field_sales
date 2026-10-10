@@ -6,6 +6,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from field_sales.sync.orders import enqueue_push_order
+
 
 class FieldOrder(Document):
 	# ------------------------------------------------------------------
@@ -27,6 +29,7 @@ class FieldOrder(Document):
 			frappe.db.set_value(
 				"Visit", self.visit, "order_taken", 1, update_modified=False
 			)
+		enqueue_push_order(self.name)
 
 	def on_cancel(self):
 		self.db_set("sync_status", "Draft")

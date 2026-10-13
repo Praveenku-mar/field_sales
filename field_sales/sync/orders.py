@@ -164,6 +164,50 @@ def retry_failed_orders():
 		enqueue_push_order(name)
 
 
+def link_completed_drafts():
+	"""
+	Scheduler (every 30 min): fill ``external_order_id`` on Synced Field Orders
+	whose draft has since been completed into an order on the store.
+
+	``push_order`` skips Synced orders, so without this the order id of a
+	draft completed on the store later would never be recorded.
+	"""
+	if not frappe.db.get_single_value("Store Connection", "enabled"):
+		return
+
+	drafts = frappe.get_all(
+		"Field Order",
+		filters={
+			"docstatus": 1,
+			"sync_status": "Synced",
+			"external_draft_id": ("is", "set"),
+			"external_order_id": ("is", "not set"),
+		},
+		fields=["name", "external_draft_id"],
+	)
+	if not drafts:
+		return
+
+	conn = get_connector()
+	completed = conn.get_completed_drafts([d.external_draft_id for d in drafts])
+
+	for d in drafts:
+		order_id = completed.get(d.external_draft_id)
+		if not order_id:
+			continue
+		frappe.db.set_value("Field Order", d.name, "external_order_id", order_id, update_modified=False)
+		log_sync(
+			platform=conn.settings.platform,
+			operation="Confirm Order",
+			reference_doctype="Field Order",
+			reference_name=d.name,
+			status="Success",
+			external_id=order_id,
+		)
+		frappe.db.commit()
+		notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
+
+
 def _ensure_store_customer(retailer: str):
 	"""Create the retailer on the store first if it is not linked to a customer yet."""
 	if frappe.db.get_value("Retailer", retailer, "external_customer_id"):

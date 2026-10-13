@@ -209,6 +209,8 @@ scheduler_events = {
 	"cron": {
 		"*/30 * * * *": [
 			"field_sales.sync.products.scheduled_sync",
+			# Record the order id of drafts completed on the store after they synced.
+			"field_sales.sync.orders.link_completed_drafts",
 		],
 		# Re-push Field Orders that failed (up to 5 attempts) or lost their job.
 		"*/15 * * * *": [

@@ -87,6 +87,10 @@ DRAFT_ORDER_QUERY = """
 query($id: ID!) { draftOrder(id: $id) { %s } }
 """ % DRAFT_ORDER_FIELDS
 
+DRAFT_ORDERS_QUERY = """
+query($ids: [ID!]!) { nodes(ids: $ids) { ... on DraftOrder { %s } } }
+""" % DRAFT_ORDER_FIELDS
+
 DRAFT_ORDER_DELETE = """
 mutation($id: ID!) { draftOrderDelete(input: {id: $id}) { deletedId userErrors { field message } } }
 """
@@ -320,6 +324,22 @@ class ShopifyConnector(BaseConnector):
 			# Left over from an earlier push in Draft mode; the order replaces it.
 			self._delete_draft(draft["id"], field_order)
 		return {"draft_id": None, "order_id": from_gid(order["id"]), "order_name": order.get("name")}
+
+	def get_completed_drafts(self, draft_ids: list) -> dict:
+		"""``{draft_id: order_id}`` for drafts completed on Shopify, queried in batches of ``PAGE_SIZE``."""
+		completed = {}
+		for start in range(0, len(draft_ids), PAGE_SIZE):
+			batch = draft_ids[start : start + PAGE_SIZE]
+			data = self._graphql(
+				DRAFT_ORDERS_QUERY,
+				{"ids": [to_gid("DraftOrder", i) for i in batch]},
+				operation="Confirm Order",
+			)
+			for node in data.get("nodes") or []:
+				# Deleted drafts come back as null.
+				if node and node.get("status") == "COMPLETED" and node.get("order"):
+					completed[from_gid(node["id"])] = from_gid(node["order"]["id"])
+		return completed
 
 	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
 		if order_id:

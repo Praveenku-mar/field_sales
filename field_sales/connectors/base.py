@@ -171,6 +171,16 @@ class BaseConnector:
 		"""
 		raise NotImplementedError
 
+	def get_completed_drafts(self, draft_ids: list) -> dict:
+		"""
+		Find which drafts have since been completed into orders on the store.
+
+		:param draft_ids: ``external_draft_id`` values from ``create_order``.
+		:return: ``{draft_id: order_id}`` for the completed drafts only; drafts
+			still open, or deleted on the store, are left out.
+		"""
+		return {}
+
 	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
 		"""
 		Admin URL of an order on the store (or of its draft when not yet confirmed).

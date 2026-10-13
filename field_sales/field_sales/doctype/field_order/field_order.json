@@ -1,0 +1,322 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-10-09 11:05:06.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "order_tab",
+  "order_section",
+  "naming_series",
+  "retailer",
+  "retailer_name",
+  "visit",
+  "col_break_order",
+  "sales_rep",
+  "order_date",
+  "delivery_date",
+  "items_section",
+  "items",
+  "totals_section",
+  "total_qty",
+  "col_break_totals",
+  "net_total",
+  "tax_percent",
+  "tax_amount",
+  "discount_amount",
+  "grand_total",
+  "notes_tab",
+  "notes_section",
+  "remarks",
+  "sync_tab",
+  "platform_sync_section",
+  "platform",
+  "location_id",
+  "external_draft_id",
+  "external_order_id",
+  "col_break_sync",
+  "sync_status",
+  "sync_attempts",
+  "last_sync_attempt",
+  "sync_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "order_tab",
+   "fieldtype": "Tab Break",
+   "label": "Order"
+  },
+  {
+   "fieldname": "order_section",
+   "fieldtype": "Section Break",
+   "label": "Order"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "FO-.YYYY.-.#####",
+   "hidden": 1
+  },
+  {
+   "fieldname": "retailer",
+   "fieldtype": "Link",
+   "label": "Retailer",
+   "options": "Retailer",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "retailer_name",
+   "fieldtype": "Data",
+   "label": "Retailer Name",
+   "fetch_from": "retailer.retailer_name",
+   "fetch_if_empty": 0,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "visit",
+   "fieldtype": "Link",
+   "label": "Visit",
+   "options": "Visit",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "col_break_order",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sales_rep",
+   "fieldtype": "Link",
+   "label": "Sales Rep",
+   "options": "Sales Rep",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "search_index": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "order_date",
+   "fieldtype": "Date",
+   "label": "Order Date",
+   "reqd": 1,
+   "default": "Today",
+   "search_index": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "delivery_date",
+   "fieldtype": "Date",
+   "label": "Delivery Date"
+  },
+  {
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "Field Order Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Totals"
+  },
+  {
+   "fieldname": "total_qty",
+   "fieldtype": "Float",
+   "label": "Total Qty",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "col_break_totals",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "net_total",
+   "fieldtype": "Currency",
+   "label": "Net Total",
+   "read_only": 1
+  },
+  {
+   "fieldname": "tax_percent",
+   "fieldtype": "Percent",
+   "label": "Tax (%)",
+   "default": "5"
+  },
+  {
+   "fieldname": "tax_amount",
+   "fieldtype": "Currency",
+   "label": "Tax Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency",
+   "label": "Discount Amount"
+  },
+  {
+   "fieldname": "grand_total",
+   "fieldtype": "Currency",
+   "label": "Grand Total",
+   "read_only": 1,
+   "bold": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "notes_tab",
+   "fieldtype": "Tab Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "sync_tab",
+   "fieldtype": "Tab Break",
+   "label": "Store Sync"
+  },
+  {
+   "fieldname": "platform_sync_section",
+   "fieldtype": "Section Break",
+   "label": "Platform Sync",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Select",
+   "label": "Platform",
+   "options": "\nShopify\nWooCommerce\nOdoo"
+  },
+  {
+   "fieldname": "location_id",
+   "fieldtype": "Data",
+   "label": "Location ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "external_draft_id",
+   "fieldtype": "Data",
+   "label": "External Draft ID",
+   "read_only": 1,
+   "description": "Shopify Draft Order GID / Odoo draft sale.order ID"
+  },
+  {
+   "fieldname": "external_order_id",
+   "fieldtype": "Data",
+   "label": "External Order ID",
+   "read_only": 1,
+   "description": "Shopify Order GID / Woo order ID / Odoo sale.order ID"
+  },
+  {
+   "fieldname": "col_break_sync",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "label": "Sync Status",
+   "options": "Draft\nPending\nSynced\nFailed",
+   "default": "Draft",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "sync_attempts",
+   "fieldtype": "Int",
+   "label": "Sync Attempts",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "last_sync_attempt",
+   "fieldtype": "Datetime",
+   "label": "Last Sync Attempt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sync_error",
+   "fieldtype": "Small Text",
+   "label": "Sync Error",
+   "read_only": 1
+  }
+ ],
+ "in_create": 0,
+ "is_submittable": 1,
+ "issingle": 0,
+ "links": [],
+ "modified": "2026-10-10 17:10:00.000000",
+ "modified_by": "Administrator",
+ "module": "Field Sales",
+ "name": "Field Order",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 0,
+   "cancel": 0,
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "if_owner": 0,
+   "print": 1,
+   "read": 1,
+   "report": 0,
+   "role": "Field Sales Rep",
+   "share": 0,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "order_date",
+ "sort_order": "DESC",
+ "title_field": "retailer_name",
+ "track_changes": 1
+}

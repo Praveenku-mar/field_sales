@@ -1,0 +1,337 @@
+// Copyright (c) 2026, Your Company and contributors
+// For license information, please see license.txt
+
+// ---------------------------------------------------------------------------
+// Parent form handlers
+// ---------------------------------------------------------------------------
+
+frappe.ui.form.on("Field Order", {
+	setup: function (frm) {
+		// Filter Visit dropdown to the currently selected Retailer.
+		// set_query uses a closure so it always reads the live frm.doc value.
+		frm.set_query("visit", function () {
+			return {
+				filters: { retailer: frm.doc.retailer || "__none__" },
+			};
+		});
+	},
+
+	onload: function (frm) {
+		_listen_for_sync(frm);
+	},
+
+	refresh: function (frm) {
+		_highlight_stock_warnings(frm);
+		_show_order_summary(frm);
+		_add_stock_button(frm);
+		_show_sync_status(frm);
+	},
+
+	// Live stock check right before submit; returning the promise makes the
+	// form wait for it, and frappe.validated = false cancels the submit.
+	before_submit: function (frm) {
+		return _refresh_stock(frm)
+			.then(function (rows) {
+				var short = rows.filter(function (row) {
+					return row.stock_warning;
+				});
+				if (short.length) {
+					frappe.validated = false;
+					frappe.msgprint({
+						title: __("Not Enough Stock"),
+						indicator: "red",
+						message: _stock_shortage_html(short),
+					});
+				}
+			})
+			.catch(function () {
+				// The server error (e.g. store unreachable) is already shown.
+				frappe.validated = false;
+			});
+	},
+
+	retailer: function (frm) {
+		if (!frm.doc.retailer) {
+			frm.set_value("visit", "");
+			frm.set_value("sales_rep", "");
+			return;
+		}
+		if (!frm.doc.visit) {
+			_set_rep_from_retailer(frm);
+			return;
+		}
+		// Keep the visit (and its rep) when it is to this retailer, e.g. an
+		// order opened from the visit; otherwise it belongs to the old retailer.
+		frappe.db.get_value("Visit", frm.doc.visit, ["retailer", "sales_rep"]).then(function (r) {
+			var visit = r.message || {};
+			if (visit.retailer === frm.doc.retailer) {
+				if (visit.sales_rep) frm.set_value("sales_rep", visit.sales_rep);
+			} else {
+				frm.set_value("visit", "");
+				_set_rep_from_retailer(frm);
+			}
+		});
+	},
+
+	visit: function (frm) {
+		if (!frm.doc.visit) return;
+		// Picking a visit fills its retailer and rep.
+		frappe.db.get_value("Visit", frm.doc.visit, ["retailer", "sales_rep"]).then(function (r) {
+			var visit = r.message || {};
+			if (visit.sales_rep) frm.set_value("sales_rep", visit.sales_rep);
+			if (visit.retailer && visit.retailer !== frm.doc.retailer) frm.set_value("retailer", visit.retailer);
+		});
+	},
+
+	tax_percent: function (frm) {
+		_recalc_totals(frm);
+	},
+
+	discount_amount: function (frm) {
+		_recalc_totals(frm);
+	},
+});
+
+// ---------------------------------------------------------------------------
+// Child table handlers
+// ---------------------------------------------------------------------------
+
+frappe.ui.form.on("Field Order Item", {
+	qty: function (frm, cdt, cdn) {
+		_recalc_row(frm, cdt, cdn);
+	},
+
+	rate: function (frm, cdt, cdn) {
+		_recalc_row(frm, cdt, cdn);
+	},
+
+	items_remove: function (frm) {
+		_recalc_totals(frm);
+		_highlight_stock_warnings(frm);
+	},
+});
+
+// ---------------------------------------------------------------------------
+// Store sync: stock check, sync status, retry
+// ---------------------------------------------------------------------------
+
+function _add_stock_button(frm) {
+	if (frm.is_new() || frm.doc.docstatus !== 0) return;
+
+	frm.add_custom_button(__("Refresh Stock"), function () {
+		var save = frm.is_dirty() ? frm.save() : Promise.resolve();
+		save.then(function () {
+			return _refresh_stock(frm);
+		}).then(function (rows) {
+			var short = rows.filter(function (row) {
+				return row.stock_warning;
+			});
+			frappe.show_alert({
+				message: short.length
+					? __("{0} item(s) exceed available stock", [short.length])
+					: __("Stock is available for all items"),
+				indicator: short.length ? "red" : "green",
+			});
+		});
+	});
+}
+
+/**
+ * Fetch live stock on the server (which saves it on the order), then reload
+ * the form so it holds the saved version. Resolves with the item rows.
+ */
+function _refresh_stock(frm) {
+	return frappe
+		.call({
+			method: "field_sales.api.refresh_stock",
+			args: { field_order: frm.doc.name },
+			freeze: true,
+			freeze_message: __("Checking live stock…"),
+		})
+		.then(function (r) {
+			return frm.reload_doc().then(function () {
+				return r.message || [];
+			});
+		});
+}
+
+function _stock_shortage_html(rows) {
+	var lines = rows.map(function (row) {
+		return __("Row {0}: {1} — ordered {2}, available {3}", [
+			row.idx,
+			frappe.utils.escape_html(row.product_title || row.product),
+			row.qty,
+			row.available_qty,
+		]);
+	});
+	return lines.join("<br>");
+}
+
+function _show_sync_status(frm) {
+	if (frm.doc.docstatus !== 1) return;
+
+	if (frm.doc.sync_status === "Failed") {
+		frm.add_custom_button(__("Retry Sync"), function () {
+			frappe
+				.call({
+					method: "field_sales.api.retry_sync",
+					args: { field_order: frm.doc.name },
+					freeze: true,
+				})
+				.then(function (r) {
+					frappe.show_alert({ message: r.message.message, indicator: "blue" });
+					frm.reload_doc();
+				});
+		}).addClass("btn-primary");
+
+		frm.dashboard.set_headline(
+			"<div>" +
+				__("Store sync failed") +
+				(frm.doc.sync_error ? ": " + frappe.utils.escape_html(frm.doc.sync_error) : "") +
+				"</div>",
+			"red"
+		);
+	} else if (frm.doc.sync_status === "Pending") {
+		frm.dashboard.set_headline(__("Sending to the store…"), "orange");
+	} else if (frm.doc.sync_status === "Synced") {
+		frappe
+			.call({
+				method: "field_sales.api.get_store_order_url",
+				args: { field_order: frm.doc.name },
+			})
+			.then(function (r) {
+				if (!r.message) return;
+				var label = __("Open in {0}", [frm.doc.platform || __("Store")]);
+				frm.dashboard.set_headline(
+					__("Synced to the store.") +
+						' <a href="' +
+						encodeURI(r.message) +
+						'" target="_blank" rel="noopener noreferrer">' +
+						label +
+						"</a>",
+					"green"
+				);
+			});
+	}
+}
+
+// Reload an open order when its background push finishes.
+function _listen_for_sync(frm) {
+	if (frappe._field_order_sync_listener) return;
+	frappe._field_order_sync_listener = true;
+
+	frappe.realtime.on("field_order_synced", function (data) {
+		var open = window.cur_frm;
+		if (open && open.doctype === "Field Order" && open.doc.name === data.name && !open.is_dirty()) {
+			open.reload_doc();
+		}
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Summary bar
+// ---------------------------------------------------------------------------
+
+function _show_order_summary(frm) {
+	if (frm.is_new()) return;
+	const items = frm.doc.items || [];
+	const short = items.filter((row) => row.stock_warning).length;
+
+	frm.dashboard.add_indicator(
+		__("{0} items · {1} units", [items.length, format_number(frm.doc.total_qty || 0, null, 0)]),
+		"blue"
+	);
+	frm.dashboard.add_indicator(__("Total {0}", [format_currency(frm.doc.grand_total)]), "green");
+	if (frm.doc.docstatus === 0 && short) {
+		frm.dashboard.add_indicator(__("{0} row(s) over stock", [short]), "red");
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+// Sales Rep for an order without a visit: a rep takes it under their own name
+// (they can order for any retailer); a manager gets the retailer's rep.
+function _set_rep_from_retailer(frm) {
+	var is_manager = frappe.user.has_role(["Sales Manager", "System Manager"]);
+	var own_rep = is_manager
+		? Promise.resolve(null)
+		: frappe.db.get_value("Sales Rep", { user: frappe.session.user, active: 1 }, "name").then(function (r) {
+				return r.message && r.message.name;
+		  });
+	own_rep.then(function (rep) {
+		if (rep) {
+			frm.set_value("sales_rep", rep);
+			return;
+		}
+		frappe.db.get_value("Retailer", frm.doc.retailer, "sales_rep", function (r) {
+			if (r && r.sales_rep) {
+				frm.set_value("sales_rep", r.sales_rep);
+			}
+		});
+	});
+}
+
+/**
+ * Recompute amount for a single child row, then roll up parent totals.
+ */
+function _recalc_row(frm, cdt, cdn) {
+	var row = locals[cdt][cdn];
+	var amount = flt(row.qty) * flt(row.rate);
+	frappe.model.set_value(cdt, cdn, "amount", amount).then(function () {
+		_recalc_totals(frm);
+		_highlight_stock_warnings(frm);
+	});
+}
+
+/**
+ * Recompute order-level totals in the browser so the user sees live values
+ * without needing to save.
+ */
+function _recalc_totals(frm) {
+	var total_qty = 0;
+	var net_total = 0;
+
+	(frm.doc.items || []).forEach(function (row) {
+		total_qty += flt(row.qty);
+		net_total += flt(row.amount);
+	});
+
+	// Rounded like the server does, so the form shows what will be saved.
+	net_total = flt(net_total, precision("net_total"));
+	var tax_amount = flt(net_total * flt(frm.doc.tax_percent) / 100, precision("tax_amount"));
+	var grand_total = flt(
+		net_total + tax_amount - flt(frm.doc.discount_amount),
+		precision("grand_total")
+	);
+
+	frm.set_value("total_qty", total_qty);
+	frm.set_value("net_total", net_total);
+	frm.set_value("tax_amount", tax_amount);
+	frm.set_value("grand_total", grand_total);
+}
+
+/**
+ * Paint child rows red when stock_warning is set, clear it otherwise.
+ * Called after every qty/rate change and on form refresh.
+ */
+function _highlight_stock_warnings(frm) {
+	var grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+	if (!grid) return;
+
+	grid.grid_rows.forEach(function (grid_row) {
+		var doc = grid_row.doc;
+		if (doc && doc.stock_warning) {
+			$(grid_row.row).css({
+				"background-color": "#fde8e8",
+				"color": "#c0392b",
+			});
+		} else {
+			$(grid_row.row).css({
+				"background-color": "",
+				"color": "",
+			});
+		}
+	});
+}

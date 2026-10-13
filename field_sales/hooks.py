@@ -85,6 +85,22 @@ use_json_request_body = True
 # desk, use setup_wizard_stages / setup_wizard_complete instead.
 # setup_wizard_url = "/field_sales/setup"
 
+# Field Sales desktop app in the desk's app switcher (shown to users with an app role).
+add_to_apps_screen = [
+	{
+		"name": "field_sales",
+		"logo": "/assets/field_sales/images/logo.svg",
+		"title": "Field Sales",
+		"route": "/fieldsales",
+		"has_permission": "field_sales.www.fieldsales.has_app_access",
+	}
+]
+
+# Desktop app (frontend/, built into public/frontend): every /fieldsales/* path serves www/fieldsales.html
+website_route_rules = [
+	{"from_route": "/fieldsales/<path:app_path>", "to_route": "fieldsales"},
+]
+
 # Generators
 # ----------
 

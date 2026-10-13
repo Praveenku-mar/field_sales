@@ -53,3 +53,7 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+
+# Desktop app build output (yarn build / bench build)
+field_sales/public/frontend
+field_sales/www/fieldsales.html

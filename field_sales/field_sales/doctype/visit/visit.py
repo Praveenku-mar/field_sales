@@ -22,6 +22,7 @@ class Visit(Document):
 		self._validate_completed_requires_checkin()
 		self._compute_time_on_site()
 		self._compute_distance_and_geofence()
+		self._set_order_outcome()
 
 	def on_update(self):
 		self._update_retailer_last_visit()
@@ -106,6 +107,29 @@ class Visit(Document):
 		self.distance_from_retailer_m = round(dist_m, 2)
 		self.within_geofence = 1 if dist_m <= get_geofence_radius(self.retailer) else 0
 
+	def _set_order_outcome(self):
+		"""
+		order_taken follows the visit's Field Orders (draft or submitted).
+		Without one, a completed visit needs the reason no order was taken.
+		"""
+		if not self.is_new():
+			self.order_taken = 1 if has_orders(self.name) else 0
+
+		if self.order_taken:
+			self.no_order_reason = self.no_order_remarks = None
+			return
+		if self.status != "Completed":
+			return
+		if not self.no_order_reason:
+			frappe.throw(
+				_("No order was taken on this visit. Select the {0} before completing it.").format(
+					_(self.meta.get_label("no_order_reason"))
+				),
+				title=_("Reason Required"),
+			)
+		if self.no_order_reason == "Other" and not (self.no_order_remarks or "").strip():
+			frappe.throw(_("Describe why no order was taken."), title=_("Reason Required"))
+
 	def _update_retailer_last_visit(self):
 		"""
 		When a visit is saved as Completed, stamp the linked Retailer's
@@ -120,6 +144,25 @@ class Visit(Document):
 				self.check_in_time,
 				update_modified=False,
 			)
+
+
+def has_orders(visit: str, exclude: str | None = None) -> bool:
+	"""Whether the visit has a draft or submitted Field Order (cancelled ones do not count)."""
+	filters = {"visit": visit, "docstatus": ("<", 2)}
+	if exclude:
+		filters["name"] = ("!=", exclude)
+	return bool(frappe.db.exists("Field Order", filters))
+
+
+def update_order_taken(visit: str, exclude: str | None = None) -> None:
+	"""Refresh order_taken after one of the visit's orders is saved, cancelled or deleted."""
+	if not visit or not frappe.db.exists("Visit", visit):
+		return
+	taken = int(has_orders(visit, exclude))
+	values = {"order_taken": taken}
+	if taken:
+		values.update(no_order_reason=None, no_order_remarks=None)
+	frappe.db.set_value("Visit", visit, values, update_modified=False)
 
 
 def get_geofence_radius(retailer: str) -> int:

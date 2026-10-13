@@ -2,9 +2,7 @@
 // For license information, please see license.txt
 
 frappe.listview_settings["Retailer"] = {
-	// Ensure sync_status is always available in the list response even if the
-	// column is later removed from in_list_view in the DocType definition.
-	add_fields: ["sync_status"],
+	add_fields: ["sync_status", "status", "last_visit"],
 
 	onload(listview) {
 		listview.page.add_actions_menu_item(__("Sync to Store"), () => {
@@ -20,14 +18,34 @@ frappe.listview_settings["Retailer"] = {
 		});
 	},
 
-	get_indicator: function (doc) {
+	get_indicator(doc) {
+		if (doc.status === "Inactive") {
+			return [__("Inactive"), "gray", "status,=,Inactive"];
+		}
 		const indicators = {
-			Synced:  [__("Synced"),  "green",  "sync_status,=,Synced"],
-			Pending: [__("Pending"), "orange", "sync_status,=,Pending"],
-			Failed:  [__("Failed"),  "red",    "sync_status,=,Failed"],
-			Draft:   [__("Draft"),   "gray",   "sync_status,=,Draft"],
+			Synced: [__("Synced"), "green", "sync_status,=,Synced"],
+			Pending: [__("Sync Pending"), "orange", "sync_status,=,Pending"],
+			Failed: [__("Sync Failed"), "red", "sync_status,=,Failed"],
+			Draft: [__("Not Synced"), "gray", "sync_status,=,Draft"],
 		};
+		return indicators[doc.sync_status] || indicators.Draft;
+	},
 
-		return indicators[doc.sync_status] || indicators["Draft"];
+	formatters: {
+		// "3 days ago", red once a retailer has gone 30 days without a visit.
+		last_visit(value) {
+			if (!value) return `<span class="text-muted">${__("Never")}</span>`;
+			const days = frappe.datetime.get_day_diff(frappe.datetime.get_today(), value);
+			const text = frappe.datetime.prettyDate(value);
+			return days > 30 ? `<span style="color: var(--red-600)">${text}</span>` : text;
+		},
+	},
+
+	// Per-row quick action.
+	button: {
+		show: (doc) => doc.status !== "Inactive",
+		get_label: () => __("Plan Visit"),
+		get_description: (doc) => __("Plan a visit to {0}", [doc.retailer_name || doc.name]),
+		action: (doc) => frappe.new_doc("Visit", { retailer: doc.name }),
 	},
 };

@@ -5,11 +5,12 @@
 
 import frappe
 from frappe import _
+from frappe.query_builder.functions import Count, Sum
 from frappe.utils import flt, get_link_to_form, now_datetime
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
-from field_sales.permissions import get_allowed_reps, is_admin
+from field_sales.permissions import get_allowed_reps, hierarchy_filters, is_admin
 from field_sales.sync.customers import push_retailers
 from field_sales.sync.notify import MONITOR_ROLES
 from field_sales.sync.orders import enqueue_push_order
@@ -21,11 +22,7 @@ VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
 
 @frappe.whitelist(methods=["POST"])
 def test_connection() -> dict:
-	"""
-	Test the configured store connection and record the outcome on Store Connection.
 
-	:return: ``{"ok": bool, "shop_name": str, "message": str}``
-	"""
 	frappe.only_for("System Manager")
 
 	result = get_connector().test_connection()
@@ -39,11 +36,7 @@ def test_connection() -> dict:
 
 @frappe.whitelist()
 def get_locations() -> list[dict]:
-	"""
-	List the store's active locations for the "Fetch Locations" picker.
 
-	:return: ``[{"id": str, "name": str}, ...]``
-	"""
 	frappe.only_for("System Manager")
 
 	try:
@@ -54,14 +47,7 @@ def get_locations() -> list[dict]:
 
 @frappe.whitelist(methods=["POST"])
 def enqueue_product_sync() -> dict:
-	"""
-	Start a background product sync (the "Sync Products" button).
 
-	Fails fast if Store Connection is disabled or has no default location, so
-	the user sees the problem now rather than in a failed job.
-
-	:return: ``{"queued": bool, "message": str}``; ``queued`` is false if a sync is already running.
-	"""
 	frappe.only_for(["System Manager", "Sales Manager"])
 
 	get_connector()
@@ -75,12 +61,7 @@ def enqueue_product_sync() -> dict:
 
 @frappe.whitelist(methods=["POST"])
 def sync_retailers(names: str | list) -> dict:
-	"""
-	Queue a push to the store for each given Retailer ("Sync to Store").
 
-	:param names: Retailer names (list, or JSON list from the client).
-	:return: ``{"message": str}``
-	"""
 	names = frappe.parse_json(names) if isinstance(names, str) else names
 	if not names:
 		frappe.throw(_("Select at least one Retailer"))
@@ -95,15 +76,7 @@ def sync_retailers(names: str | list) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 def check_in(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
-	"""
-	Check in to a Planned visit at the rep's current GPS position.
-
-	Time comes from the server, never the client. The first check-in at a
-	retailer with no coordinates sets the shop's location. Checking in outside
-	the geofence is allowed, but returns a warning.
-
-	:return: ``{"status", "distance_m", "within_geofence", "warning", "retailer_location_set"}``
-	"""
+	
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)
@@ -172,14 +145,17 @@ def check_in(visit: str, latitude: float, longitude: float, accuracy: float | No
 
 
 @frappe.whitelist(methods=["POST"])
-def check_out(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
+def check_out(
+	visit: str,
+	latitude: float,
+	longitude: float,
+	accuracy: float | None = None,
+	no_order_reason: str | None = None,
+	no_order_remarks: str | None = None,
+) -> dict:
 	"""
-	Check out of an In Progress visit and mark it Completed.
-
-	The check-in location stays on the visit; the check-out position is only
-	recorded in the timeline. Visit.on_update stamps Retailer.last_visit.
-
-	:return: ``{"status", "time_on_site_min", "distance_m", "within_geofence", "warning"}``
+	Complete an In Progress visit. When no order was taken on it, the rep gives
+	the reason (``no_order_reason``, plus ``no_order_remarks`` for "Other").
 	"""
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
@@ -188,6 +164,10 @@ def check_out(visit: str, latitude: float, longitude: float, accuracy: float | N
 	if doc.status != "In Progress":
 		frappe.throw(_("Only an In Progress visit can be checked out of. This visit is {0}.").format(_(doc.status)))
 
+	if no_order_reason:
+		doc.no_order_reason = no_order_reason
+	if no_order_remarks:
+		doc.no_order_remarks = no_order_remarks
 	doc.check_out_time = now_datetime()
 	doc.status = "Completed"
 	doc.flags.via_check_in_api = True
@@ -230,8 +210,6 @@ def refresh_stock(field_order: str) -> list[dict]:
 
 	Updates each row's available_qty and the Platform Product's, then saves the
 	order so stock_warning is recalculated ("Refresh Stock", and before submit).
-
-	:return: ``[{"idx", "product", "product_title", "qty", "available_qty", "stock_warning"}, ...]``
 	"""
 	doc = frappe.get_doc("Field Order", field_order)
 	doc.check_permission("write")
@@ -283,14 +261,7 @@ def refresh_stock(field_order: str) -> list[dict]:
 
 @frappe.whitelist(methods=["POST"])
 def retry_sync(field_order: str) -> dict:
-	"""
-	Queue another push of a Failed Field Order to the store ("Retry Sync").
-
-	Allowed for the order's own rep, their Sales Manager, or an admin. Not
-	limited by the scheduler's attempt cap.
-
-	:return: ``{"message": str}``
-	"""
+	
 	doc = frappe.get_doc("Field Order", field_order)
 	doc.check_permission("read")
 	if not _is_rep_or_their_manager(doc.sales_rep):
@@ -313,9 +284,6 @@ def get_store_order_url(field_order: str) -> str | None:
 	return get_connector().get_order_url(doc.external_order_id, doc.external_draft_id)
 
 
-# ----------------------------------------------------------------------
-# Sync Failures page, workspace count, report filters
-# ----------------------------------------------------------------------
 
 SYNC_FAILURE_LIMIT = 500
 
@@ -338,7 +306,7 @@ def get_sync_failures() -> dict:
 	)
 	retailers = frappe.get_list(
 		"Retailer",
-		filters={"sync_status": "Failed"},
+		filters=[["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")],
 		fields=["name", "retailer_name", "sales_rep", "last_sync_attempt", "sync_attempts", "sync_error"],
 		order_by="last_sync_attempt desc",
 		limit_page_length=SYNC_FAILURE_LIMIT,
@@ -367,7 +335,9 @@ def retry_all_sync_failures() -> dict:
 	orders = frappe.get_list(
 		"Field Order", filters={"docstatus": 1, "sync_status": "Failed"}, pluck="name", limit_page_length=0
 	)
-	retailers = frappe.get_list("Retailer", filters={"sync_status": "Failed"}, pluck="name", limit_page_length=0)
+	retailers = frappe.get_list(
+		"Retailer", filters=[["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")], pluck="name", limit_page_length=0
+	)
 
 	for name in orders:
 		enqueue_push_order(name)
@@ -381,11 +351,13 @@ def retry_all_sync_failures() -> dict:
 
 
 @frappe.whitelist()
-def get_sync_failure_count(filters=None) -> dict:
+def get_sync_failure_count(filters: str | list | dict | None = None) -> dict:
 	"""Number card "Sync Failures": failed orders + retailers in the user's scope; opens the page."""
 	count = len(
 		frappe.get_list("Field Order", filters={"docstatus": 1, "sync_status": "Failed"}, pluck="name", limit_page_length=0)
-	) + len(frappe.get_list("Retailer", filters={"sync_status": "Failed"}, pluck="name", limit_page_length=0))
+	) + len(frappe.get_list(
+		"Retailer", filters=[["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")], pluck="name", limit_page_length=0
+	))
 
 	result = {"value": count, "fieldtype": "Int"}
 	if set(MONITOR_ROLES) & set(frappe.get_roles()):
@@ -413,6 +385,72 @@ def get_retailer_cities(txt: str | None = None) -> list[str]:
 	return frappe.get_list(
 		"Retailer", filters=filters, pluck="city", distinct=True, order_by="city asc", limit_page_length=50
 	)
+
+
+@frappe.whitelist()
+def get_retailer_summary(retailer: str) -> dict:
+	"""Last 30 days at a retailer, for the summary bar on its form."""
+	frappe.has_permission("Retailer", "read", retailer, throw=True)
+	since = frappe.utils.add_days(frappe.utils.nowdate(), -30)
+
+	visit = frappe.qb.DocType("Visit")
+	visits = (
+		frappe.qb.from_(visit)
+		.select(Count("*"))
+		.where((visit.retailer == retailer) & (visit.status == "Completed") & (visit.visit_date >= since))
+	).run()[0][0]
+
+	order = frappe.qb.DocType("Field Order")
+	orders, value = (
+		frappe.qb.from_(order)
+		.select(Count("*"), Sum(order.grand_total))
+		.where((order.retailer == retailer) & (order.docstatus == 1) & (order.order_date >= since))
+	).run()[0]
+
+	return {"visits_30d": visits, "orders_30d": orders, "value_30d": flt(value)}
+
+
+@frappe.whitelist()
+def get_visit_orders(visit: str) -> list[dict]:
+	"""
+	Field Orders taken on a visit, newest first, with how many lines are short
+	of stock (shown on the visit as "Out of stock" until the order is fixed).
+	"""
+	frappe.has_permission("Visit", "read", visit, throw=True)
+
+	orders = frappe.get_list(
+		"Field Order",
+		filters={"visit": visit},
+		fields=["name", "order_date", "docstatus", "sync_status", "total_qty", "grand_total", "sync_error"],
+		order_by="creation desc",
+	)
+	if not orders:
+		return []
+
+	item = frappe.qb.DocType("Field Order Item")
+	counts = {
+		parent: (lines, short)
+		for parent, lines, short in (
+			frappe.qb.from_(item)
+			.select(item.parent, Count("*"), Sum(item.stock_warning))
+			.where((item.parenttype == "Field Order") & item.parent.isin([o.name for o in orders]))
+			.groupby(item.parent)
+		).run()
+	}
+	for order in orders:
+		lines, short = counts.get(order.name, (0, 0))
+		order.items = lines
+		order.short_items = int(short or 0)
+		order.status = _visit_order_status(order)
+	return orders
+
+
+def _visit_order_status(order) -> str:
+	if order.docstatus == 2:
+		return "Cancelled"
+	if order.docstatus == 0:
+		return "Out of Stock" if order.short_items else "Draft"
+	return order.sync_status or "Pending"
 
 
 def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]:

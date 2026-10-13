@@ -6,6 +6,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.sync.orders import enqueue_push_order
 
 
@@ -15,6 +16,7 @@ class FieldOrder(Document):
 	# ------------------------------------------------------------------
 
 	def validate(self):
+		self._validate_visit()
 		self._validate_item_quantities()
 		self._validate_no_duplicate_products()
 		self._compute_item_amounts()
@@ -23,20 +25,45 @@ class FieldOrder(Document):
 	def before_submit(self):
 		self._block_on_stock_warning()
 
+	def on_update(self):
+		# A draft counts as an order taken on the visit, even while stock is short.
+		update_order_taken(self.visit)
+		before = self.get_doc_before_save()
+		if before and before.visit and before.visit != self.visit:
+			update_order_taken(before.visit)
+
 	def on_submit(self):
 		self.db_set("sync_status", "Pending")
-		if self.visit:
-			frappe.db.set_value(
-				"Visit", self.visit, "order_taken", 1, update_modified=False
-			)
 		enqueue_push_order(self.name)
 
 	def on_cancel(self):
 		self.db_set("sync_status", "Draft")
+		update_order_taken(self.visit)
+
+	def on_trash(self):
+		update_order_taken(self.visit, exclude=self.name)
 
 	# ------------------------------------------------------------------
 	# Validation helpers
 	# ------------------------------------------------------------------
+
+	def _validate_visit(self):
+		"""The visit must be to the same retailer; the order defaults to the visit's rep."""
+		if not self.visit:
+			return
+		visit = frappe.db.get_value("Visit", self.visit, ["retailer", "sales_rep", "status"], as_dict=True)
+		if not visit:
+			return
+		if visit.retailer != self.retailer:
+			frappe.throw(
+				_("Visit {0} is to a different retailer. Pick a visit to {1} or clear the Visit.").format(
+					self.visit, self.retailer_name or self.retailer
+				)
+			)
+		if visit.status == "Cancelled":
+			frappe.throw(_("Visit {0} is cancelled; an order cannot be taken on it.").format(self.visit))
+		if not self.sales_rep:
+			self.sales_rep = visit.sales_rep
 
 	def _validate_item_quantities(self):
 		"""Every line item must have qty > 0."""

@@ -7,6 +7,7 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "order_tab",
   "order_section",
   "naming_series",
   "retailer",
@@ -26,8 +27,10 @@
   "tax_amount",
   "discount_amount",
   "grand_total",
+  "notes_tab",
   "notes_section",
   "remarks",
+  "sync_tab",
   "platform_sync_section",
   "platform",
   "location_id",
@@ -40,6 +43,11 @@
   "sync_error"
  ],
  "fields": [
+  {
+   "fieldname": "order_tab",
+   "fieldtype": "Tab Break",
+   "label": "Order"
+  },
   {
    "fieldname": "order_section",
    "fieldtype": "Section Break",
@@ -58,7 +66,6 @@
    "label": "Retailer",
    "options": "Retailer",
    "reqd": 1,
-   "in_list_view": 1,
    "in_standard_filter": 1,
    "search_index": 1
   },
@@ -68,7 +75,8 @@
    "label": "Retailer Name",
    "fetch_from": "retailer.retailer_name",
    "fetch_if_empty": 0,
-   "read_only": 1
+   "read_only": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "visit",
@@ -88,7 +96,8 @@
    "options": "Sales Rep",
    "reqd": 1,
    "in_standard_filter": 1,
-   "search_index": 1
+   "search_index": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "order_date",
@@ -96,8 +105,9 @@
    "label": "Order Date",
    "reqd": 1,
    "default": "Today",
+   "search_index": 1,
    "in_list_view": 1,
-   "search_index": 1
+   "in_standard_filter": 1
   },
   {
    "fieldname": "delivery_date",
@@ -125,7 +135,8 @@
    "fieldname": "total_qty",
    "fieldtype": "Float",
    "label": "Total Qty",
-   "read_only": 1
+   "read_only": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "col_break_totals",
@@ -159,8 +170,13 @@
    "fieldtype": "Currency",
    "label": "Grand Total",
    "read_only": 1,
-   "in_list_view": 1,
-   "bold": 1
+   "bold": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "notes_tab",
+   "fieldtype": "Tab Break",
+   "label": "Notes"
   },
   {
    "fieldname": "notes_section",
@@ -171,6 +187,11 @@
    "fieldname": "remarks",
    "fieldtype": "Small Text",
    "label": "Remarks"
+  },
+  {
+   "fieldname": "sync_tab",
+   "fieldtype": "Tab Break",
+   "label": "Store Sync"
   },
   {
    "fieldname": "platform_sync_section",
@@ -215,7 +236,6 @@
    "options": "Draft\nPending\nSynced\nFailed",
    "default": "Draft",
    "read_only": 1,
-   "in_list_view": 1,
    "in_standard_filter": 1
   },
   {
@@ -242,7 +262,7 @@
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-10 15:00:00.000000",
+ "modified": "2026-10-10 17:10:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

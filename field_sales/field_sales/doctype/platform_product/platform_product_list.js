@@ -1,8 +1,27 @@
 // Copyright (c) 2026, Your Company and contributors
 // For license information, please see license.txt
 
+// Stock at or below this shows as "Low Stock".
+const LOW_STOCK = 5;
+
 frappe.listview_settings["Platform Product"] = {
 	add_fields: ["available_qty", "track_inventory", "status"],
+
+	get_indicator(doc) {
+		if (doc.status !== "Active") return [__(doc.status), "gray", `status,=,${doc.status}`];
+		if (!doc.track_inventory) return [__("Not Tracked"), "blue", "track_inventory,=,0"];
+		if (doc.available_qty <= 0) return [__("Out of Stock"), "red", "available_qty,<=,0"];
+		if (doc.available_qty <= LOW_STOCK) return [__("Low Stock"), "orange", `available_qty,<=,${LOW_STOCK}`];
+		return [__("In Stock"), "green", `available_qty,>,${LOW_STOCK}`];
+	},
+
+	formatters: {
+		available_qty(value, df, doc) {
+			if (!doc.track_inventory) return `<span class="text-muted">—</span>`;
+			const color = value <= 0 ? "red" : value <= LOW_STOCK ? "orange" : "green";
+			return `<span style="color: var(--${color}-600)">${format_number(value, null, 0)}</span>`;
+		},
+	},
 
 	onload(listview) {
 		if (!frappe.user.has_role(["System Manager", "Sales Manager"])) return;

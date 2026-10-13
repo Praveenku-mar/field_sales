@@ -44,7 +44,6 @@
    "fieldtype": "Data",
    "label": "Product Title",
    "reqd": 1,
-   "in_list_view": 1,
    "in_standard_filter": 1,
    "bold": 1
   },
@@ -52,15 +51,15 @@
    "fieldname": "variant_title",
    "fieldtype": "Data",
    "label": "Variant Title",
-   "in_list_view": 1,
-   "description": "e.g. 5 kg, 1 L; blank if no variants"
+   "description": "e.g. 5 kg, 1 L; blank if no variants",
+   "in_list_view": 1
   },
   {
    "fieldname": "sku",
    "fieldtype": "Data",
    "label": "SKU",
-   "in_list_view": 1,
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "barcode",
@@ -95,7 +94,8 @@
    "label": "Status",
    "options": "Active\nDraft\nArchived",
    "default": "Active",
-   "in_standard_filter": 1
+   "in_standard_filter": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "price_stock_section",
@@ -179,8 +179,7 @@
    "fieldname": "last_synced",
    "fieldtype": "Datetime",
    "label": "Last Synced",
-   "read_only": 1,
-   "in_list_view": 1
+   "read_only": 1
   },
   {
    "fieldname": "sync_hash",
@@ -194,7 +193,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-09 10:46:20.000000",
+ "modified": "2026-10-10 17:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Platform Product",

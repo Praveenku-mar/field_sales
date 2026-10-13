@@ -14,8 +14,10 @@ frappe.ui.form.on("Visit", {
 
 	refresh(frm) {
 		add_check_in_buttons(frm);
+		show_visit_summary(frm);
 		show_geofence_indicator(frm);
 		render_location_map(frm);
+		render_orders(frm);
 	},
 });
 
@@ -53,21 +55,71 @@ function add_check_in_buttons(frm) {
 	}
 
 	if (frm.doc.status === "In Progress") {
-		frm.add_custom_button(__("Check Out"), () =>
-			check_in_or_out(frm, "field_sales.api.check_out", __("Checking out…"))
-		).addClass("btn-primary");
+		// Not returning the promise: the button would spin while the reason dialog is open.
+		frm.add_custom_button(__("Check Out"), () => {
+			get_no_order_reason(frm).then((reason) =>
+				check_in_or_out(frm, "field_sales.api.check_out", __("Checking out…"), reason)
+			);
+		}).addClass("btn-primary");
 
-		frm.add_custom_button(__("New Field Order"), () =>
-			frappe.new_doc("Field Order", {
-				retailer: frm.doc.retailer,
-				visit: frm.doc.name,
-				sales_rep: frm.doc.sales_rep,
-			})
-		);
+		frm.add_custom_button(__("New Field Order"), () => new_field_order(frm));
 	}
 }
 
-function check_in_or_out(frm, method, freeze_message) {
+function new_field_order(frm) {
+	frappe.new_doc("Field Order", {
+		retailer: frm.doc.retailer,
+		visit: frm.doc.name,
+		sales_rep: frm.doc.sales_rep,
+	});
+}
+
+/**
+ * Resolves with {} when the visit has an order, otherwise asks why no order
+ * was taken and resolves with the answer (never resolves if the rep cancels).
+ */
+function get_no_order_reason(frm) {
+	return frappe.db.count("Field Order", { filters: { visit: frm.doc.name, docstatus: ["<", 2] } }).then((count) => {
+		if (count) return {};
+
+		return new Promise((resolve) => {
+			const dialog = new frappe.ui.Dialog({
+				title: __("No Order Taken"),
+				fields: [
+					{
+						fieldtype: "HTML",
+						options: `<p class="text-muted">${__(
+							"No order was taken on this visit. Tell us why before checking out."
+						)}</p>`,
+					},
+					{
+						fieldname: "no_order_reason",
+						fieldtype: "Select",
+						label: __("Reason"),
+						options: frm.get_field("no_order_reason").df.options,
+						default: frm.doc.no_order_reason,
+						reqd: 1,
+					},
+					{
+						fieldname: "no_order_remarks",
+						fieldtype: "Small Text",
+						label: __("Details"),
+						default: frm.doc.no_order_remarks,
+						mandatory_depends_on: "eval:doc.no_order_reason=='Other'",
+					},
+				],
+				primary_action_label: __("Check Out"),
+				primary_action(values) {
+					dialog.hide();
+					resolve(values);
+				},
+			});
+			dialog.show();
+		});
+	});
+}
+
+function check_in_or_out(frm, method, freeze_message, extra_args = {}) {
 	// Save pending edits (e.g. notes) first, so reload_doc does not discard them.
 	const saved = frm.is_dirty() ? frm.save() : Promise.resolve();
 
@@ -81,6 +133,7 @@ function check_in_or_out(frm, method, freeze_message) {
 					latitude: coords.latitude,
 					longitude: coords.longitude,
 					accuracy: coords.accuracy,
+					...extra_args,
 				},
 				freeze: true,
 				freeze_message,
@@ -229,4 +282,105 @@ function render_location_map(frm) {
 		// The section may have just become visible; let Leaflet measure it.
 		setTimeout(() => map.invalidateSize(), 100);
 	});
+}
+
+// ----------------------------------------------------------------------
+// Orders taken on this visit (drafts included, so an order waiting on stock shows)
+// ----------------------------------------------------------------------
+
+const ORDER_STATUS_COLORS = {
+	Draft: "gray",
+	"Out of Stock": "red",
+	Pending: "orange",
+	Synced: "green",
+	Failed: "red",
+	Cancelled: "gray",
+};
+
+function render_orders(frm) {
+	const field = frm.get_field("orders_html");
+	if (!field) return;
+	field.$wrapper.empty();
+	if (frm.is_new()) return;
+
+	frappe
+		.call({ method: "field_sales.api.get_visit_orders", args: { visit: frm.doc.name } })
+		.then(({ message: orders = [] }) => {
+			field.$wrapper.empty();
+			const can_add = ["In Progress", "Completed"].includes(frm.doc.status) && frappe.model.can_create("Field Order");
+
+			if (!orders.length) {
+				field.$wrapper.append(
+					`<div class="text-muted" style="margin-bottom: var(--margin-sm)">${__("No order taken on this visit yet.")}</div>`
+				);
+			} else {
+				const rows = orders
+					.map((o) => {
+						const note =
+							o.status === "Out of Stock"
+								? __("{0} item(s) exceed available stock", [o.short_items])
+								: o.status === "Failed" && o.sync_error
+								? frappe.utils.escape_html(o.sync_error)
+								: "";
+						return `<tr>
+							<td><a href="/app/field-order/${encodeURIComponent(o.name)}">${o.name}</a></td>
+							<td>${frappe.datetime.str_to_user(o.order_date)}</td>
+							<td class="text-right">${__("{0} items · {1} units", [o.items, format_number(o.total_qty, null, 0)])}</td>
+							<td class="text-right">${format_currency(o.grand_total)}</td>
+							<td><span class="indicator-pill ${ORDER_STATUS_COLORS[o.status] || "gray"}">${__(o.status)}</span>
+								${note ? `<div class="small text-muted" style="margin-top: 4px">${note}</div>` : ""}</td>
+						</tr>`;
+					})
+					.join("");
+				field.$wrapper.append(`<table class="table table-bordered" style="margin-bottom: var(--margin-sm)">
+					<thead><tr>
+						<th>${__("Order")}</th><th>${__("Date")}</th><th class="text-right">${__("Items")}</th>
+						<th class="text-right">${__("Total")}</th><th>${__("Status")}</th>
+					</tr></thead><tbody>${rows}</tbody></table>`);
+			}
+
+			if (can_add) {
+				$(`<button class="btn btn-xs btn-default">${__("New Field Order")}</button>`)
+					.on("click", () => new_field_order(frm))
+					.appendTo(field.$wrapper);
+			}
+		});
+}
+
+// ----------------------------------------------------------------------
+// Summary bar: where the visit stands
+// ----------------------------------------------------------------------
+
+function show_visit_summary(frm) {
+	if (frm.is_new()) return;
+	const d = frm.doc;
+
+	if (d.status === "In Progress" && d.check_in_time) {
+		const minutes = Math.max(0, Math.round(moment().diff(moment(d.check_in_time), "minutes")));
+		frm.dashboard.set_headline(
+			__("Checked in at {0} · {1} min on site. Check out when you leave.", [
+				frappe.datetime.str_to_user(d.check_in_time).split(" ").slice(-1)[0],
+				minutes,
+			]),
+			"blue"
+		);
+	} else if (d.status === "Planned") {
+		const overdue = d.visit_date < frappe.datetime.get_today();
+		frm.dashboard.set_headline(
+			overdue
+				? __("This visit was planned for {0} and has not been checked in.", [frappe.datetime.str_to_user(d.visit_date)])
+				: __("Check in when you reach the retailer."),
+			overdue ? "orange" : "gray"
+		);
+	} else {
+		frm.dashboard.clear_headline();
+	}
+
+	if (d.status === "Completed") {
+		frm.dashboard.add_indicator(__("{0} min on site", [d.time_on_site_min || 0]), "blue");
+		frm.dashboard.add_indicator(
+			d.order_taken ? __("Order taken") : d.no_order_reason ? __("No order: {0}", [__(d.no_order_reason)]) : __("No order"),
+			d.order_taken ? "green" : "gray"
+		);
+	}
 }

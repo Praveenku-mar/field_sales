@@ -8,6 +8,10 @@ A user sees records of their own Sales Rep and of every rep reporting to it,
 directly or indirectly (Sales Rep.reports_to). System Manager and
 Administrator see everything; a user with no Sales Rep sees nothing.
 
+Retailers are the exception: every rep can see every retailer (to plan a
+visit or take an order anywhere), but can edit only those of their hierarchy.
+Lists of retailers needing the rep's action use ``hierarchy_filters``.
+
 Wired up in hooks.py through ``permission_query_conditions`` (list views,
 reports, link search) and ``has_permission`` (opening / saving one record).
 """
@@ -17,6 +21,9 @@ from collections import defaultdict, deque
 import frappe
 
 ADMIN_ROLES = {"System Manager"}
+
+# Permission types that only look at a record (any retailer may be seen).
+READ_ONLY_PTYPES = {"read", "select", "print", "email", "report", "export"}
 
 # DocType -> field holding the Sales Rep the record belongs to.
 REP_FIELD = {
@@ -108,7 +115,19 @@ def field_order_query(user: str | None = None) -> str:
 
 
 def retailer_query(user: str | None = None) -> str:
-	return _query_conditions("Retailer", user)
+	# Every retailer is listed; role permissions still decide who may read at all.
+	return ""
+
+
+def hierarchy_filters(doctype: str, user: str | None = None) -> list:
+	"""
+	Filters limiting a list to the user's hierarchy, for doctypes whose read
+	access is wider (Retailer): e.g. "my retailers that failed to sync".
+	"""
+	user = user or frappe.session.user
+	if is_admin(user):
+		return []
+	return [[REP_FIELD[doctype], "in", get_allowed_reps(user) or [""]]]
 
 
 # ----------------------------------------------------------------------
@@ -133,6 +152,8 @@ def retailer_has_permission(doc, ptype: str | None = None, user: str | None = No
 	# Retailer.before_insert then assigns it to them.
 	if ptype == "create" and not doc.sales_rep:
 		return is_admin(user) or bool(get_allowed_reps(user))
+	if ptype in READ_ONLY_PTYPES:
+		return True
 	return _rep_in_allowed(doc.sales_rep, user)
 
 

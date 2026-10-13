@@ -11,6 +11,14 @@ frappe.ui.form.on("Retailer", {
 
 		if (frm.is_new()) return;
 
+		show_retailer_summary(frm);
+		frm.add_custom_button(__("Plan Visit"), () => frappe.new_doc("Visit", { retailer: frm.doc.name }), __("Create"));
+		frm.add_custom_button(
+			__("Field Order"),
+			() => frappe.new_doc("Field Order", { retailer: frm.doc.name, sales_rep: frm.doc.sales_rep }),
+			__("Create")
+		);
+
 		if (["Draft", "Failed"].includes(frm.doc.sync_status)) {
 			frm.add_custom_button(__("Sync to Store"), () => {
 				frappe
@@ -37,6 +45,12 @@ frappe.ui.form.on("Retailer", {
 		} else {
 			frm.dashboard.clear_headline();
 		}
+	},
+
+	// The map lives in a tab: Leaflet measures a hidden tab as 0x0, so resize when shown.
+	on_tab_change(frm) {
+		const map = frm.fields_dict.location_map && frm.fields_dict.location_map.map;
+		if (map) setTimeout(() => map.invalidateSize(), 50);
 	},
 
 	// Handlers return their promise so Frappe finishes one update before
@@ -218,4 +232,29 @@ function add_use_my_location_button(frm) {
 			{ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
 		);
 	});
+}
+
+// ----------------------------------------------------------------------
+// Summary bar: last visit and the last 30 days
+// ----------------------------------------------------------------------
+
+function show_retailer_summary(frm) {
+	const last = frm.doc.last_visit;
+	const days = last ? frappe.datetime.get_day_diff(frappe.datetime.get_today(), last) : null;
+	const color = days === null || days > 30 ? "red" : days > 7 ? "orange" : "green";
+	frm.dashboard.add_indicator(
+		last ? __("Last visit {0}", [frappe.datetime.prettyDate(last)]) : __("Never visited"),
+		color
+	);
+
+	frappe
+		.call({ method: "field_sales.api.get_retailer_summary", args: { retailer: frm.doc.name } })
+		.then(({ message: s }) => {
+			if (!s || frm.doc.name !== frm.docname) return;
+			frm.dashboard.add_indicator(__("{0} visits in 30 days", [s.visits_30d]), "blue");
+			frm.dashboard.add_indicator(
+				__("{0} orders · {1} in 30 days", [s.orders_30d, format_currency(s.value_30d)]),
+				s.orders_30d ? "green" : "gray"
+			);
+		});
 }

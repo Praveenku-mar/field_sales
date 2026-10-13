@@ -22,6 +22,7 @@ frappe.ui.form.on("Field Order", {
 
 	refresh: function (frm) {
 		_highlight_stock_warnings(frm);
+		_show_order_summary(frm);
 		_add_stock_button(frm);
 		_show_sync_status(frm);
 	},
@@ -50,27 +51,36 @@ frappe.ui.form.on("Field Order", {
 	},
 
 	retailer: function (frm) {
-		// Clear a visit that may belong to the old retailer
-		if (frm.doc.visit) {
-			frm.set_value("visit", "");
-		}
-
 		if (!frm.doc.retailer) {
+			frm.set_value("visit", "");
 			frm.set_value("sales_rep", "");
 			return;
 		}
-
-		// Auto-fill Sales Rep from the Retailer record
-		frappe.db.get_value(
-			"Retailer",
-			frm.doc.retailer,
-			"sales_rep",
-			function (r) {
-				if (r && r.sales_rep) {
-					frm.set_value("sales_rep", r.sales_rep);
-				}
+		if (!frm.doc.visit) {
+			_set_rep_from_retailer(frm);
+			return;
+		}
+		// Keep the visit (and its rep) when it is to this retailer, e.g. an
+		// order opened from the visit; otherwise it belongs to the old retailer.
+		frappe.db.get_value("Visit", frm.doc.visit, ["retailer", "sales_rep"]).then(function (r) {
+			var visit = r.message || {};
+			if (visit.retailer === frm.doc.retailer) {
+				if (visit.sales_rep) frm.set_value("sales_rep", visit.sales_rep);
+			} else {
+				frm.set_value("visit", "");
+				_set_rep_from_retailer(frm);
 			}
-		);
+		});
+	},
+
+	visit: function (frm) {
+		if (!frm.doc.visit) return;
+		// Picking a visit fills its retailer and rep.
+		frappe.db.get_value("Visit", frm.doc.visit, ["retailer", "sales_rep"]).then(function (r) {
+			var visit = r.message || {};
+			if (visit.sales_rep) frm.set_value("sales_rep", visit.sales_rep);
+			if (visit.retailer && visit.retailer !== frm.doc.retailer) frm.set_value("retailer", visit.retailer);
+		});
 	},
 
 	tax_percent: function (frm) {
@@ -219,8 +229,49 @@ function _listen_for_sync(frm) {
 }
 
 // ---------------------------------------------------------------------------
+// Summary bar
+// ---------------------------------------------------------------------------
+
+function _show_order_summary(frm) {
+	if (frm.is_new()) return;
+	const items = frm.doc.items || [];
+	const short = items.filter((row) => row.stock_warning).length;
+
+	frm.dashboard.add_indicator(
+		__("{0} items · {1} units", [items.length, format_number(frm.doc.total_qty || 0, null, 0)]),
+		"blue"
+	);
+	frm.dashboard.add_indicator(__("Total {0}", [format_currency(frm.doc.grand_total)]), "green");
+	if (frm.doc.docstatus === 0 && short) {
+		frm.dashboard.add_indicator(__("{0} row(s) over stock", [short]), "red");
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+// Sales Rep for an order without a visit: a rep takes it under their own name
+// (they can order for any retailer); a manager gets the retailer's rep.
+function _set_rep_from_retailer(frm) {
+	var is_manager = frappe.user.has_role(["Sales Manager", "System Manager"]);
+	var own_rep = is_manager
+		? Promise.resolve(null)
+		: frappe.db.get_value("Sales Rep", { user: frappe.session.user, active: 1 }, "name").then(function (r) {
+				return r.message && r.message.name;
+		  });
+	own_rep.then(function (rep) {
+		if (rep) {
+			frm.set_value("sales_rep", rep);
+			return;
+		}
+		frappe.db.get_value("Retailer", frm.doc.retailer, "sales_rep", function (r) {
+			if (r && r.sales_rep) {
+				frm.set_value("sales_rep", r.sales_rep);
+			}
+		});
+	});
+}
 
 /**
  * Recompute amount for a single child row, then roll up parent totals.

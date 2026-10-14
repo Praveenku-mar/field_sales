@@ -1,11 +1,39 @@
 <template>
   <div>
-    <PageHeader title="Settings" />
-    <div class="space-y-3 px-5 pb-5">
-      <TabButtons v-model="tab" :options="tabs" />
-      <div class="fs-card">
-        <EmptyState icon="lucide-settings" :title="current.label" :description="current.description">
-          <Button label="Open in Desk" icon-left="lucide-external-link" :href="current.href" />
+    <PageHeader title="Settings">
+      <template #meta>
+        <TabButtons v-model="tab" :options="TABS" />
+        <StatusPill
+          v-if="tab === 'store' && storeForm?.titleStatus"
+          :status="storeForm.titleStatus.status"
+          :label="storeForm.titleStatus.label"
+          :icon="storeForm.titleStatus.icon"
+        />
+      </template>
+      <template #actions>
+        <Button
+          v-if="session.isAdmin && tab === 'store'"
+          variant="solid"
+          label="Fetch Locations"
+          icon-left="lucide-refresh-cw"
+          :loading="!!storeForm?.fetchingLocations"
+          :disabled="!storeForm"
+          @click="storeForm?.fetchLocations()"
+        />
+      </template>
+    </PageHeader>
+    <div class="px-5 pb-5">
+      <template v-if="session.isAdmin">
+        <!-- v-show keeps unsaved Store Connection edits while the Email tab is open -->
+        <StoreConnectionForm v-show="tab === 'store'" ref="storeForm" />
+        <EmailAccountSettings v-if="tab === 'email'" />
+      </template>
+      <div v-else class="fs-card">
+        <EmptyState
+          :icon="tab === 'email' ? 'lucide-mail' : 'lucide-store'"
+          :title="tab === 'email' ? 'Email Account' : 'Store Connection'"
+          :description="`Only a System Manager can change the ${tab === 'email' ? 'email account' : 'store connection'}.`"
+        >
         </EmptyState>
       </div>
     </div>
@@ -14,14 +42,28 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Button, TabButtons } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import StatusPill from '@/components/StatusPill.vue'
+import StoreConnectionForm from '@/components/StoreConnectionForm.vue'
+import EmailAccountSettings from '@/components/EmailAccountSettings.vue'
+import { useSessionStore } from '@/stores/session'
 
-const tabs = [
-  { label: 'Store Connection', value: 'store', description: 'Connect the store and choose the default location.', href: '/app/store-connection' },
-  { label: 'Sales Reps', value: 'reps', description: 'Reps, territories, reporting lines and monthly targets.', href: '/app/sales-rep' },
+const session = useSessionStore()
+const storeForm = ref(null)
+
+const TABS = [
+  { label: 'Store Connection', value: 'store' },
+  { label: 'Email Account', value: 'email' },
 ]
-const tab = ref('store')
-const current = computed(() => tabs.find((t) => t.value === tab.value))
+// The tab is in the URL (?tab=email), so a refresh or a link opens it.
+const route = useRoute()
+const router = useRouter()
+const tab = computed({
+  get: () => (route.query.tab === 'email' ? 'email' : 'store'),
+  set: (value) => router.replace({ query: value === 'store' ? {} : { tab: value } }),
+})
 </script>
+

@@ -10,7 +10,7 @@
           variant="ghost"
           label="Preview"
           icon-left="lucide-eye"
-          :href="`/printview?doctype=Field%20Order&name=${encodeURIComponent(name)}`"
+          :href="`/printview?doctype=Field%20Order&name=${encodeURIComponent(name)}&format=Field%20Sales%20Order`"
           target="_blank"
         />
         <template v-if="editable">
@@ -27,8 +27,8 @@
     <div v-else class="grid grid-cols-1 items-start gap-4 px-5 pb-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <!-- Order -->
       <div class="fs-card">
-        <div class="grid grid-cols-1 gap-4 border-b border-desk-border p-5 sm:grid-cols-3">
-          <Field label="Retailer" required>
+        <div class="grid grid-cols-1 gap-4 border-b border-desk-border p-5 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="Customer" required>
             <LinkField
               v-if="editable"
               v-model="form.retailer"
@@ -38,7 +38,7 @@
               :search-fields="['name', 'retailer_name', 'city', 'phone']"
               :filters="{ status: 'Active' }"
               :label="form.retailer_name"
-              placeholder="Select retailer"
+              placeholder="Select customer"
               @select="onRetailer"
             />
             <ReadOnly v-else :value="form.retailer_name || form.retailer" :aside="retailerCity.data?.city" :route="{ name: 'Retailer', params: { name: form.retailer } }" />
@@ -59,6 +59,16 @@
             <DatePicker v-if="editable" v-model="form.order_date" />
             <ReadOnly v-else :value="formatDate(form.order_date)" />
           </Field>
+          <Field label="Location">
+            <Select
+              v-if="editable && multipleLocations"
+              :model-value="form.location_id"
+              :options="locationOptions"
+              :disabled="locationBusy"
+              @update:model-value="changeLocation"
+            />
+            <ReadOnly v-else :value="locationName" />
+          </Field>
         </div>
 
         <!-- Items -->
@@ -74,6 +84,48 @@
               icon-left="lucide-trash-2"
               @click="deleteSelected"
             />
+          </div>
+
+          <!-- Search-to-add: matches the catalog on the server, picking adds the row.
+               The results panel is in flow — it makes room instead of overlapping
+               the items table. -->
+          <div v-if="editable">
+            <TextInput
+              ref="quickSearchEl"
+              v-model="quickQuery"
+              placeholder="Search a product to add — name, SKU or barcode"
+              @keydown.enter.prevent="quickRows.length && quickAdd(quickRows[0])"
+              @blur="quickOpen = false"
+              @focus="quickSearch.data && (quickOpen = true)"
+            >
+              <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+            </TextInput>
+            <ul
+              v-if="quickOpen && (quickSearch.loading || quickRows.length)"
+              class="mt-1 max-h-72 overflow-y-auto rounded-4 border border-outline-gray-2 bg-surface-base py-1"
+            >
+              <li v-if="quickSearch.loading" class="flex justify-center px-3 py-3"><LoadingIndicator class="size-4 text-ink-gray-5" /></li>
+              <li
+                v-for="p in quickRows"
+                :key="p.name"
+                class="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-surface-gray-1"
+                @mousedown.prevent="quickAdd(p)"
+                @mouseenter="quickActive = p.name"
+                @mouseleave="quickActive = null"
+                :class="quickActive === p.name && 'bg-surface-gray-1'"
+              >
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-ink-gray-9">{{ productLabel(p) }}</span>
+                  <span class="block truncate font-mono text-xs text-ink-gray-5">{{ p.sku || p.name }}</span>
+                </span>
+                <span class="shrink-0 text-right">
+                  <span class="block tabular-nums">{{ formatCurrency(p.price) }}</span>
+                  <span class="block text-xs" :class="p.track_inventory && (listedQty(p) ?? 1) <= 0 ? 'text-ink-red-5' : 'text-ink-gray-5'">
+                    {{ stockText(p, 'in stock', 'not tracked') }}
+                  </span>
+                </span>
+              </li>
+            </ul>
           </div>
 
           <div v-if="warningRows.length" class="flex items-start gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
@@ -201,7 +253,27 @@
             <dl class="space-y-2.5">
               <div class="flex justify-between"><dt class="text-ink-gray-6">Net Total</dt><dd class="tabular-nums">{{ formatCurrency(totals.net) }}</dd></div>
               <div class="flex justify-between"><dt class="text-ink-gray-6">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums">{{ formatCurrency(totals.tax) }}</dd></div>
-              <div class="flex justify-between"><dt class="text-ink-gray-6">Discount</dt><dd class="tabular-nums">{{ formatCurrency(form.discount_amount || 0) }}</dd></div>
+              <div v-if="editable" class="flex items-start justify-between gap-3">
+                <dt class="pt-1 text-ink-gray-6">Discount %</dt>
+                <dd class="text-right">
+                  <div class="flex items-center justify-end gap-3">
+                    <TextInput
+                      v-model="form.discount_percent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      class="w-20 [&_input]:text-right"
+                      aria-label="Discount %"
+                    />
+                    <span class="w-24 tabular-nums">{{ formatCurrency(totals.discount) }}</span>
+                  </div>
+                  <p class="mt-1 text-xs" :class="overDiscountLimit ? 'text-ink-red-5' : 'text-ink-gray-5'">{{ discountHint }}</p>
+                </dd>
+              </div>
+              <div v-else class="flex justify-between">
+                <dt class="text-ink-gray-6">Discount ({{ formatNumber(form.discount_percent || 0, 2) }}%)</dt>
+                <dd class="tabular-nums">{{ formatCurrency(form.discount_amount || 0) }}</dd>
+              </div>
               <div class="flex justify-between border-t border-outline-gray-2 pt-3 text-lg font-semibold text-ink-gray-9">
                 <dt>Grand Total</dt><dd class="tabular-nums">{{ formatCurrency(totals.grand) }}</dd>
               </div>
@@ -277,7 +349,7 @@
             </span>
             <span class="text-right text-xs tabular-nums text-ink-gray-5">
               {{ formatCurrency(p.price) }}
-              <span class="block">{{ p.track_inventory ? `${formatNumber(p.available_qty)} in stock` : 'Not tracked' }}</span>
+              <span class="block">{{ stockText(p, 'in stock', 'Not tracked') }}</span>
             </span>
           </label>
         </div>
@@ -303,7 +375,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, reactive, ref, watch } from 'vue'
 import { RouterLink, onBeforeRouteLeave, useRouter } from 'vue-router'
 import {
   Button,
@@ -312,8 +384,10 @@ import {
   Dialog,
   Dropdown,
   LoadingIndicator,
+  Select,
   TextInput,
   Tooltip,
+  call,
   createDocumentResource,
   createResource,
   debounce,
@@ -324,12 +398,14 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import LinkField from '@/components/LinkField.vue'
 import { useSessionStore } from '@/stores/session'
+import { useSellLocations } from '@/composables/useSellLocations'
 import { callMethod } from '@/utils/api'
 import { formatCurrency, formatDate, formatNumber, formatTime, orderStatus, relativeDay } from '@/utils/format'
 
 const props = defineProps({ name: { type: String, required: true } })
 const router = useRouter()
 const session = useSessionStore()
+const { options: locationOptions, multiple: multipleLocations, defaultLocation, locations: sellLocations } = useSellLocations()
 
 /** Label above a form control, with the desk's red asterisk for required fields. */
 const Field = defineComponent({
@@ -351,6 +427,12 @@ const ReadOnly = defineComponent({
         : h('span', { class: ['flex-1 truncate', p.value ? 'text-ink-gray-8' : 'text-ink-gray-4'] }, p.value || '—'),
       p.aside ? h('span', { class: 'shrink-0 text-ink-gray-5' }, p.aside) : null,
     ]),
+})
+
+// Name of the order's location: saved with the order, else looked up from the shop's locations.
+const locationName = computed(() => {
+  const id = form.value?.location_id
+  return form.value?.location_name || sellLocations.value.find((l) => l.location_id === id)?.location_name || id || null
 })
 
 const PRODUCT_FIELDS = ['product_title', 'variant_title', 'sku', 'available_qty', 'price', 'track_inventory', 'external_variant_id']
@@ -379,7 +461,7 @@ function resetForm() {
 
 // Compares only what the user can change, so loading or recomputed fields never count as edits.
 const editableState = (o) =>
-  o && JSON.stringify([o.retailer, o.visit || null, o.order_date, (o.items || []).map((r) => [r.product || null, +r.qty || 0, +r.rate || 0])])
+  o && JSON.stringify([o.retailer, o.visit || null, o.order_date, (o.items || []).map((r) => [r.product || null, +r.qty || 0, +r.rate || 0]), +o.discount_percent || 0])
 const dirty = computed(() => !!form.value && editable.value && editableState(form.value) !== editableState(doc.doc))
 
 onBeforeRouteLeave(() => !dirty.value || window.confirm('You have unsaved changes to this order. Leave without saving?'))
@@ -436,19 +518,73 @@ const rowLabel = (row) => productLabel(row) || `row ${form.value.items.indexOf(r
 const totals = computed(() => {
   if (!dirty.value) {
     const o = d.value
-    return { qty: o.total_qty, net: o.net_total, tax: o.tax_amount, grand: o.grand_total }
+    return { qty: o.total_qty, net: o.net_total, tax: o.tax_amount, discount: o.discount_amount, grand: o.grand_total }
   }
   const items = form.value.items
   const net = Math.round(items.reduce((sum, r) => sum + amountOf(r), 0) * 100) / 100
   const tax = Math.round(((net * (+form.value.tax_percent || 0)) / 100) * 100) / 100
+  const discount = Math.round(((net * (+form.value.discount_percent || 0)) / 100) * 100) / 100
   return {
     qty: items.reduce((sum, r) => sum + (+r.qty || 0), 0),
     net,
     tax,
-    grand: Math.round((net + tax - (+form.value.discount_amount || 0)) * 100) / 100,
+    discount,
+    grand: Math.round((net + tax - discount) * 100) / 100,
   }
 })
 
+// The rep's discount limit (managers have none); the server enforces it on save.
+const repLimit = createResource({
+  url: 'frappe.client.get_value',
+  makeParams: () => ({ doctype: 'Sales Rep', filters: form.value.sales_rep, fieldname: 'max_discount_pct' }),
+})
+watch(
+  () => !session.isManager && editable.value && form.value?.sales_rep,
+  (rep) => rep && repLimit.fetch(),
+  { immediate: true },
+)
+const maxDiscount = computed(() => (session.isManager ? null : +repLimit.data?.max_discount_pct || 0))
+const overDiscountLimit = computed(
+  () => maxDiscount.value !== null && repLimit.data && (+form.value.discount_percent || 0) > maxDiscount.value,
+)
+const discountHint = computed(() => {
+  if (maxDiscount.value === null) return 'no limit'
+  if (!repLimit.data) return ''
+  return maxDiscount.value > 0 ? `max ${formatNumber(maxDiscount.value, 2)}%` : 'no discount allowed'
+})
+
+// Stock of listed products (search results, Add Multiple) at the ORDER's location: Platform
+// Product.available_qty is the default location's figure only. Keyed `${location}|${product}`.
+const listedStock = ref({})
+const stockKey = (product) => `${form.value?.location_id}|${product}`
+const atDefaultLocation = computed(
+  () => !form.value?.location_id || form.value.location_id === defaultLocation.value?.location_id,
+)
+// Quantity at the order's location; null while it is still loading.
+function listedQty(p) {
+  const key = stockKey(p.name)
+  if (key in listedStock.value) return listedStock.value[key]
+  return atDefaultLocation.value ? p.available_qty : null
+}
+const stockText = (p, suffix, untracked) =>
+  !p.track_inventory ? untracked : listedQty(p) == null ? '…' : `${formatNumber(listedQty(p))} ${suffix}`
+
+async function loadListedStock(location, products) {
+  try {
+    const rows = await call('frappe.client.get_list', {
+      doctype: 'Product Stock',
+      filters: { location_id: location, product: ['in', products] },
+      fields: ['product', 'available_qty'],
+      limit_page_length: 0,
+    })
+    // No row means no known stock there.
+    const found = Object.fromEntries(products.map((name) => [`${location}|${name}`, 0]))
+    rows.forEach((r) => (found[`${location}|${r.product}`] = r.available_qty))
+    listedStock.value = { ...listedStock.value, ...found }
+  } catch {
+    // The list falls back to the default location's figure or "…".
+  }
+}
 function setProduct(row, p) {
   tracked.value[p.name] = !!p.track_inventory
   Object.assign(row, {
@@ -456,16 +592,68 @@ function setProduct(row, p) {
     product_title: p.product_title,
     variant_title: p.variant_title,
     sku: p.sku,
-    available_qty: p.available_qty,
+    available_qty: listedQty(p) ?? 0,
     rate: p.price,
     external_variant_id: p.external_variant_id,
   })
+  if (p.track_inventory) loadLiveStock(row, p.name)
+}
+
+// The picker shows stock from the last sync; replace it with the store's current
+// figure at the order's location as soon as a tracked product is added. On failure the synced figure stays,
+// and submitting checks live stock again anyway.
+async function loadLiveStock(row, product) {
+  try {
+    const location = form.value.location_id
+    const live = await call('field_sales.api.get_live_stock', { products: [product], location_id: location })
+    if (product in live) listedStock.value = { ...listedStock.value, [`${location}|${product}`]: live[product] }
+    // The row may have been switched to another product meanwhile.
+    if (row.product === product && product in live && form.value.location_id === location) row.available_qty = live[product]
+  } catch {
+    // Keep the synced figure.
+  }
 }
 
 function addRow(product) {
-  const row = withKey({ doctype: 'Field Order Item', product: null, qty: 1, rate: 0 })
-  if (product) setProduct(row, product)
-  form.value.items.push(row)
+  form.value.items.push(withKey({ doctype: 'Field Order Item', product: null, qty: 1, rate: 0 }))
+  // Fill the reactive row (not the plain object), so the live stock that arrives later shows.
+  if (product) setProduct(form.value.items[form.value.items.length - 1], product)
+}
+
+// Search-to-add in the items card: same catalog search as the picker, but the
+// picked product goes straight onto the order.
+const quickSearchEl = ref(null)
+const quickQuery = ref('')
+const quickOpen = ref(false)
+const quickActive = ref(null)
+const quickSearch = createResource({
+  url: 'frappe.client.get_list',
+  makeParams: () => {
+    const txt = quickQuery.value.trim()
+    return {
+      doctype: 'Platform Product',
+      fields: ['name', ...PRODUCT_FIELDS],
+      filters: { status: 'Active' },
+      or_filters: txt
+        ? ['product_title', 'variant_title', 'sku', 'barcode'].map((f) => [f, 'like', `%${txt}%`])
+        : null,
+      order_by: 'product_title asc',
+      limit_page_length: 10,
+    }
+  },
+})
+const quickRows = computed(() => (quickSearch.data || []).filter((p) => !productNames.value.includes(p.name)))
+watch(quickQuery, debounce(() => {
+  quickOpen.value = true
+  quickSearch.fetch()
+}, 250))
+function quickAdd(p) {
+  addRow(p)
+  quickQuery.value = ''
+  quickOpen.value = false
+  quickActive.value = null
+  quickSearch.setData(null)
+  nextTick(() => quickSearchEl.value?.$el?.querySelector('input')?.focus())
 }
 
 const selected = ref(new Set())
@@ -522,6 +710,49 @@ function resetPicker() {
   picked.value = new Set()
 }
 
+watch(
+  [() => quickRows.value, () => pickerRows.value, () => form.value?.location_id],
+  ([quick, pick, location]) => {
+    if (!location) return
+    const missing = [...new Set([...quick, ...pick].map((p) => p.name))].filter((n) => !(`${location}|${n}` in listedStock.value))
+    if (missing.length) loadListedStock(location, missing)
+  },
+)
+
+
+// Switching a draft to another location: save the order there, then re-check its rows live
+// at the new location (the server also swaps the rows' stock for the stored figures on save).
+const locationBusy = ref(false)
+async function changeLocation(location) {
+  if (!location || location === d.value.location_id) return
+  locationBusy.value = true
+  try {
+    if (dirty.value) {
+      form.value.location_id = location
+      if (!(await save())) {
+        form.value.location_id = d.value.location_id
+        return
+      }
+    } else {
+      await callMethod('frappe.client.set_value', {
+        doctype: 'Field Order',
+        name: props.name,
+        fieldname: 'location_id',
+        value: location,
+      })
+    }
+    if (d.value.items?.some((r) => r.product) || form.value.items.some((r) => r.product)) {
+      await callMethod('field_sales.api.refresh_stock', { field_order: props.name })
+    }
+    await doc.reload()
+    toast.success(`Stock checked at ${locationName.value}`)
+  } catch {
+    await doc.reload() // callMethod already showed the error; put the saved location back
+  } finally {
+    locationBusy.value = false
+  }
+}
+
 // ---------------------------------------------------------------- actions
 
 const saving = ref(false)
@@ -529,11 +760,13 @@ const saving = ref(false)
 function validateForm() {
   const f = form.value
   const problem =
-    (!f.retailer && 'Select a retailer') ||
+    (!f.retailer && 'Select a customer') ||
     (!f.order_date && 'Set the order date') ||
     (!f.items.length && 'Add at least one item') ||
     (f.items.some((r) => !r.product) && 'Select a product in every row, or delete the empty rows') ||
-    (f.items.some((r) => !(+r.qty > 0)) && 'Every quantity must be greater than 0')
+    (f.items.some((r) => !(+r.qty > 0)) && 'Every quantity must be greater than 0') ||
+    (!(+f.discount_percent >= 0 && +f.discount_percent <= 100) && 'Discount must be between 0 and 100%') ||
+    (overDiscountLimit.value && `Discount is over your limit (${discountHint.value})`)
   if (problem) toast.error(problem)
   return !problem
 }
@@ -543,7 +776,7 @@ async function save() {
   saving.value = true
   try {
     const items = form.value.items.map(({ _key, ...row }) => row)
-    await callMethod('frappe.client.save', { doc: { ...form.value, items } })
+    await callMethod('frappe.client.save', { doc: { ...form.value, items, discount_percent: +form.value.discount_percent || 0 } })
     await doc.reload()
     toast.success('Order saved')
     return true
@@ -570,9 +803,20 @@ async function runConfirm() {
   }
 }
 
-function confirmSubmit() {
+async function confirmSubmit() {
+  // Check the store's current stock first (as the desk does), so a shortage shows on
+  // the rows before confirming. The server checks it again when the order is submitted.
+  saving.value = true
+  try {
+    await callMethod('field_sales.api.refresh_stock', { field_order: props.name })
+    await doc.reload()
+  } catch {
+    return // callMethod already showed the error (e.g. the store could not be reached)
+  } finally {
+    saving.value = false
+  }
   if (warningRows.value.length) {
-    toast.error('Reduce the quantities that exceed available stock before submitting')
+    toast.error('Not enough stock: reduce the highlighted quantities before submitting')
     return
   }
   ask({
@@ -595,7 +839,6 @@ async function refreshStock() {
 }
 
 const moreActions = computed(() => {
-  const desk = `/app/field-order/${encodeURIComponent(props.name)}`
   const actions = []
   if (editable.value) {
     actions.push({ label: 'Refresh Stock', icon: 'lucide-refresh-ccw', onClick: refreshStock })
@@ -603,11 +846,6 @@ const moreActions = computed(() => {
   if (storeUrl.value) {
     actions.push({ label: `Open in ${platform.value}`, icon: 'lucide-external-link', onClick: () => window.open(storeUrl.value, '_blank') })
   }
-  actions.push({
-    label: d.value.docstatus === 2 ? 'Amend in Desk' : 'Open in Desk',
-    icon: 'lucide-app-window',
-    onClick: () => (window.location.href = desk),
-  })
   if (d.value.docstatus === 1) {
     actions.push({
       label: 'Cancel Order',

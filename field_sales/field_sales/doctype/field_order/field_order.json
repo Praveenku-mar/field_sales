@@ -17,6 +17,8 @@
   "sales_rep",
   "order_date",
   "delivery_date",
+  "location_id",
+  "location_name",
   "items_section",
   "items",
   "totals_section",
@@ -25,6 +27,7 @@
   "net_total",
   "tax_percent",
   "tax_amount",
+  "discount_percent",
   "discount_amount",
   "grand_total",
   "notes_tab",
@@ -33,7 +36,6 @@
   "sync_tab",
   "platform_sync_section",
   "platform",
-  "location_id",
   "external_draft_id",
   "external_order_id",
   "col_break_sync",
@@ -161,9 +163,15 @@
    "read_only": 1
   },
   {
+   "fieldname": "discount_percent",
+   "fieldtype": "Percent",
+   "label": "Discount %"
+  },
+  {
    "fieldname": "discount_amount",
    "fieldtype": "Currency",
-   "label": "Discount Amount"
+   "label": "Discount Amount",
+   "read_only": 1
   },
   {
    "fieldname": "grand_total",
@@ -207,9 +215,10 @@
   },
   {
    "fieldname": "location_id",
-   "fieldtype": "Data",
-   "label": "Location ID",
-   "read_only": 1
+   "fieldtype": "Select",
+   "label": "Location",
+   "options": "",
+   "description": "Stock is checked against this store location"
   },
   {
    "fieldname": "external_draft_id",
@@ -255,6 +264,12 @@
    "fieldname": "sync_error",
    "fieldtype": "Small Text",
    "label": "Sync Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "location_name",
+   "fieldtype": "Data",
+   "label": "Location Name",
    "read_only": 1
   }
  ],

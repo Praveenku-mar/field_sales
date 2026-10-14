@@ -50,6 +50,7 @@ DATE_FORMAT = CustomFunction("DATE_FORMAT", ["date", "format"])
 ADDITIVE = (
 	"planned", "completed", "missed", "checked_in", "inside", "dist_sum", "dist_cnt",
 	"time_sum", "time_cnt", "orders", "value", "units", "failed", "not_visited",
+	"net", "discount", "discounted", "cmp_discount",
 	"monthly_target", "target", "cmp_planned", "cmp_completed", "cmp_orders", "cmp_value",
 )
 
@@ -272,7 +273,7 @@ def _collect(ctx) -> dict:
 	for row in _order_rows(ctx, ctx.from_date, ctx.to_date, reps):
 		comp = comps[_group_key(ctx, row.sales_rep, row.dim)]
 		comp["reps"].add(row.sales_rep)
-		for key in ("orders", "value", "units", "failed"):
+		for key in ("orders", "value", "units", "failed", "net", "discount", "discounted"):
 			comp[key] += flt(row[key])
 
 	for row in _visited_retailer_rows(ctx, reps):
@@ -299,6 +300,7 @@ def _collect(ctx) -> dict:
 			comp = comps[_group_key(ctx, row.sales_rep, row.dim)]
 			comp["cmp_orders"] += flt(row.orders)
 			comp["cmp_value"] += flt(row.value)
+			comp["cmp_discount"] += flt(row.discount)
 
 	_apply_targets(ctx, comps)
 	return comps
@@ -356,6 +358,7 @@ def _order_rows(ctx, from_date, to_date, reps, shift=None):
 	order = frappe.qb.DocType("Field Order")
 	retailer = frappe.qb.DocType("Retailer")
 	failed = frappe.qb.terms.Case().when(order.sync_status == "Failed", 1).else_(0)
+	discounted = frappe.qb.terms.Case().when(order.discount_amount > 0, 1).else_(0)
 
 	query = (
 		frappe.qb.from_(order)
@@ -367,6 +370,9 @@ def _order_rows(ctx, from_date, to_date, reps, shift=None):
 			Sum(IfNull(order.grand_total, 0)).as_("value"),
 			Sum(IfNull(order.total_qty, 0)).as_("units"),
 			Sum(failed).as_("failed"),
+			Sum(IfNull(order.net_total, 0)).as_("net"),
+			Sum(IfNull(order.discount_amount, 0)).as_("discount"),
+			Sum(discounted).as_("discounted"),
 		)
 		.where(order.docstatus == 1)
 		.where(order.order_date.between(from_date, to_date))
@@ -531,6 +537,9 @@ def get_columns(ctx=None):
 		{"label": _("Orders"), "fieldname": "orders", "fieldtype": "Int", "width": 85},
 		{"label": _("Order Value"), "fieldname": "order_value", "fieldtype": "Currency", "width": 130},
 		{"label": _("Avg Order Value"), "fieldname": "avg_order_value", "fieldtype": "Currency", "width": 130},
+		{"label": _("Discount Given"), "fieldname": "discount_given", "fieldtype": "Currency", "width": 125},
+		{"label": _("Avg Discount %"), "fieldname": "avg_discount_pct", "fieldtype": "Percent", "width": 120},
+		{"label": _("Orders with Discount"), "fieldname": "discounted_orders", "fieldtype": "Int", "width": 150},
 		{"label": _("Units Sold"), "fieldname": "units_sold", "fieldtype": "Float", "precision": 0, "width": 100},
 		{"label": _("Conversion %"), "fieldname": "conversion_pct", "fieldtype": "Percent", "width": 115},
 		{"label": _("Active Retailers Visited"), "fieldname": "retailers_visited", "fieldtype": "Int", "width": 170},
@@ -566,6 +575,10 @@ def _metrics(ctx, comp: dict) -> dict:
 		"orders": int(comp["orders"]),
 		"order_value": value,
 		"avg_order_value": flt(value / comp["orders"], 2) if comp["orders"] else None,
+		"discount_given": flt(comp["discount"], 2),
+		# Discount against what it was taken off (net, before tax), across all orders.
+		"avg_discount_pct": _pct(comp["discount"], comp["net"]),
+		"discounted_orders": int(comp["discounted"]),
 		"units_sold": flt(comp["units"]),
 		# Orders can be taken without a visit, so this can exceed 100%.
 		"conversion_pct": _pct(comp["orders"], comp["completed"]),
@@ -789,6 +802,7 @@ def _get_summary(ctx, comps) -> list[dict]:
 		"aov": ratio(total["value"], total["orders"]),
 		"conversion": _pct(total["orders"], total["completed"]),
 		"achievement": _pct(total["value"], target),
+		"discount": total["discount"],
 	}
 	previous = {
 		"visits": total["cmp_planned"],
@@ -798,19 +812,22 @@ def _get_summary(ctx, comps) -> list[dict]:
 		"aov": ratio(total["cmp_value"], total["cmp_orders"]),
 		"conversion": _pct(total["cmp_orders"], total["cmp_completed"]),
 		"achievement": _pct(total["cmp_value"], cmp_target),
+		"discount": total["cmp_discount"],
 	}
 
+	# (key, label, datatype, is_rate, lower_is_better)
 	cards = (
-		("visits", _("Total Visits"), "Int", False),
-		("completion", _("Completion %"), "Percent", True),
-		("orders", _("Total Orders"), "Int", False),
-		("value", _("Total Value"), "Currency", False),
-		("aov", _("Avg Order Value"), "Currency", False),
-		("conversion", _("Conversion %"), "Percent", True),
-		("achievement", _("Achievement %"), "Percent", True),
+		("visits", _("Total Visits"), "Int", False, False),
+		("completion", _("Completion %"), "Percent", True, False),
+		("orders", _("Total Orders"), "Int", False, False),
+		("value", _("Total Value"), "Currency", False, False),
+		("aov", _("Avg Order Value"), "Currency", False, False),
+		("conversion", _("Conversion %"), "Percent", True, False),
+		("achievement", _("Achievement %"), "Percent", True, False),
+		("discount", _("Total Discount"), "Currency", False, True),
 	)
 	summary = []
-	for key, label, datatype, is_rate in cards:
+	for key, label, datatype, is_rate, lower_is_better in cards:
 		value, before = current[key], previous[key]
 		indicator, suffix = "Blue", ""
 		if ctx.compare and value is not None and before is not None:
@@ -820,7 +837,8 @@ def _get_summary(ctx, comps) -> list[dict]:
 				arrow = "▲" if change > 0 else "▼" if change < 0 else "■"
 				unit = _("pts") if is_rate else "%"
 				suffix = f" · {arrow} {abs(flt(change, 1))}{unit}"
-				indicator = "Green" if change > 0 else "Red" if change < 0 else "Blue"
+				better = change < 0 if lower_is_better else change > 0
+				indicator = "Blue" if not change else "Green" if better else "Red"
 		summary.append({"label": label + suffix, "value": flt(value, 2), "datatype": datatype, "indicator": indicator})
 	return summary
 

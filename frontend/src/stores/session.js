@@ -7,7 +7,7 @@ export const APP_ROLES = ['System Manager', 'Sales Manager', 'Field Sales Rep']
 
 export function redirectToLogin() {
   const target = window.location.pathname + window.location.search
-  window.location.href = `/login?redirect-to=${encodeURIComponent(target || '/fieldsales')}`
+  window.location.href = `/login?redirect-to=${encodeURIComponent(target || window.default_route || '/fieldsales')}`
 }
 
 /** Frappe sets this cookie on every response; "Guest" (or missing) means not signed in. */

@@ -4,7 +4,6 @@
       <template #meta><span class="text-ink-gray-5">{{ d.creation ? formatDateTime(d.creation) : '' }}</span></template>
       <template #actions>
         <Button v-if="referenceRoute" :label="`Open ${d.reference_doctype}`" icon-left="lucide-arrow-up-right" :route="referenceRoute" />
-        <Button variant="ghost" label="Open in Desk" icon-left="lucide-app-window" :href="`/app/sync-log/${encodeURIComponent(name)}`" />
       </template>
     </PageHeader>
 

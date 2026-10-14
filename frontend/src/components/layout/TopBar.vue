@@ -1,42 +1,16 @@
 <template>
-  <header class="flex h-topbar shrink-0 items-center gap-3 border-b border-desk-border bg-white px-4">
-    <Breadcrumbs :items="crumbs" class="min-w-0 flex-1" />
-
-    <Dropdown :options="userMenu" align="end">
-      <button class="flex items-center rounded-full focus:outline-none focus-visible:ring-2">
-        <Avatar :label="session.fullName" :image="session.userImage" size="md" />
-      </button>
-    </Dropdown>
+  <!-- Phones have no sidebar: search and the user menu live here. Desktop
+       shows no top bar — each page's heading already names it, so a duplicate
+       title strip would only repeat it. -->
+  <header class="flex h-topbar shrink-0 items-center gap-3 border-b border-outline-gray-2 bg-surface-base px-4 md:hidden">
+    <Button variant="ghost" icon="lucide-search" aria-label="Search" @click="$emit('open-search')" />
+    <UserMenu collapsed />
   </header>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { Avatar, Breadcrumbs, Dropdown } from 'frappe-ui'
-import { useSessionStore } from '@/stores/session'
+import { Button } from 'frappe-ui'
+import UserMenu from './UserMenu.vue'
 
-const route = useRoute()
-const router = useRouter()
-const session = useSessionStore()
-
-const crumbs = computed(() => {
-  const items = []
-  if (route.meta.parent) {
-    const parent = router.resolve({ name: route.meta.parent })
-    items.push({ label: parent.meta.title, route: { name: route.meta.parent } })
-  }
-  items.push({ label: route.meta.title || route.params.name || '', route: route.fullPath })
-  return items
-})
-
-const userMenu = computed(() => [
-  {
-    group: session.fullName,
-    options: [
-      { label: 'Switch to Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = '/app') },
-      { label: 'Logout', icon: 'lucide-log-out', onClick: () => session.logout() },
-    ],
-  },
-])
+defineEmits(['open-search'])
 </script>

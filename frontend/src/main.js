@@ -9,6 +9,11 @@ import router from './router'
 
 // createResource / createListResource / createDocumentResource all fetch through this.
 setConfig('resourceFetcher', frappeRequest)
+// frappe-ui sends the browser's hostname as X-Frappe-Site-Name, which names no site
+// behind a tunnel or proxy (ngrok, a custom domain). Send the site that served the page.
+setConfig('requestHeaders', () =>
+  window.site_name ? { 'X-Frappe-Site-Name': window.site_name } : {},
+)
 
 const app = createApp(App)
 app.use(FrappeUI)

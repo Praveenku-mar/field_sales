@@ -1,31 +1,36 @@
 <template>
-  <Sidebar v-model:collapsed="collapsed" width="224px" class="border-r border-desk-border">
+  <Sidebar v-model:collapsed="collapsed" width="224px" class="border-r border-outline-gray-2">
     <SidebarHeader
       title="Field Sales"
+      :subtitle="session.store.name || 'No store connected'"
       logo="/assets/field_sales/images/logo.svg"
-      :menu-items="appMenu"
       class="px-2"
     />
 
-    <div class="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
-      <SidebarItem label="Search" icon="lucide-search" @click="$emit('open-search')">
+    <div class="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-2">
+      <SidebarItem label="Search" icon="lucide-search" style="height: 2.5rem" @click="$emit('open-search')">
+        <template #prefix><span class="lucide-search size-6 text-ink-gray-6" /></template>
         <template #suffix>
           <kbd class="mr-2 text-xs text-ink-gray-4">Ctrl K</kbd>
         </template>
       </SidebarItem>
-      <SidebarItem label="Notification" icon="lucide-bell" href="/app/notification-log" target="_blank" />
+      <SidebarItem label="Notification" icon="lucide-bell" style="height: 2.5rem" href="/app/notification-log" target="_blank">
+        <template #prefix><span class="lucide-bell size-6 text-ink-gray-6" /></template>
+      </SidebarItem>
 
-      <div class="h-4 shrink-0" />
+      <div class="h-6 shrink-0" />
 
       <SidebarItem
         v-for="item in navItems"
         :key="item.label"
         :label="item.label"
-        :icon="item.icon"
+        style="height: 2.5rem"
         :route="item.route && { name: item.route }"
         :href="item.href"
         :active="isActive(item)"
       >
+        <template #prefix><span :class="[item.icon, 'size-6 text-ink-gray-6']" /></template>
+        <span class="truncate text-base leading-tighter">{{ item.label }}</span>
         <template v-if="countOf(item)" #suffix>
           <Tooltip :text="item.countTooltip" :disabled="!item.countTooltip">
             <span
@@ -37,39 +42,10 @@
           </Tooltip>
         </template>
       </SidebarItem>
-
-      <!-- Reports: a collapsible group of desk pages, as in the desk sidebar -->
-      <template v-if="reportLinks.length">
-        <SidebarItem
-          label="Reports"
-          icon="lucide-notepad-text"
-          :aria-expanded="reportsOpen"
-          @click="reportsOpen = !reportsOpen"
-        >
-          <template #suffix>
-            <span
-              class="lucide-chevron-down mr-2 size-4 text-ink-gray-5 transition-transform"
-              :class="!reportsOpen && '-rotate-90'"
-            />
-          </template>
-        </SidebarItem>
-        <div
-          v-show="reportsOpen"
-          class="flex flex-col gap-0.5"
-          :class="!collapsed && 'ml-4 border-l border-outline-gray-2 pl-2'"
-        >
-          <SidebarItem
-            v-for="link in reportLinks"
-            :key="link.href"
-            :label="link.label"
-            :icon="collapsed ? link.icon : undefined"
-            :href="link.href"
-          />
-        </div>
-      </template>
     </div>
 
-    <div class="px-2 pb-2">
+    <div class="flex flex-col gap-0.5 border-t border-outline-gray-2 p-2">
+      <UserMenu :collapsed="collapsed" />
       <SidebarCollapseToggle />
     </div>
   </Sidebar>
@@ -80,26 +56,15 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Sidebar, SidebarCollapseToggle, SidebarHeader, SidebarItem, Tooltip, createResource } from 'frappe-ui'
 import { useSessionStore } from '@/stores/session'
-import { NAV_ITEMS, REPORT_LINKS } from '@/utils/nav'
+import { NAV_ITEMS } from '@/utils/nav'
+import UserMenu from './UserMenu.vue'
 
 defineEmits(['open-search'])
 
 const session = useSessionStore()
 const route = useRoute()
 
-const allowed = (item) => !item.roles || session.hasRole(...item.roles)
-const navItems = computed(() => NAV_ITEMS.filter(allowed))
-const reportLinks = computed(() => REPORT_LINKS.filter(allowed))
-
-const appMenu = computed(() => [
-  {
-    group: session.store.name || 'No store connected',
-    options: [
-      { label: 'Switch to Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = '/app') },
-      { label: 'Logout', icon: 'lucide-log-out', onClick: () => session.logout() },
-    ],
-  },
-])
+const navItems = computed(() => NAV_ITEMS.filter((item) => !item.roles || session.hasRole(...item.roles)))
 
 const counts = createResource({
   url: 'field_sales.frontend_api.get_sidebar_counts',
@@ -115,23 +80,17 @@ function isActive(item) {
   return !!item.route && (route.name === item.route || route.meta.parent === item.route)
 }
 
-// Collapsed state and the Reports group survive reloads; they are per-browser preferences.
-const collapsed = usePreference('fs:sidebar-collapsed', false)
-const reportsOpen = usePreference('fs:sidebar-reports-open', true)
-
-function usePreference(key, fallback) {
-  let stored = null
+// Collapsed state survives reloads; it is a per-browser preference.
+let stored = null
+try {
+  stored = localStorage.getItem('fs:sidebar-collapsed')
+} catch {}
+const collapsed = ref(stored === '1')
+watch(collapsed, (v) => {
   try {
-    stored = localStorage.getItem(key)
+    localStorage.setItem('fs:sidebar-collapsed', v ? '1' : '0')
   } catch {}
-  const value = ref(stored === null ? fallback : stored === '1')
-  watch(value, (v) => {
-    try {
-      localStorage.setItem(key, v ? '1' : '0')
-    } catch {}
-  })
-  return value
-}
+})
 
 // Counts change as people work; refresh them when moving between pages.
 watch(() => route.name, () => counts.reload())

@@ -1,7 +1,8 @@
 <template>
-  <div>
+  <!-- Full height: the table fills what is left and scrolls inside its card -->
+  <div class="flex h-full flex-col">
     <PageHeader title="Sync Log" />
-    <div class="space-y-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
       <ListFilters v-model="model" search-placeholder="Search record, error, endpoint" :tabs="tabs" :fields="fields">
         <div v-if="reference" class="flex items-center gap-1.5 rounded-full bg-surface-gray-3 py-1 pl-3 pr-1.5 text-sm text-ink-gray-8">
           <span class="lucide-filter size-3.5 text-ink-gray-5" />
@@ -17,6 +18,7 @@
         :loading="list.list.loading"
         :total="count.data"
         :has-more="list.hasNextPage"
+        v-model:page-length="pageSize"
         :row-route="(row) => ({ name: 'SyncLogEntry', params: { name: row.name } })"
         empty-icon="lucide-scroll-text"
         empty-title="No sync log entries"
@@ -102,7 +104,7 @@ function buildFilters(m) {
   return filters
 }
 
-const { model, list, count } = useDocList({
+const { model, list, count, pageSize } = useDocList({
   doctype: 'Sync Log',
   fields: ['name', 'creation', 'platform', 'operation', 'reference_doctype', 'reference_name', 'status', 'attempt', 'duration_ms', 'error_code', 'error_message'],
   orderBy: 'creation desc',

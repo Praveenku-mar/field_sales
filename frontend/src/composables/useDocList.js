@@ -17,6 +17,8 @@ import { createListResource, createResource } from 'frappe-ui'
  * @param {(model: object) => Array} options.buildFilters  ListFilters model -> frappe filters
  * @param {string[]} [options.searchFields]  fields the search box matches (any of them)
  * @param {object} [options.initial]  initial ListFilters model
+ * @param {number} [options.pageLength]  default rows per page; the user's pick (DataTable's
+ *   page size selector) is remembered per doctype in this browser
  * @param {string|null} [options.preset]  dashboard preset key (e.g. from ?preset=)
  */
 export function useDocList({
@@ -31,6 +33,10 @@ export function useDocList({
 }) {
   // Replaced wholesale by ListFilters (v-model), so a ref, not a reactive.
   const model = ref({ search: '', ...initial })
+
+  // Rows per page. Browser storage is only a convenience: it may be unavailable.
+  const storageKey = `field_sales:page_length:${doctype}`
+  const pageSize = ref(readPageSize(storageKey) || pageLength)
 
   // Not cached: a cached resource is shared between page visits and keeps the
   // first visit's callbacks, so a second visit's list would never load.
@@ -50,7 +56,7 @@ export function useDocList({
     doctype,
     fields,
     orderBy,
-    pageLength,
+    pageLength: pageSize.value,
     filters: filters(),
     orFilters: orFilters(),
     auto: !preset,
@@ -73,6 +79,17 @@ export function useDocList({
 
   watch(model, refresh, { deep: true })
 
+  // A new page size reloads from the first row, as the desk list does.
+  watch(pageSize, (size) => {
+    list.pageLength = size
+    try {
+      localStorage.setItem(storageKey, String(size))
+    } catch {
+      // Not remembered; the list still works.
+    }
+    refresh()
+  })
+
   // Load the list once this page's preset filters have arrived.
   watch(
     () => presetResource.data,
@@ -86,5 +103,13 @@ export function useDocList({
     },
   )
 
-  return { model, list, count, refresh, presetLabel }
+  return { model, list, count, refresh, presetLabel, pageSize }
+}
+
+function readPageSize(key) {
+  try {
+    return Number(localStorage.getItem(key)) || null
+  } catch {
+    return null
+  }
 }

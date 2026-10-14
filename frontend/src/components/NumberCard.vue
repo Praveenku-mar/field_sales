@@ -15,6 +15,7 @@
       <span v-if="delta != null && !loading" class="text-xs font-medium" :class="delta >= 0 ? 'text-ink-green-7' : 'text-ink-red-5'">
         {{ delta >= 0 ? '▲' : '▼' }} {{ Math.abs(delta).toFixed(1) }}%
       </span>
+      <slot v-if="!loading" name="badge" />
     </div>
     <div v-if="caption" class="mt-1 truncate text-xs text-ink-gray-5">{{ caption }}</div>
   </component>

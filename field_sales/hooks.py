@@ -96,9 +96,12 @@ add_to_apps_screen = [
 	}
 ]
 
-# Desktop app (frontend/, built into public/frontend): every /fieldsales/* path serves www/fieldsales.html
+# Desktop app (frontend/, built into public/frontend): every /fieldsales/* path serves www/fieldsales.html.
+# /fs is a short alias for the same app; the router picks its base from the URL.
 website_route_rules = [
 	{"from_route": "/fieldsales/<path:app_path>", "to_route": "fieldsales"},
+	{"from_route": "/fs", "to_route": "fieldsales"},
+	{"from_route": "/fs/<path:app_path>", "to_route": "fieldsales"},
 ]
 
 # Generators
@@ -333,3 +336,10 @@ require_type_annotated_api_methods = True
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+
+# Fixtures
+# ------------
+# The Field Sales Order print format (created on the site, versioned here).
+fixtures = [
+	{"dt": "Print Format", "filters": [["name", "=", "Field Sales Order"]]},
+]

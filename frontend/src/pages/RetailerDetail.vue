@@ -3,6 +3,13 @@
     <PageHeader :title="d.retailer_name || name" :status="d.name ? statusLabel : null">
       <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
       <template #actions>
+        <Button
+          v-if="session.isManager"
+          label="Edit"
+          icon-left="lucide-pencil"
+          :disabled="!d.name"
+          @click="editOpen = true"
+        />
         <Button label="Plan Visit Today" icon-left="lucide-calendar-plus" variant="solid" :loading="planning" :disabled="!d.name || d.status === 'Inactive'" @click="planVisit" />
         <Dropdown :options="moreActions">
           <Button icon="lucide-more-horizontal" />
@@ -10,7 +17,7 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Retailer not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Customer not found" :description="errorText" /></div></div>
 
     <div v-else class="grid grid-cols-1 gap-5 px-5 pb-6 xl:grid-cols-3">
       <div class="space-y-5 xl:col-span-2">
@@ -59,6 +66,10 @@
         </SectionCard>
       </div>
     </div>
+
+    <!-- Managers only: session.isManager gates the Edit button above. -->
+    <RetailerDialog v-model="editOpen" :retailer="name" @updated="doc.reload()" />
+    <NewOrderDialog v-model="newOrderOpen" :retailer="name" />
   </div>
 </template>
 
@@ -73,6 +84,8 @@ import MapEmbed from '@/components/MapEmbed.vue'
 import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import RetailerDialog from '@/components/RetailerDialog.vue'
+import NewOrderDialog from '@/components/NewOrderDialog.vue'
 import { useSessionStore } from '@/stores/session'
 import { callMethod } from '@/utils/api'
 import { daysAgo, formatCurrency, formatDate, formatDateTime, orderStatus, relativeDay, today } from '@/utils/format'
@@ -164,11 +177,12 @@ const writePerm = createResource({
 const canWrite = computed(() => !!writePerm.data?.has_permission)
 
 const moreActions = computed(() => [
-  { label: 'New Order in Desk', icon: 'lucide-shopping-cart', onClick: () => (window.location.href = `/app/field-order/new?retailer=${encodeURIComponent(props.name)}`) },
-  { label: 'Open in Desk', icon: 'lucide-external-link', onClick: () => (window.location.href = `/app/retailer/${encodeURIComponent(props.name)}`) },
+  { label: 'New Order', icon: 'lucide-shopping-cart', onClick: () => (newOrderOpen.value = true) },
 ])
 
 const planning = ref(false)
+const editOpen = ref(false)
+const newOrderOpen = ref(false)
 async function planVisit() {
   planning.value = true
   try {

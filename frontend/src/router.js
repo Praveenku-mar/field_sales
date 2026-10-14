@@ -2,7 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { toast } from 'frappe-ui'
 import { useSessionStore } from '@/stores/session'
 
-// Sync Log and the Sales Rep list are manager pages, as in the desk.
+// Sync Log, Reports and Store Connection are manager pages. The Sales Rep list is open to
+// reps too: the server limits it to themselves and their team.
 const MANAGERS = ['System Manager', 'Sales Manager']
 
 // meta.title: page title and last breadcrumb; meta.parent: breadcrumb parent route name.
@@ -18,7 +19,7 @@ const routes = [
     path: '/retailers',
     name: 'Retailers',
     component: () => import('@/pages/Retailers.vue'),
-    meta: { title: 'Retailers' },
+    meta: { title: 'Customers' },
   },
   {
     path: '/retailers/:name',
@@ -70,7 +71,7 @@ const routes = [
     path: '/sales-reps',
     name: 'SalesReps',
     component: () => import('@/pages/SalesReps.vue'),
-    meta: { title: 'Sales Reps', roles: MANAGERS },
+    meta: { title: 'Sales Reps' },
   },
   {
     // A rep can open their own page (and their team's): the server limits which reps load.
@@ -97,13 +98,25 @@ const routes = [
     path: '/sync-failures',
     name: 'SyncFailures',
     component: () => import('@/pages/SyncFailures.vue'),
-    meta: { title: 'Sync Failures' },
+    meta: { title: 'Sync Failures', roles: MANAGERS },
   },
   {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/pages/Settings.vue'),
-    meta: { title: 'Settings', roles: ['System Manager'] },
+    meta: { title: 'Settings', roles: MANAGERS },
+  },
+  {
+    path: '/reports',
+    name: 'Reports',
+    component: () => import('@/pages/Reports.vue'),
+    meta: { title: 'Reports', roles: MANAGERS },
+  },
+  {
+    path: '/reports/rep-performance',
+    name: 'RepPerformance',
+    component: () => import('@/pages/RepPerformance.vue'),
+    meta: { title: 'Rep Performance', parent: 'Reports', roles: MANAGERS },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -113,8 +126,11 @@ const routes = [
   },
 ]
 
+// Served at /fieldsales and its alias /fs (hooks.website_route_rules): keep whichever was opened.
+export const APP_BASE = /^\/fs(\/|$)/.test(window.location.pathname) ? '/fs' : '/fieldsales'
+
 const router = createRouter({
-  history: createWebHistory('/fieldsales'),
+  history: createWebHistory(APP_BASE),
   routes,
 })
 

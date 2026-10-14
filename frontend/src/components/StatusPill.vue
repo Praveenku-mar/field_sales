@@ -1,5 +1,7 @@
 <template>
-  <Badge :label="label || status" :theme="theme" variant="subtle" size="md" />
+  <Badge :label="label || status" :theme="theme" variant="subtle" size="md">
+    <template v-if="icon" #prefix><span :class="[icon, 'size-3']" /></template>
+  </Badge>
 </template>
 
 <script setup>
@@ -9,6 +11,8 @@ import { Badge } from 'frappe-ui'
 const props = defineProps({
   status: { type: String, required: true },
   label: { type: String, default: null },
+  /** Icon class (e.g. lucide-circle-check) rendered before the label. */
+  icon: { type: String, default: null },
 })
 
 // Sync and document states used across Field Order, Retailer, Visit, Sales Rep and Sync Log.

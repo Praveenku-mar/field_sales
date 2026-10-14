@@ -6,7 +6,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import validate_email_address
+from frappe.utils import flt, validate_email_address
 
 from field_sales.permissions import get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
@@ -67,12 +67,14 @@ class Retailer(Document):
 
 	def _validate_coordinates(self):
 
-		if self.latitude and not (-90 <= self.latitude <= 90):
+		# flt(): the value may still be a string at validate time (e.g. set_value
+		# from a client form), and comparing a str with int raises.
+		if self.latitude and not (-90 <= flt(self.latitude) <= 90):
 			frappe.throw(
 				_("Latitude must be between -90 and 90. Received: {0}").format(self.latitude)
 			)
 
-		if self.longitude and not (-180 <= self.longitude <= 180):
+		if self.longitude and not (-180 <= flt(self.longitude) <= 180):
 			frappe.throw(
 				_("Longitude must be between -180 and 180. Received: {0}").format(self.longitude)
 			)

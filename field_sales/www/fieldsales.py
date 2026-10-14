@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Your Company and contributors
 # For license information, please see license.txt
 
-"""Serves the Field Sales desktop app (Vue SPA) at /fieldsales/*."""
+"""Serves the Field Sales desktop app (Vue SPA) at /fieldsales/* and its alias /fs/* (hooks.website_route_rules)."""
 
 from urllib.parse import quote
 
@@ -38,7 +38,7 @@ def get_boot() -> dict:
 			"frappe_version": frappe.__version__,
 			"site_name": frappe.local.site,
 			"csrf_token": frappe.sessions.get_csrf_token(),
-			"default_route": "/fieldsales",
+			"default_route": _app_base(),
 			"sysdefaults": frappe.defaults.get_defaults(),
 		}
 	)
@@ -55,6 +55,12 @@ def get_context_for_dev():
 	if not frappe.conf.developer_mode:
 		frappe.throw(_("This method is only meant for developer mode"))
 	return get_boot()
+
+
+def _app_base() -> str:
+	"""The path the app was opened under: /fs or /fieldsales."""
+	path = frappe.request.path if frappe.request else ""
+	return "/fs" if path == "/fs" or path.startswith("/fs/") else "/fieldsales"
 
 
 def _redirect(location: str):

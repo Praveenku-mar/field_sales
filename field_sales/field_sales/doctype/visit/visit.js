@@ -48,7 +48,9 @@ function set_new_visit_defaults(frm) {
 function add_check_in_buttons(frm) {
 	if (frm.is_new()) return;
 
-	if (frm.doc.status === "Planned") {
+	// Only the assigned rep checks in (the server enforces it too). A Sales Rep is
+	// named after its user, so the rep's name is the user's email.
+	if (frm.doc.status === "Planned" && frm.doc.sales_rep === frappe.session.user) {
 		frm.add_custom_button(__("Check In"), () =>
 			check_in_or_out(frm, "field_sales.api.check_in", __("Checking in…"))
 		).addClass("btn-primary");

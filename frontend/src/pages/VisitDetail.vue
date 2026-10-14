@@ -10,7 +10,7 @@
           :disabled="!d.name"
           @click="editOpen = true"
         />
-        <Button v-if="d.status === 'Planned'" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
+        <Button v-if="d.status === 'Planned' && isOwnVisit" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
         <template v-if="d.status === 'In Progress'">
           <Button label="New Order" icon-left="lucide-shopping-cart" @click="newOrderOpen = true" />
           <Button label="Check Out" icon-left="lucide-log-out" variant="solid" :loading="busy" @click="startCheckOut" />
@@ -110,6 +110,9 @@ import { callMethod, getPosition } from '@/utils/api'
 import { formatCurrency, formatDate, formatTime, plural, today } from '@/utils/format'
 
 const session = useSessionStore()
+// Only the assigned rep checks in (the server enforces it too). A Sales Rep is named
+// after its user, so the rep's name is the user's email.
+const isOwnVisit = computed(() => !!d.value.sales_rep && d.value.sales_rep === session.user)
 const editOpen = ref(false)
 const newOrderOpen = ref(false)
 

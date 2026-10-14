@@ -261,7 +261,7 @@ def check_in(visit: str, latitude: float, longitude: float, accuracy: float | No
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)
-	_check_visit_access(doc)
+	_check_own_visit(doc)
 	if doc.status != "Planned":
 		frappe.throw(_("Only a Planned visit can be checked in to. This visit is {0}.").format(_(doc.status)))
 
@@ -646,11 +646,24 @@ def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]
 	return latitude, longitude, max(flt(accuracy), 0)
 
 
+def _check_own_visit(doc) -> None:
+	"""
+	Only the visit's assigned rep checks in: the check-in records where that rep is, so
+	nobody else (a manager or System Manager included) can do it for them.
+	"""
+	rep = frappe.db.get_value("Sales Rep", doc.sales_rep, ["user", "full_name"], as_dict=True) or frappe._dict()
+	if not rep.user or rep.user != frappe.session.user:
+		frappe.throw(
+			_("Only {0}, the rep assigned to this visit, can check in.").format(rep.full_name or doc.sales_rep),
+			frappe.PermissionError,
+		)
+
+
 def _check_visit_access(doc) -> None:
-	"""Only the visit's own sales rep, or a manager over that rep, may check in / out."""
+	"""Only the visit's own sales rep, or a manager over that rep, may check out."""
 	if not _is_rep_or_their_manager(doc.sales_rep):
 		frappe.throw(
-			_("Only the visit's sales rep or their Sales Manager can check in or out."),
+			_("Only the visit's sales rep or their Sales Manager can check out."),
 			frappe.PermissionError,
 		)
 

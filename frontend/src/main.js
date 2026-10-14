@@ -2,10 +2,11 @@ import './index.css'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { FrappeUI, setConfig, frappeRequest } from 'frappe-ui'
+import { FrappeUI, setConfig, frappeRequest, toast } from 'frappe-ui'
 
 import App from './App.vue'
 import router from './router'
+import './composables/useInstallPrompt' // listens for beforeinstallprompt from page load
 
 // createResource / createListResource / createDocumentResource all fetch through this.
 setConfig('resourceFetcher', frappeRequest)
@@ -32,6 +33,20 @@ async function start() {
   // only do it once the boot values (csrf_token) are on window.
   app.use(router)
   app.mount('#app')
+  registerServiceWorker()
+}
+
+// Precaches the built assets and makes the app installable (see src/sw.js).
+function registerServiceWorker() {
+  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return
+  // Only an update replaces an existing controller; the first install does not.
+  const hadController = !!navigator.serviceWorker.controller
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) toast.success('App updated')
+  })
+  navigator.serviceWorker.register('/assets/field_sales/frontend/sw.js').catch((error) => {
+    console.error('Service worker registration failed', error)
+  })
 }
 
 start()

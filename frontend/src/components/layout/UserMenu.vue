@@ -15,11 +15,18 @@
       </template>
     </button>
   </Dropdown>
+
+  <Dialog v-model="iosHintOpen" title="Add to Home Screen" size="sm">
+    <p class="text-p-base text-ink-gray-7">
+      In Safari, tap the Share button, then choose Add to Home Screen to install Field Sales.
+    </p>
+  </Dialog>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { Avatar, Dropdown } from 'frappe-ui'
+import { computed, ref } from 'vue'
+import { Avatar, Dialog, Dropdown } from 'frappe-ui'
+import { useInstallPrompt } from '@/composables/useInstallPrompt'
 import { useSessionStore } from '@/stores/session'
 
 defineProps({
@@ -27,14 +34,18 @@ defineProps({
 })
 
 const session = useSessionStore()
+const { canInstall, showIosHint, install } = useInstallPrompt()
+const iosHintOpen = ref(false)
 
 const options = computed(() => [
   {
     group: session.user,
     options: [
+      canInstall.value && { label: 'Install app', icon: 'lucide-download', onClick: install },
+      showIosHint.value && { label: 'Add to Home Screen', icon: 'lucide-download', onClick: () => (iosHintOpen.value = true) },
       { label: 'Switch to Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = '/app') },
       { label: 'Log out', icon: 'lucide-log-out', onClick: () => session.logout() },
-    ],
+    ].filter(Boolean),
   },
 ])
 </script>

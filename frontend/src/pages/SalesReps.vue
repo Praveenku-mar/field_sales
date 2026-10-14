@@ -1,11 +1,12 @@
 <template>
-  <div>
+  <!-- Full height: the table fills what is left and scrolls inside its card -->
+  <div class="flex h-full flex-col">
     <PageHeader title="Sales Reps">
       <template #actions>
-        <Button v-if="session.isManager" label="New Sales Rep" icon-left="lucide-plus" variant="solid" href="/app/sales-rep/new" />
+        <Button v-if="session.isManager" label="New Sales Rep" icon-left="lucide-plus" variant="solid" @click="newRepOpen = true" />
       </template>
     </PageHeader>
-    <div class="space-y-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
       <ListFilters v-model="model" search-placeholder="Search name, email, territory" :tabs="tabs" :fields="fields" />
       <DataTable
         :columns="columns"
@@ -13,6 +14,7 @@
         :loading="list.list.loading"
         :total="count.data"
         :has-more="list.hasNextPage"
+        v-model:page-length="pageSize"
         :row-route="(row) => ({ name: 'SalesRep', params: { name: row.name } })"
         empty-icon="lucide-user-round"
         empty-title="No sales reps found"
@@ -39,11 +41,16 @@
         </template>
       </DataTable>
     </div>
+    <NewSalesRepDialog v-model="newRepOpen" />
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { Avatar, Button, createResource } from 'frappe-ui'
+import NewSalesRepDialog from '@/components/NewSalesRepDialog.vue'
+
+const newRepOpen = ref(false)
 import PageHeader from '@/components/PageHeader.vue'
 import ListFilters from '@/components/ListFilters.vue'
 import DataTable from '@/components/DataTable.vue'
@@ -80,7 +87,7 @@ function buildFilters(m) {
   return filters
 }
 
-const { model, list, count } = useDocList({
+const { model, list, count, pageSize } = useDocList({
   doctype: 'Sales Rep',
   fields: ['name', 'full_name', 'user.user_image as user_image', 'territory', 'reports_to', 'reports_to.full_name as reports_to_name', 'mobile', 'monthly_target', 'active'],
   orderBy: 'full_name asc',

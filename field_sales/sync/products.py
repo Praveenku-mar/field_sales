@@ -18,6 +18,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 
 from field_sales.connectors import get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
+from field_sales.sync.stock import get_sell_locations, set_location_stock
 
 JOB_ID = "field_sales:product_sync"
 REALTIME_EVENT = "product_sync_done"
@@ -55,7 +56,7 @@ def scheduled_sync():
 	at least ``product_sync_frequency`` has passed since the last product sync
 	activity (manual or scheduled, successful or not).
 	"""
-	settings = frappe.db.get_singles_dict("Store Connection")
+	settings = frappe.db.get_singles_dict("Store Connection", cast=True)
 	if not settings.enabled or not settings.default_location_id:
 		return
 
@@ -78,7 +79,10 @@ def sync_products() -> dict:
 	Pull every product variant from the store into Platform Product.
 
 	- Upserts by (platform, external_variant_id); unchanged rows (same
-	  ``sync_hash``) are not saved.
+	  ``sync_hash``) are not saved. ``available_qty`` (and so the hash) is the
+	  default location's stock.
+- Fetches stock at every ``Sell from here`` location and saves it as Product
+	  Stock rows (tracked products only; untracked ones have no stock rows).
 	- Commits after each page, so a failure keeps the pages already synced.
 	- Once all pages are in, marks this platform's products that the store no
 	  longer returned as Archived (skipped if the run fails part-way).
@@ -107,7 +111,8 @@ def sync_products() -> dict:
 			tracked = [i["external_inventory_id"] for i in items if i["track_inventory"] and i["external_inventory_id"]]
 			stock = conn.get_stock(tracked, location_id) if tracked else {}
 
-			_upsert_page(platform, location_id, items, stock, seen, summary)
+			names = _upsert_page(platform, location_id, items, stock, seen, summary)
+			_save_location_stock(conn, location_id, items, names, stock)
 			frappe.db.commit()
 
 			cursor = page["next_cursor"]
@@ -147,8 +152,49 @@ def sync_products() -> dict:
 	return summary
 
 
-def _upsert_page(platform: str, location_id: str, items: list[dict], stock: dict, seen: set, summary: dict):
-	"""Create or update the Platform Products for one page of normalized items."""
+def sync_one_product(conn, external_product_id: str) -> dict:
+	"""
+	Refresh one product's variants from the store (used by the product webhook).
+
+	Upserts the variants the store returns; variants of this product that it no
+	longer returns (or all of them, if the product is gone) are marked Archived.
+	Does not commit.
+
+	:param conn: Connector from ``get_connector()``.
+	:param external_product_id: Plain platform product id.
+	:return: ``{"created": n, "updated": n, "unchanged": n, "archived": n}``
+	"""
+	settings = conn.settings
+	platform = settings.platform
+	location_id = settings.default_location_id
+	if not location_id:
+		frappe.throw(_("Set a Default Location on Store Connection before syncing products"))
+
+	items = conn.get_product(external_product_id)
+	tracked = [i["external_inventory_id"] for i in items if i["track_inventory"] and i["external_inventory_id"]]
+	stock = conn.get_stock(tracked, location_id) if tracked else {}
+
+	summary = {"created": 0, "updated": 0, "unchanged": 0, "archived": 0}
+	seen: set[str] = set()
+	if items:
+		names = _upsert_page(platform, location_id, items, stock, seen, summary)
+		_save_location_stock(conn, location_id, items, names, stock)
+
+	filters = {"platform": platform, "external_product_id": external_product_id, "status": ("!=", "Archived")}
+	if seen:
+		filters["name"] = ("not in", list(seen))
+	summary["archived"] = _archive(frappe.get_all("Platform Product", filters=filters, pluck="name"))
+	return summary
+
+
+def _upsert_page(
+	platform: str, location_id: str, items: list[dict], stock: dict, seen: set, summary: dict
+) -> dict[str, str]:
+	"""
+	Create or update the Platform Products for one page of normalized items.
+
+	:return: ``{external_variant_id: Platform Product name}`` for every item on the page, changed or not.
+	"""
 	variant_ids = [i["external_variant_id"] for i in items]
 	existing = {
 		r.external_variant_id: r
@@ -159,6 +205,7 @@ def _upsert_page(platform: str, location_id: str, items: list[dict], stock: dict
 		)
 	} if variant_ids else {}
 	now = now_datetime()
+	names = {}
 
 	for item in items:
 		values = {FIELD_MAP.get(key, key): value for key, value in item.items()}
@@ -174,6 +221,7 @@ def _upsert_page(platform: str, location_id: str, items: list[dict], stock: dict
 		row = existing.get(item["external_variant_id"])
 		if row:
 			seen.add(row.name)
+			names[item["external_variant_id"]] = row.name
 			if row.sync_hash == sync_hash:
 				summary["unchanged"] += 1
 				continue
@@ -188,7 +236,41 @@ def _upsert_page(platform: str, location_id: str, items: list[dict], stock: dict
 			doc = frappe.get_doc({"doctype": "Platform Product", **values})
 			doc.insert(ignore_permissions=True)
 			seen.add(doc.name)
+			names[item["external_variant_id"]] = doc.name
 			summary["created"] += 1
+
+	return names
+
+
+def _save_location_stock(conn, default_id: str, items: list[dict], names: dict, default_stock: dict):
+	"""
+	Save Product Stock rows for every sell location of one page of items.
+
+	The default location reuses the stock already fetched for the page (the
+	Platform Product itself was written by ``_upsert_page``); every other
+	location costs one more store call per page.
+
+	:param names: ``{external_variant_id: Platform Product name}`` from ``_upsert_page``.
+	:param default_stock: ``{inventory_id: qty}`` at the default location.
+	"""
+	tracked = [i for i in items if i["track_inventory"] and i["external_inventory_id"]]
+	if not tracked:
+		return
+	inventory_ids = [i["external_inventory_id"] for i in tracked]
+
+	now = now_datetime()
+	for location in get_sell_locations():
+		is_default = location["location_id"] == default_id
+		stock = default_stock if is_default else conn.get_stock(inventory_ids, location["location_id"])
+		for item in tracked:
+			set_location_stock(
+				names[item["external_variant_id"]],
+				location["location_id"],
+				stock.get(item["external_inventory_id"], 0.0),
+				location["location_name"],
+				now,
+				update_product=False,
+			)
 
 
 def _archive_missing(platform: str, seen: set) -> int:
@@ -197,16 +279,20 @@ def _archive_missing(platform: str, seen: set) -> int:
 	if seen:
 		filters["name"] = ("not in", list(seen))
 
-	stale = frappe.get_all("Platform Product", filters=filters, pluck="name")
-	if stale:
+	return _archive(frappe.get_all("Platform Product", filters=filters, pluck="name"))
+
+
+def _archive(names: list[str]) -> int:
+	"""Mark the given Platform Products Archived; returns how many."""
+	if names:
 		# Clearing sync_hash makes a product that comes back on the store count
 		# as changed, so the next run saves it and restores its real status.
 		frappe.db.set_value(
 			"Platform Product",
-			{"name": ("in", stale)},
+			{"name": ("in", names)},
 			{"status": "Archived", "sync_hash": None, "last_synced": now_datetime()},
 		)
-	return len(stale)
+	return len(names)
 
 
 def _hash(values: dict) -> str:

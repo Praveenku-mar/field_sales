@@ -3,10 +3,14 @@
 
 """Whitelisted endpoints used by the Store Connection, Retailer, Visit and Field Order forms and the Platform Product view."""
 
+
 import frappe
 from frappe import _
+from frappe.auth import MAX_PASSWORD_SIZE
+from frappe.rate_limiter import rate_limit
 from frappe.query_builder.functions import Count, Sum
 from frappe.utils import flt, get_link_to_form, now_datetime
+from frappe.utils.password import check_password
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
@@ -15,6 +19,8 @@ from field_sales.sync.customers import push_retailers
 from field_sales.sync.notify import MONITOR_ROLES
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.products import enqueue_sync
+from field_sales.sync.stock import fetch_live_stock
+from field_sales.sync.stock import get_sell_locations as _get_sell_locations
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
 
 VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
@@ -27,10 +33,11 @@ def test_connection() -> dict:
 
 	result = get_connector().test_connection()
 	status = "Success" if result.get("ok") else f"Failed: {result.get('message')}"
-	frappe.db.set_single_value(
-		"Store Connection",
-		{"last_test_status": status[:140], "last_tested_on": now_datetime()},
-	)
+	values = {"last_test_status": status[:140], "last_tested_on": now_datetime()}
+	if result.get("ok") and result.get("shop_name"):
+		# Kept for the page header pill; left untouched on a failure.
+		values["shop_name"] = result["shop_name"][:140]
+	frappe.db.set_single_value("Store Connection", values)
 	return result
 
 
@@ -45,6 +52,17 @@ def get_locations() -> list[dict]:
 		frappe.throw(e.message, title=_("Could not fetch locations"))
 
 
+@frappe.whitelist()
+def get_sell_locations() -> list[dict]:
+	"""
+	Locations a rep can sell from, default first (for the app's order and filter pickers).
+
+	:return: ``[{"location_id", "location_name", "is_default"}]``
+	"""
+	frappe.has_permission("Field Order", "read", throw=True)
+	return _get_sell_locations()
+
+
 @frappe.whitelist(methods=["POST"])
 def enqueue_product_sync() -> dict:
 
@@ -57,6 +75,169 @@ def enqueue_product_sync() -> dict:
 	if enqueue_sync():
 		return {"queued": True, "message": _("Sync started")}
 	return {"queued": False, "message": _("A product sync is already running")}
+
+
+@frappe.whitelist(methods=["POST"])
+def create_order(
+	retailer: str, sales_rep: str, order_date: str, visit: str | None = None, location_id: str | None = None
+) -> dict:
+	"""
+	Start a draft Field Order from the app: header only, no items yet — they
+	are added on the order page. (``items`` is mandatory on the doctype, so
+	the insert skips the mandatory check for the empty table.)
+
+	:param location_id: Store location to sell from; the default location when omitted.
+	"""
+	frappe.has_permission("Field Order", "create", throw=True)
+	frappe.has_permission("Retailer", "read", retailer, throw=True)
+
+	doc = frappe.new_doc("Field Order")
+	doc.update(
+		{
+			"retailer": retailer,
+			"sales_rep": sales_rep,
+			"order_date": order_date,
+			"visit": visit or None,
+			"location_id": location_id or None,
+		}
+	)
+	doc.flags.ignore_mandatory = True
+	doc.insert()
+	return doc.as_dict()
+
+
+@frappe.whitelist()
+def get_user_for_sales_rep(email: str) -> dict:
+	"""
+	Whether ``email`` is already a user (and already a Sales Rep), for the app's New Sales Rep dialog.
+
+	:return: ``{"exists", "full_name", "sales_rep"}``
+	"""
+	frappe.has_permission("Sales Rep", "create", throw=True)
+	email = (email or "").strip().lower()
+	user = frappe.db.get_value("User", email, ["name", "full_name"], as_dict=True)
+	return {
+		"exists": bool(user),
+		"full_name": user.full_name if user else None,
+		"sales_rep": frappe.db.exists("Sales Rep", email) if user else None,
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def create_sales_rep(
+	user: str,
+	full_name: str | None = None,
+	mobile: str | None = None,
+	territory: str | None = None,
+	reports_to: str | None = None,
+	monthly_target: float | None = None,
+	max_discount_pct: float | None = None,
+	send_welcome_email: int = 1,
+) -> dict:
+	"""
+	Create a Sales Rep from the app, creating its User first when ``user`` is a new email.
+
+	A new user gets only the Field Sales Rep role. Sales Managers cannot create users in the
+	desk, so that insert skips User permissions; it runs only for someone who may create a
+	Sales Rep, and never changes an existing user. Both inserts share the request's
+	transaction: if the Sales Rep fails, the user is rolled back too.
+
+	:return: ``{"name", "user_created"}``
+	"""
+	frappe.has_permission("Sales Rep", "create", throw=True)
+
+	user = (user or "").strip().lower()
+	frappe.utils.validate_email_address(user, throw=True)
+	if frappe.db.exists("Sales Rep", user):
+		frappe.throw(_("{0} is already a Sales Rep").format(user), frappe.DuplicateEntryError)
+
+	# new_doc, not get_doc: the hierarchy hook below must see a new document.
+	rep = frappe.new_doc("Sales Rep")
+	rep.update(
+		{
+			"user": user,
+			"full_name": (full_name or "").strip() or None,
+			"mobile": mobile or None,
+			"territory": territory or None,
+			"reports_to": reports_to or None,
+			"monthly_target": flt(monthly_target) if monthly_target not in (None, "") else None,
+			"max_discount_pct": flt(max_discount_pct) if max_discount_pct not in (None, "") else None,
+			"active": 1,
+		}
+	)
+	# The hierarchy rule (a manager adds reps under themselves or their team) is checked
+	# before any user is created.
+	if not frappe.has_permission("Sales Rep", "create", doc=rep):
+		frappe.throw(
+			_("Set Reports To: you can add reps only under yourself or someone in your team"),
+			frappe.PermissionError,
+		)
+
+	user_created = False
+	if not frappe.db.exists("User", user):
+		if not (full_name or "").strip():
+			frappe.throw(_("Full Name is required to create the user {0}").format(user))
+		first_name, _sep, last_name = full_name.strip().partition(" ")
+		new_user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": user,
+				"first_name": first_name,
+				"last_name": last_name.strip() or None,
+				"mobile_no": mobile or None,
+				"user_type": "System User",
+				"send_welcome_email": frappe.utils.cint(send_welcome_email),
+				"roles": [{"role": "Field Sales Rep"}],
+			}
+		)
+		new_user.insert(ignore_permissions=True)
+		user_created = True
+
+	rep.insert()
+	return {"name": rep.name, "user_created": user_created}
+
+
+@frappe.whitelist(methods=["POST"])
+@rate_limit(limit=10, seconds=60 * 60, user_based=True, ip_based=False)
+def set_sales_rep_password(
+	sales_rep: str, new_password: str, logout_all_sessions: int = 1, old_password: str | None = None
+) -> None:
+	"""
+	Set a new password for a Sales Rep's user, from the app's Sales Rep page.
+
+	- Your own (any rep): needs ``old_password``. Signing out keeps this session.
+	- Someone else's: whoever may edit that Sales Rep (managers, within their hierarchy).
+	  Only a System Manager may reset a manager's or System Manager's password.
+
+	Nobody may reset Administrator's here. The password policy still applies (User.validate).
+	Rate limited per user, since a wrong ``old_password`` is a password guess.
+	"""
+	rep = frappe.get_doc("Sales Rep", sales_rep)
+	user = rep.user
+
+	if user == frappe.session.user:
+		rep.check_permission("read")
+		try:
+			check_password(user, old_password or "", delete_tracker_cache=False)
+		except frappe.AuthenticationError:
+			frappe.throw(_("Current password is incorrect"), frappe.AuthenticationError)
+		if old_password == new_password:
+			frappe.throw(_("The new password must be different from the current one"))
+	else:
+		rep.check_permission("write")
+		if user in ("Administrator", "Guest"):
+			frappe.throw(_("The password of {0} cannot be changed here").format(user), frappe.PermissionError)
+		if VISIT_MANAGER_ROLES & set(frappe.get_roles(user)) and not is_admin():
+			frappe.throw(_("Only a System Manager can change a manager's password"), frappe.PermissionError)
+
+	if not new_password or len(new_password) > MAX_PASSWORD_SIZE:
+		frappe.throw(_("Enter a valid new password"))
+
+	user_doc = frappe.get_doc("User", user)
+	user_doc.new_password = new_password
+	user_doc.logout_all_sessions = frappe.utils.cint(logout_all_sessions)
+	# Reps and Sales Managers cannot write User in the desk; the checks above stand in for that.
+	user_doc.save(ignore_permissions=True)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -204,11 +385,31 @@ def check_out(
 
 
 @frappe.whitelist(methods=["POST"])
+def get_live_stock(products: str | list, location_id: str | None = None) -> dict:
+	"""
+	Current store stock at a location for products being added to an order in the app.
+
+	Also saved on the Platform Products. Only tracked products are returned;
+	untracked ones are always available.
+
+	:param products: Platform Product names (list or JSON list).
+	:param location_id: The order's location; the default location when omitted.
+	:return: ``{product: available_qty}``
+	"""
+	frappe.has_permission("Platform Product", "read", throw=True)
+	products = frappe.parse_json(products) if isinstance(products, str) else products
+	try:
+		return fetch_live_stock(products or [], location_id or None)
+	except ConnectorError as e:
+		frappe.throw(e.message, title=_("Could not fetch live stock"))
+
+
+@frappe.whitelist(methods=["POST"])
 def refresh_stock(field_order: str) -> list[dict]:
 	"""
-	Fetch live stock for a draft Field Order's items and save it.
+	Fetch live stock for a draft Field Order's items at the order's location and save it.
 
-	Updates each row's available_qty and the Platform Product's, then saves the
+	Updates each row's available_qty and the location's Product Stock, then saves the
 	order so stock_warning is recalculated ("Refresh Stock", and before submit).
 	"""
 	doc = frappe.get_doc("Field Order", field_order)
@@ -216,34 +417,14 @@ def refresh_stock(field_order: str) -> list[dict]:
 	if doc.docstatus != 0:
 		frappe.throw(_("Stock can only be refreshed on a draft Field Order"))
 
-	location_id = frappe.db.get_single_value("Store Connection", "default_location_id")
-	if not location_id:
-		frappe.throw(_("Set a Default Location on Store Connection before checking stock"))
+	try:
+		live = fetch_live_stock([row.product for row in doc.items], doc.location_id)
+	except ConnectorError as e:
+		frappe.throw(e.message, title=_("Could not fetch live stock"))
 
-	products = frappe.get_all(
-		"Platform Product",
-		filters={"name": ("in", [row.product for row in doc.items if row.product])},
-		fields=["name", "external_inventory_id", "track_inventory"],
-	)
-	# Untracked products are always available; only tracked ones are worth a store call.
-	inventory_ids = {p.name: p.external_inventory_id for p in products if p.track_inventory and p.external_inventory_id}
-
-	if inventory_ids:
-		try:
-			stock = get_connector().get_stock(list(set(inventory_ids.values())), location_id)
-		except ConnectorError as e:
-			frappe.throw(e.message, title=_("Could not fetch live stock"))
-
-		for product, inventory_id in inventory_ids.items():
-			frappe.db.set_value(
-				"Platform Product",
-				product,
-				{"available_qty": stock.get(inventory_id, 0), "location_id": location_id},
-				update_modified=False,
-			)
-		for row in doc.items:
-			if row.product in inventory_ids:
-				row.available_qty = stock.get(inventory_ids[row.product], 0)
+	for row in doc.items:
+		if row.product in live:
+			row.available_qty = live[row.product]
 
 	doc.save()  # validate() recalculates stock_warning
 	return [

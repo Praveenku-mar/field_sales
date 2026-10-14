@@ -1,11 +1,22 @@
 <template>
-  <div>
+  <!-- Full height: the table fills what is left and scrolls inside its card -->
+  <div class="flex h-full flex-col">
     <PageHeader title="Products">
       <template #meta>
         <span class="text-ink-gray-5">Synced from the store</span>
       </template>
+      <template #actions>
+        <Button
+          v-if="session.isManager"
+          variant="solid"
+          label="Sync Products"
+          icon-left="lucide-refresh-cw"
+          :loading="syncing"
+          @click="syncProducts"
+        />
+      </template>
     </PageHeader>
-    <div class="space-y-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
       <ListFilters v-model="model" search-placeholder="Search title or SKU" :tabs="tabs">
         <PresetChip :label="presetLabel" />
       </ListFilters>
@@ -15,6 +26,7 @@
         :loading="list.list.loading"
         :total="count.data"
         :has-more="list.hasNextPage"
+        v-model:page-length="pageSize"
         :row-route="(row) => ({ name: 'Product', params: { name: row.name } })"
         empty-icon="lucide-package"
         empty-title="No products found"
@@ -43,7 +55,9 @@
 </template>
 
 <script setup>
+import { onBeforeUnmount, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { Button, call, toast } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ListFilters from '@/components/ListFilters.vue'
 import PresetChip from '@/components/PresetChip.vue'
@@ -51,6 +65,8 @@ import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import { useDocList } from '@/composables/useDocList'
 import { formatCurrency, formatNumber } from '@/utils/format'
+import { callMethod } from '@/utils/api'
+import { useSessionStore } from '@/stores/session'
 
 const LOW_STOCK = 5
 const tabs = [
@@ -78,7 +94,7 @@ function buildFilters(m) {
 }
 
 const route = useRoute()
-const { model, list, count, presetLabel } = useDocList({
+const { model, list, count, refresh, presetLabel, pageSize } = useDocList({
   doctype: 'Platform Product',
   fields: ['name', 'product_title', 'variant_title', 'collection', 'sku', 'price', 'available_qty', 'track_inventory', 'status', 'image'],
   orderBy: 'product_title asc',
@@ -93,4 +109,67 @@ const { model, list, count, presetLabel } = useDocList({
 function stockClass(qty) {
   return qty <= 0 ? 'font-medium text-ink-red-5' : qty <= LOW_STOCK ? 'text-ink-amber-7' : 'text-ink-green-7'
 }
+
+// ---------------------------------------------------------------- sync
+
+// Same as the desk list's Sync Products (managers only, enforced on the server too).
+// The app has no realtime connection, so the run's own "Product Sync" Sync Log is
+// polled to tell when it has finished.
+const session = useSessionStore()
+const syncing = ref(false)
+const POLL_MS = 4000
+const POLL_LIMIT_MS = 25 * 60 * 1000 // the job's own timeout
+let pollTimer = null
+
+// The newest "Product Sync" log, or null.
+async function lastSyncLog() {
+  const [log] = await call('frappe.client.get_list', {
+    doctype: 'Sync Log',
+    fields: ['name', 'status', 'response_payload', 'error_message', 'creation'],
+    filters: { operation: 'Product Sync' },
+    order_by: 'creation desc',
+    limit_page_length: 1,
+  })
+  return log || null
+}
+
+async function syncProducts() {
+  syncing.value = true
+  try {
+    // The run is done when a log newer than this one appears (both are server times).
+    const before = await lastSyncLog()
+    const result = await callMethod('field_sales.api.enqueue_product_sync')
+    toast[result.queued ? 'info' : 'warning'](result.message)
+    waitForSync(before?.creation || null, Date.now())
+  } catch {
+    // callMethod already toasted the error (e.g. no Default Location).
+    syncing.value = false
+  }
+}
+
+function waitForSync(after, pollStart) {
+  pollTimer = setTimeout(async () => {
+    try {
+      const log = await lastSyncLog()
+      if (log && (!after || log.creation > after)) return finishSync(log)
+    } catch {
+      // A failed poll is retried on the next tick.
+    }
+    if (Date.now() - pollStart < POLL_LIMIT_MS) waitForSync(after, pollStart)
+    else syncing.value = false
+  }, POLL_MS)
+}
+
+function finishSync(log) {
+  syncing.value = false
+  if (log.status === 'Success') {
+    const s = JSON.parse(log.response_payload || '{}')
+    toast.success(`Product sync done: ${s.created ?? 0} created, ${s.updated ?? 0} updated, ${s.unchanged ?? 0} unchanged, ${s.archived ?? 0} archived`)
+  } else {
+    toast.error(`Product sync failed: ${log.error_message || 'see Sync Log'}`)
+  }
+  refresh()
+}
+
+onBeforeUnmount(() => clearTimeout(pollTimer))
 </script>

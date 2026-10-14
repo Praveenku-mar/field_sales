@@ -23,15 +23,18 @@ CONNECTORS: dict[str, type[BaseConnector]] = {
 __all__ = ["BaseConnector", "ConnectorError", "get_connector"]
 
 
-def get_connector() -> BaseConnector:
+def get_connector(require_enabled: bool = True) -> BaseConnector:
 	"""
 	Return a connector for the platform configured on Store Connection.
 
 	Raises a ``frappe.ValidationError`` if the connection is disabled or the
 	platform has no connector yet.
+
+	:param require_enabled: Pass ``False`` to skip the disabled check, for callers
+		(webhook receiver) that decide for themselves what a disabled connection means.
 	"""
 	settings = frappe.get_single("Store Connection")
-	if not settings.enabled:
+	if require_enabled and not settings.enabled:
 		frappe.throw(_("Store Connection is disabled"))
 
 	connector_cls = CONNECTORS.get(settings.platform)

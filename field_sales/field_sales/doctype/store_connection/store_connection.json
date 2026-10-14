@@ -37,10 +37,13 @@
   "default_location_name",
   "order_mode",
   "product_sync_frequency",
+  "locations_section",
+  "locations",
   "status_section",
   "last_test_status",
   "col_break_status",
-  "last_tested_on"
+  "last_tested_on",
+  "shop_name"
  ],
  "fields": [
   {
@@ -243,6 +246,25 @@
    "fieldtype": "Datetime",
    "label": "Last Tested On",
    "read_only": 1
+  },
+  {
+   "description": "Store name from the last successful Test Connection; shown next to the page title.",
+   "fieldname": "shop_name",
+   "fieldtype": "Data",
+   "label": "Shop Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "locations_section",
+   "fieldtype": "Section Break",
+   "label": "Locations"
+  },
+  {
+   "fieldname": "locations",
+   "fieldtype": "Table",
+   "label": "Locations",
+   "options": "Store Location",
+   "description": "Stock locations reps can sell from. The default location is always one of them."
   }
  ],
  "in_create": 1,

@@ -29,7 +29,14 @@ function test_connection(frm) {
 				title: result.ok ? __("Connection Successful") : __("Connection Failed"),
 				indicator: result.ok ? "green" : "red",
 				message: result.ok
-					? __("Connected to {0}", [frappe.utils.escape_html(result.shop_name)])
+					? __("Shop: {0} ({1})", [
+							frappe.utils.escape_html(result.shop_name),
+							frappe.utils.escape_html(result.shop_domain || ""),
+					  ]) +
+					  "<br>" +
+					  __("Scopes: {0}", [
+							frappe.utils.escape_html((result.scopes || []).join(", ") || __("none reported")),
+					  ])
 					: frappe.utils.escape_html(result.message),
 			});
 			frm.reload_doc();
@@ -65,6 +72,7 @@ function fetch_locations(frm) {
 				primary_action_label: __("Set Default"),
 				primary_action({ location }) {
 					const picked = locations.find((l) => l.id === location);
+					merge_locations(frm, locations, picked.id);
 					frm.set_value({
 						default_location_id: picked.id,
 						default_location_name: picked.name,
@@ -75,4 +83,23 @@ function fetch_locations(frm) {
 			});
 			dialog.show();
 		});
+}
+
+// Add the store's locations to the Locations table. New ones start unticked (the
+// default is ticked), names are refreshed and existing ticks are kept. Rows the
+// store no longer returns are left alone for you to untick or delete.
+function merge_locations(frm, locations, default_id) {
+	locations.forEach((loc) => {
+		const row = (frm.doc.locations || []).find((r) => r.location_id === loc.id);
+		if (row) {
+			frappe.model.set_value(row.doctype, row.name, "location_name", loc.name);
+		} else {
+			frm.add_child("locations", {
+				location_id: loc.id,
+				location_name: loc.name,
+				sell_from: loc.id === default_id ? 1 : 0,
+			});
+		}
+	});
+	frm.refresh_field("locations");
 }

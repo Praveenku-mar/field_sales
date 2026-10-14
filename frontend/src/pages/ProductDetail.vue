@@ -4,9 +4,6 @@
       <template #meta>
         <span v-if="d.variant_title" class="text-ink-gray-5">{{ d.variant_title }}</span>
       </template>
-      <template #actions>
-        <Button label="Open in Desk" icon-left="lucide-external-link" :href="`/app/platform-product/${encodeURIComponent(name)}`" />
-      </template>
     </PageHeader>
 
     <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Product not found" :description="errorText" /></div></div>
@@ -36,6 +33,14 @@
               <InfoGrid :items="details" :columns="3" />
             </div>
           </div>
+        </SectionCard>
+
+        <SectionCard v-if="d.track_inventory && locationStock.data?.length" title="Stock by Location" flush>
+          <DataTable :columns="locationColumns" :rows="locationStock.data">
+            <template #cell-available_qty="{ row }">
+              <span :class="stockOf(row).class">{{ formatNumber(row.available_qty) }}</span>
+            </template>
+          </DataTable>
         </SectionCard>
 
         <SectionCard v-if="activity.data?.variants?.length" :title="`Other Variants (${activity.data.variants.length})`" flush>
@@ -81,7 +86,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Button, createDocumentResource, createResource } from 'frappe-ui'
+import { Button, createDocumentResource, createListResource, createResource } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import SectionCard from '@/components/SectionCard.vue'
 import InfoGrid from '@/components/InfoGrid.vue'
@@ -102,6 +107,16 @@ const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.
 const activity = createResource({
   url: 'field_sales.frontend_api.get_product_activity',
   params: { product: props.name },
+  auto: true,
+})
+
+// Stock at each location the shop sells from (the figure above is the default location's).
+const locationStock = createListResource({
+  doctype: 'Product Stock',
+  fields: ['name', 'location_id', 'location_name', 'available_qty', 'stock_updated_at'],
+  filters: { product: props.name },
+  orderBy: 'location_name asc',
+  pageLength: 50,
   auto: true,
 })
 
@@ -140,9 +155,14 @@ const variantColumns = [
   { key: 'price', label: 'Price', align: 'right', format: (v) => formatCurrency(v) },
   { key: 'available_qty', label: 'Stock', align: 'right' },
 ]
+const locationColumns = [
+  { key: 'location_name', label: 'Location', format: (v, row) => v || row.location_id },
+  { key: 'available_qty', label: 'Available', align: 'right' },
+  { key: 'stock_updated_at', label: 'Updated', format: (v) => (v ? formatDateTime(v) : '—') },
+]
 const orderColumns = [
   { key: 'name', label: 'Order' },
-  { key: 'retailer_name', label: 'Retailer' },
+  { key: 'retailer_name', label: 'Customer' },
   { key: 'order_date', label: 'Date', format: formatDate },
   { key: 'qty', label: 'Qty', align: 'right', format: (v) => formatNumber(v) },
   { key: 'amount', label: 'Amount', align: 'right', format: (v) => formatCurrency(v) },

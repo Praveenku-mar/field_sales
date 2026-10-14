@@ -29,6 +29,18 @@ Normalized product dict (one per *variant*)::
 		"status": "Active" | "Draft" | "Archived",
 		"track_inventory": bool,
 	}
+
+Webhooks: the store pushes events to ``field_sales.api.webhooks.receive``, which
+verifies and parses them through the connector, so everything after that is
+platform-neutral. A parsed event is::
+
+	{
+		"topic": "stock/update" | "product/update" | "product/delete" | other,
+		"platform_topic": str,       # the store's own topic name, for logs
+		"event_id": str | None,      # unique per delivery; used to drop duplicates
+		"updated_at": str | None,    # ISO timestamp of the change, to order events
+		"payload": dict,             # the store's JSON body, untouched
+	}
 """
 
 from __future__ import annotations
@@ -40,6 +52,11 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
 if TYPE_CHECKING:
 	from frappe.model.document import Document
 
+
+#: Platform-neutral webhook topics; ``parse_webhook`` maps each platform's own topics to these.
+STOCK_TOPIC = "stock/update"
+PRODUCT_UPDATE_TOPIC = "product/update"
+PRODUCT_DELETE_TOPIC = "product/delete"
 
 NORMALIZED_PRODUCT_KEYS: tuple[str, ...] = (
 	"external_product_id",
@@ -109,7 +126,8 @@ class BaseConnector:
 		"""
 		Verify credentials and reachability.
 
-		:return: ``{"ok": bool, "shop_name": str, "message": str}``
+		:return: ``{"ok": bool, "shop_name": str, "shop_domain": str, "scopes": [str, ...], "message": str}``;
+			``scopes`` are the permissions granted to the app (empty if the platform has none or on failure).
 		"""
 		raise NotImplementedError
 
@@ -188,6 +206,47 @@ class BaseConnector:
 		:return: URL, or ``None`` if the platform has no such page.
 		"""
 		return None
+
+	def verify_webhook(self, headers, raw_body: bytes) -> bool:
+		"""
+		Check that a webhook request really comes from the configured store.
+
+		:param headers: Request headers (case-insensitive mapping).
+		:param raw_body: The request body exactly as received; signatures cover these bytes.
+		:return: ``True`` if the signature and sender are valid; ``False`` if anything is missing or wrong.
+		"""
+		raise NotImplementedError
+
+	def parse_webhook(self, headers, raw_body: bytes) -> dict:
+		"""
+		Turn a verified webhook request into a neutral event.
+
+		:param headers: Request headers (case-insensitive mapping).
+		:param raw_body: The request body exactly as received.
+		:return: ``{"topic", "platform_topic", "event_id", "updated_at", "payload"}``
+			(see the module docstring); ``topic`` is one of ``STOCK_TOPIC``,
+			``PRODUCT_UPDATE_TOPIC``, ``PRODUCT_DELETE_TOPIC``, or the platform topic if unmapped.
+		"""
+		raise NotImplementedError
+
+	def handle_stock_event(self, payload: dict) -> dict | None:
+		"""
+		Read a stock-change payload.
+
+		:param payload: ``payload`` of a ``STOCK_TOPIC`` event.
+		:return: ``{"external_inventory_id": str, "location_id": str, "available": float}``
+			(plain ids), or ``None`` if the payload is not a stock event.
+		"""
+		raise NotImplementedError
+
+	def get_product(self, external_product_id: str) -> list[dict]:
+		"""
+		Fetch every variant of one product.
+
+		:param external_product_id: Plain platform product id.
+		:return: Normalized product dicts, one per variant; empty if the product no longer exists.
+		"""
+		raise NotImplementedError
 
 	# ------------------------------------------------------------------
 	# Shared helpers

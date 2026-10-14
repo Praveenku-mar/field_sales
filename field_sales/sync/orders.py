@@ -114,7 +114,9 @@ def push_order(field_order: str):
 			"external_draft_id": result.get("draft_id"),
 			"external_order_id": result.get("order_id"),
 			"platform": platform,
-			"location_id": conn.settings.default_location_id,
+			# The location the rep picked stays; only an order without one gets the default.
+			"location_id": doc.location_id or conn.settings.default_location_id,
+			"location_name": doc.location_name or conn.settings.default_location_name,
 			"sync_status": "Synced",
 			"sync_error": "",
 		},

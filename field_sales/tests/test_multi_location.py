@@ -310,16 +310,13 @@ class TestMultiLocation(IntegrationTestCase):
 
 	# -- Shopify order tags and note ---------------------------------------------
 
-	def test_order_tags_and_note_carry_the_location(self):
+	def test_order_tag_is_field_sales_and_note_carries_the_location(self):
 		order = frappe._dict(name="FO-1", sales_rep="rep@example.com", location_id=WAREHOUSE, location_name="Warehouse, East")
-		self.assertIn("Location: Warehouse  East", _order_tags(order))
+		# The order number and rep are metafields now; the location stays in the note.
+		self.assertEqual(_order_tags(order), ["field-sales"])
 		self.assertTrue(_order_note(order).endswith(" · Location Warehouse, East"))
 
-		order.location_name = None
-		self.assertIn(f"Location: {WAREHOUSE}", _order_tags(order))
-
 		order.location_id = None
-		self.assertFalse([t for t in _order_tags(order) if t.startswith("Location")])
 		self.assertNotIn("Location", _order_note(order))
 
 	# -- Migration patch ------------------------------------------------------------

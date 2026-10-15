@@ -236,6 +236,19 @@ class BaseConnector:
 		"""
 		return {}
 
+	def ensure_order_metafields(self) -> bool:
+		"""
+		Set up the store's order fields for the Field Order No and Sales Rep, if the platform has them.
+		Safe to run again.
+
+		:return: ``True`` when they exist (or the platform needs none).
+		"""
+		return True
+
+	def set_order_metafields(self, order_id: str, field_order: Document) -> None:
+		"""Write the Field Order No and Sales Rep onto an existing store order (e.g. a completed draft)."""
+		return None
+
 	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
 		"""
 		Admin URL of an order on the store (or of its draft when not yet confirmed).

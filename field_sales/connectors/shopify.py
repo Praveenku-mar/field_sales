@@ -142,6 +142,29 @@ ORDER_SEARCH = """
 query($q: String!) { orders(first: 1, query: $q) { nodes { id name } } }
 """
 
+# App-owned order fields (Shopify shows the namespace as app--<app id>--field_sales). Staff can read
+# them but not edit them, so the values stay trustworthy. They replace the old identifying tags.
+METAFIELD_NAMESPACE = "$app:field_sales"
+METAFIELD_TYPE = "single_line_text_field"
+ORDER_METAFIELDS = {
+	"field_order_no": ("Field Order No", "The Field Sales order this order was placed from."),
+	"sales_rep": ("Sales Rep", "The sales rep who took the order: name and email."),
+}
+# Draft orders get the fields too; Shopify does not copy them when a draft is completed.
+METAFIELD_OWNER_TYPES = ("ORDER", "DRAFTORDER")
+
+METAFIELD_DEFINITION_CREATE = """
+mutation($definition: MetafieldDefinitionInput!) {
+  metafieldDefinitionCreate(definition: $definition) { createdDefinition { id } userErrors { field message code } }
+}
+"""
+
+METAFIELDS_SET = """
+mutation($metafields: [MetafieldsSetInput!]!) {
+  metafieldsSet(metafields: $metafields) { metafields { key } userErrors { field message code } }
+}
+"""
+
 ORDER_LINE_LIMIT = 250
 ORDER_REFUND_LIMIT = 50
 
@@ -239,6 +262,50 @@ class ShopifyConnector(BaseConnector):
 			"scopes": [s["handle"] for s in scopes if s.get("handle")],
 			"message": _("Connected to {0} ({1})").format(shop.get("name"), shop.get("myshopifyDomain")),
 		}
+
+	def ensure_order_metafields(self) -> bool:
+		"""
+		Create the Field Order No and Sales Rep field definitions on orders and draft orders.
+
+		Safe to run again: a definition that already exists counts as done. Records the time on
+		Store Connection (``metafields_ready_on``) once all of them exist, so it is not repeated.
+
+		:return: ``True`` if every definition exists now; ``False`` if one could not be created
+			(logged in Sync Log; orders still carry the values without a definition).
+		"""
+		ok = True
+		for owner_type in METAFIELD_OWNER_TYPES:
+			for key, (name, description) in ORDER_METAFIELDS.items():
+				definition = {
+					"name": name,
+					"namespace": METAFIELD_NAMESPACE,
+					"key": key,
+					"type": METAFIELD_TYPE,
+					"ownerType": owner_type,
+					"description": description,
+					"access": {"admin": "MERCHANT_READ"},
+					"pin": True,
+				}
+				try:
+					self._graphql(METAFIELD_DEFINITION_CREATE, {"definition": definition}, operation="Other")
+				except ConnectorError as e:
+					# TAKEN: it exists already (an earlier run, or the app was set up before).
+					codes = {d.get("code") for d in (e.details or [])}
+					if codes != {"TAKEN"}:
+						ok = False
+		if ok:
+			frappe.db.set_single_value("Store Connection", "metafields_ready_on", now_datetime())
+		return ok
+
+	def set_order_metafields(self, order_id: str, field_order) -> None:
+		"""Write the two fields onto an existing order (a completed draft does not inherit the draft's)."""
+		owner = to_gid("Order", order_id)
+		self._graphql(
+			METAFIELDS_SET,
+			{"metafields": [{**m, "ownerId": owner} for m in _order_metafields(field_order)]},
+			operation="Confirm Order",
+			ref=field_order,
+		)
 
 	def get_locations(self) -> list[dict]:
 		"""Return the store's active locations as ``[{"id", "name"}]`` (ids are Shopify GIDs)."""
@@ -440,10 +507,18 @@ class ShopifyConnector(BaseConnector):
 
 		Retries never duplicate: a linked draft is reused (or its completed
 		order returned), and an order already created for this Field Order is
-		found by its tag.
+		found by its source identifier (the Field Order name).
+
+		The order (or draft) carries the Field Order No and Sales Rep fields
+		(``ORDER_METAFIELDS``) and a single "field-sales" tag.
 
 		:return: ``{"draft_id", "order_id", "order_name"}`` (plain ids; order fields ``None`` in Draft mode).
 		"""
+		if not self.settings.metafields_ready_on:
+			# First order on this store (or Test Connection never ran): set up the order fields.
+			# A failure is logged and does not block the order; the values are sent anyway.
+			self.ensure_order_metafields()
+
 		retailer = frappe.get_doc("Retailer", field_order.retailer)
 		if not retailer.external_customer_id:
 			raise ConnectorError(
@@ -499,6 +574,7 @@ class ShopifyConnector(BaseConnector):
 			"financialStatus": "PENDING",
 			"note": _order_note(field_order),
 			"tags": _order_tags(field_order),
+			"metafields": _order_metafields(field_order),
 			"sourceIdentifier": field_order.name,
 			"shippingAddress": address,
 			"billingAddress": address,
@@ -540,14 +616,13 @@ class ShopifyConnector(BaseConnector):
 
 	def _find_order(self, field_order) -> dict | None:
 		"""An order already created for this Field Order (a retry after a lost response)."""
-		data = self._graphql(
-			ORDER_SEARCH,
-			{"q": f'tag:"{_field_order_tag(field_order)}"'},
-			operation="Confirm Order",
-			ref=field_order,
-		)
-		nodes = (data.get("orders") or {}).get("nodes") or []
-		return nodes[0] if nodes else None
+		# Orders from older versions were found by tag; still look for one, so their retries never duplicate.
+		for query in (f'source_identifier:"{field_order.name}"', f'tag:"{_legacy_field_order_tag(field_order)}"'):
+			data = self._graphql(ORDER_SEARCH, {"q": query}, operation="Confirm Order", ref=field_order)
+			nodes = (data.get("orders") or {}).get("nodes") or []
+			if nodes:
+				return nodes[0]
+		return None
 
 	def _get_draft(self, draft_id: str, field_order) -> dict | None:
 		"""The linked draft order, or ``None`` if it no longer exists on Shopify."""
@@ -582,6 +657,7 @@ class ShopifyConnector(BaseConnector):
 			"taxExempt": True,
 			"note": _order_note(field_order),
 			"tags": _order_tags(field_order),
+			"metafields": _order_metafields(field_order),
 			"shippingAddress": address,
 			"billingAddress": address,
 		}
@@ -894,19 +970,29 @@ def _money(amount, currency: str) -> dict:
 	return {"shopMoney": {"amount": str(flt(amount, 2)), "currencyCode": currency}}
 
 
-def _field_order_tag(field_order) -> str:
-	"""Tag that identifies the Field Order's order on Shopify, used to find it again on retry."""
+def _legacy_field_order_tag(field_order) -> str:
+	"""Tag older versions put on the order to find it again on retry (no longer added)."""
 	return f"field-order-{field_order.name}"
 
 
 def _order_tags(field_order) -> list[str]:
-	# Shopify tags cannot contain commas.
-	location = (
-		f"Location: {field_order.location_name or field_order.location_id}".replace(",", " ")
-		if field_order.location_id
-		else None
-	)
-	return [t for t in ("field-sales", field_order.sales_rep, _field_order_tag(field_order), location) if t]
+	"""One tag so staff can filter Field Sales orders; the order number and rep are metafields."""
+	return ["field-sales"]
+
+
+def _order_metafields(field_order) -> list[dict]:
+	"""MetafieldInput values for the Field Order No and Sales Rep fields."""
+	full_name, email = frappe.db.get_value("Sales Rep", field_order.sales_rep, ["full_name", "user"]) or (None, None)
+	email = email or field_order.sales_rep
+	values = {
+		"field_order_no": field_order.name,
+		"sales_rep": f"{full_name} <{email}>" if full_name and email else email or full_name or "",
+	}
+	return [
+		{"namespace": METAFIELD_NAMESPACE, "key": key, "type": METAFIELD_TYPE, "value": value}
+		for key, value in values.items()
+		if value
+	]
 
 
 def _order_note(field_order) -> str:

@@ -44,6 +44,7 @@
   "col_break_status",
   "last_tested_on",
   "shop_name",
+  "metafields_ready_on",
   "invoice_section",
   "send_order_confirmation",
   "col_break_invoice",
@@ -81,7 +82,7 @@
    "fieldtype": "Data",
    "label": "Store URL",
    "reqd": 1,
-   "description": "Shopify: kovai-mart.myshopify.com \u00b7 WooCommerce: https://shop.com \u00b7 Odoo: https://company.odoo.com"
+   "description": "Shopify: kovai-mart.myshopify.com · WooCommerce: https://shop.com · Odoo: https://company.odoo.com"
   },
   {
    "fieldname": "shopify_section",
@@ -264,6 +265,13 @@
    "read_only": 1
   },
   {
+   "description": "When the Field Order No and Sales Rep order fields were set up on the store (Test Connection, or before the first order).",
+   "fieldname": "metafields_ready_on",
+   "fieldtype": "Datetime",
+   "label": "Order Fields Set Up On",
+   "read_only": 1
+  },
+  {
    "fieldname": "locations_section",
    "fieldtype": "Section Break",
    "label": "Locations"
@@ -327,7 +335,7 @@
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-15 10:00:00.000000",
+ "modified": "2026-10-15 17:51:12.246533",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

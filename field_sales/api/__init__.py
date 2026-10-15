@@ -31,7 +31,12 @@ def test_connection() -> dict:
 
 	frappe.only_for("System Manager")
 
-	result = get_connector().test_connection()
+	conn = get_connector()
+	result = conn.test_connection()
+	if result.get("ok"):
+		# Set up the order fields (Field Order No, Sales Rep) now; a failure is in Sync Log and
+		# is retried before the next order.
+		result["order_fields_ready"] = conn.ensure_order_metafields()
 	status = "Success" if result.get("ok") else f"Failed: {result.get('message')}"
 	values = {"last_test_status": status[:140], "last_tested_on": now_datetime()}
 	if result.get("ok") and result.get("shop_name"):

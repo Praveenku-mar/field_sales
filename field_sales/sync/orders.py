@@ -204,6 +204,11 @@ def link_completed_drafts():
 		if not order_id:
 			continue
 		frappe.db.set_value("Field Order", d.name, "external_order_id", order_id, update_modified=False)
+		try:
+			# Shopify does not copy a draft's fields to the order made from it.
+			conn.set_order_metafields(order_id, frappe.get_doc("Field Order", d.name))
+		except ConnectorError:
+			pass  # logged by the connector; the order itself is linked either way
 		enqueue_create_entries(d.name)
 		enqueue_order_confirmation(d.name)
 		log_sync(

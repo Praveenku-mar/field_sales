@@ -38,7 +38,9 @@ from field_sales.connectors.base import (
 	ConnectorError,
 )
 
-REQUEST_TIMEOUT = 30  # seconds
+# (connect, read) seconds. A short connect limit means an unreachable address (e.g. a broken
+# IPv6 route) is given up quickly and the next one (IPv4) is tried; replies still get 30 s.
+REQUEST_TIMEOUT = (5, 30)
 TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 DEFAULT_TOKEN_TTL = 24 * 60 * 60  # used if Shopify omits expires_in
 THROTTLE_MIN_AVAILABLE = 100  # query cost points

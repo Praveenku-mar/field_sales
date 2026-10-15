@@ -99,6 +99,16 @@ watch(collapsed, (v) => {
 watch(() => route.name, () => counts.reload())
 // The Notifications page announces read/unread changes made without leaving it.
 const reloadCounts = () => counts.reload()
-onMounted(() => window.addEventListener('fs:notifications-changed', reloadCounts))
-onBeforeUnmount(() => window.removeEventListener('fs:notifications-changed', reloadCounts))
+// There is no realtime connection, so poll while the tab is in view to pick up new notifications.
+let poll = null
+onMounted(() => {
+  window.addEventListener('fs:notifications-changed', reloadCounts)
+  poll = setInterval(() => {
+    if (document.visibilityState === 'visible') counts.reload()
+  }, 60000)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('fs:notifications-changed', reloadCounts)
+  clearInterval(poll)
+})
 </script>

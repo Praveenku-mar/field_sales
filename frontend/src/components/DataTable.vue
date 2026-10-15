@@ -29,8 +29,8 @@
             v-for="row in rows"
             :key="row.name"
             class="border-b border-desk-border last:border-0"
-            :class="rowRoute && 'cursor-pointer hover:bg-surface-gray-1'"
-            @click="rowRoute && $router.push(rowRoute(row))"
+            :class="(rowRoute || rowClickable) && 'cursor-pointer hover:bg-surface-gray-1'"
+            @click="rowRoute ? $router.push(rowRoute(row)) : rowClickable && $emit('row-click', row)"
           >
             <td
               v-for="col in columns"
@@ -83,6 +83,8 @@ defineProps({
   hasMore: { type: Boolean, default: false },
   /** row => route location; makes rows clickable */
   rowRoute: { type: Function, default: null },
+  /** Without a rowRoute, make rows clickable and emit `row-click` with the row. */
+  rowClickable: { type: Boolean, default: false },
   emptyTitle: { type: String, default: 'Nothing here yet' },
   emptyDescription: { type: String, default: null },
   emptyIcon: { type: String, default: 'lucide-inbox' },
@@ -90,5 +92,5 @@ defineProps({
   pageLength: { type: Number, default: null },
   pageLengths: { type: Array, default: () => [20, 100, 500, 2500] },
 })
-defineEmits(['load-more', 'update:pageLength'])
+defineEmits(['load-more', 'update:pageLength', 'row-click'])
 </script>

@@ -110,6 +110,18 @@
             placeholder="No manager"
           />
         </div>
+        <div class="space-y-1.5 sm:col-span-2">
+          <div class="text-sm text-ink-gray-6">Commission Plan</div>
+          <LinkField
+            v-model="edit.commission_plan"
+            class="w-full"
+            doctype="Commission Plan"
+            :filters="{ is_active: 1 }"
+            :label="d.commission_plan"
+            placeholder="No plan"
+          />
+          <Checkbox v-model="edit.commission_active" label="Commission Active" />
+        </div>
         <Checkbox v-model="edit.active" label="Active" class="sm:col-span-2" />
       </div>
       <template #actions>
@@ -242,6 +254,10 @@ const details = computed(() => [
   },
   { label: 'Monthly Target', value: d.value.monthly_target ? formatCurrency(d.value.monthly_target, undefined, 0) : null },
   { label: 'Max Discount', value: d.value.max_discount_pct > 0 ? `${d.value.max_discount_pct}%` : 'No discount' },
+  {
+    label: 'Commission Plan',
+    value: d.value.commission_plan ? `${d.value.commission_plan}${d.value.commission_active ? '' : ' (commission off)'}` : 'No plan',
+  },
 ])
 
 // ---------------------------------------------------------------- related lists
@@ -332,19 +348,30 @@ const moreActions = computed(() => [
 const editOpen = ref(false)
 const edit = reactive({})
 // full_name is fetched from the User, so it is not editable here.
-const EDIT_FIELDS = ['mobile', 'territory', 'monthly_target', 'max_discount_pct', 'reports_to', 'active']
+const EDIT_FIELDS = ['mobile', 'territory', 'monthly_target', 'max_discount_pct', 'reports_to', 'active', 'commission_plan', 'commission_active']
 
 function openEdit() {
   EDIT_FIELDS.forEach((f) => (edit[f] = d.value[f] ?? null))
   edit.active = !!d.value.active
+  edit.commission_active = !!d.value.commission_active
   editOpen.value = true
 }
 
 async function saveEdit() {
   try {
-    await doc.setValue.submit({ ...edit, active: edit.active ? 1 : 0, monthly_target: edit.monthly_target || 0,
+    // The plan is saved through its own method, which checks it is an active plan.
+    const { commission_plan, commission_active, ...rest } = edit
+    await doc.setValue.submit({ ...rest, active: edit.active ? 1 : 0, monthly_target: edit.monthly_target || 0,
       max_discount_pct: edit.max_discount_pct === '' || edit.max_discount_pct == null ? null : edit.max_discount_pct,
     })
+    if ((commission_plan || null) !== (d.value.commission_plan || null) || !!commission_active !== !!d.value.commission_active) {
+      await callMethod('field_sales.commission.api.assign_commission_plan', {
+        sales_rep: props.name,
+        commission_plan: commission_plan || null,
+        commission_active: commission_active ? 1 : 0,
+      })
+      await doc.reload()
+    }
     editOpen.value = false
     toast.success('Sales rep updated')
     month.reload()

@@ -82,6 +82,19 @@ const routes = [
     meta: { parent: 'SalesReps' },
   },
   {
+    path: '/commission',
+    name: 'Commission',
+    component: () => import('@/pages/Commission.vue'),
+    meta: { title: 'Commission' },
+  },
+  {
+    path: '/commission/statements/:name',
+    name: 'CommissionStatement',
+    component: () => import('@/pages/CommissionStatement.vue'),
+    props: true,
+    meta: { parent: 'Commission' },
+  },
+  {
     path: '/sync-log',
     name: 'SyncLogs',
     component: () => import('@/pages/SyncLogs.vue'),

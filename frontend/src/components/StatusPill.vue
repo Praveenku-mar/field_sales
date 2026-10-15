@@ -28,6 +28,10 @@ const THEMES = {
   Failed: 'red',
   'Out of Stock': 'red',
   Cancelled: 'red',
+  Earned: 'green',
+  Approved: 'blue',
+  Paid: 'green',
+  Reversed: 'red',
   Draft: 'gray',
   Inactive: 'gray',
 }

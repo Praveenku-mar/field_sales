@@ -6,9 +6,21 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import flt, get_first_day, get_last_day, nowdate
+from frappe.utils import add_months, flt, get_first_day, get_last_day, nowdate
 
 from field_sales.commission.engine import create_entries, reconcile_order
+from field_sales.commission.api import (
+	approve_statement,
+	get_team_commission,
+	assign_commission_plan,
+	create_adjustment,
+	generate_statements,
+	get_commission_plans,
+	save_commission_plan,
+	get_commission_statement,
+	get_commission_statements,
+	get_my_commission_summary,
+)
 from field_sales.commission.statements import build_statement, mark_paid
 from field_sales.connectors import get_connector
 from field_sales.connectors.shopify import _normalize_order
@@ -466,6 +478,191 @@ class TestCommission(IntegrationTestCase):
 		_columns, rows = run_summary({**filters, "sales_rep": manager.name})
 		self.assertEqual((rows[0]["override"], rows[0]["net"]), (13.5, 13.5))
 		self.assertEqual(run_summary({**filters, "location_id": "no-such-location"})[1], [])
+
+	# -- Statement screens API ---------------------------------------------------
+
+	def draft_statement(self, rep):
+		"""A Draft statement with one entry (an empty one has no currency on a bare test site)."""
+		order_id = f"79{self.users}"
+		self.field_order(rep, [("1", 4, 250)], order_id)
+		self.reconcile(self.store_order(order_id, [{"variant": "1", "qty": 4, "price": 250}]))
+		today = nowdate()
+		return build_statement(rep.name, get_first_day(today), get_last_day(today))
+
+	def test_my_summary_without_rep_is_empty(self):
+		# Administrator has no Sales Rep of their own.
+		self.assertEqual(get_my_commission_summary(), {"has_rep": False})
+
+	def test_approve_statement_sets_approved(self):
+		rep = self.rep(self.plan("Approve plan", flat_rate=10))
+		statement = self.draft_statement(rep)
+
+		result = approve_statement(statement.name)
+		self.assertEqual(result["status"], "Approved")
+		self.assertEqual(frappe.db.get_value("Commission Statement", statement.name, "docstatus"), 1)
+		with self.assertRaises(frappe.ValidationError):
+			approve_statement(statement.name)
+
+		data = get_commission_statement(statement.name)
+		self.assertEqual(data["full_name"], rep.full_name)
+		self.assertTrue(data["can_manage"])
+		self.assertEqual(len(data["entries"]), 1)
+
+	def test_rep_cannot_approve_statement(self):
+		rep = self.rep(self.plan("Deny plan", flat_rate=10))
+		statement = self.draft_statement(rep)
+		frappe.set_user(rep.user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				approve_statement(statement.name)
+			self.assertFalse(get_commission_statement(statement.name)["can_manage"])
+		finally:
+			frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value("Commission Statement", statement.name, "docstatus"), 0)
+
+	def test_statement_list_respects_hierarchy(self):
+		manager = self.rep(self.plan("List mgr", flat_rate=1))
+		member = self.rep(self.plan("List member", flat_rate=1), reports_to=manager.name)
+		outsider = self.rep(self.plan("List outsider", flat_rate=1))
+		own, team, other = (self.draft_statement(r).name for r in (manager, member, outsider))
+
+		def visible(user):
+			frappe.set_user(user)
+			try:
+				return {r["name"] for r in get_commission_statements()["statements"]}
+			finally:
+				frappe.set_user("Administrator")
+
+		self.assertEqual(visible(manager.user) & {own, team, other}, {own, team})
+		self.assertEqual(visible(member.user) & {own, team, other}, {team})
+		self.assertTrue({own, team, other} <= visible("Administrator"))
+		frappe.set_user(manager.user)
+		try:
+			(row,) = [r for r in get_commission_statements()["statements"] if r["name"] == team]
+		finally:
+			frappe.set_user("Administrator")
+		self.assertEqual(row["full_name"], member.full_name)
+
+	# -- Manager screens API -------------------------------------------------------
+
+	def as_user(self, user, fn, *args, **kwargs):
+		frappe.set_user(user)
+		try:
+			return fn(*args, **kwargs)
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_save_commission_plan_creates_and_edits(self):
+		created = save_commission_plan(
+			{
+				"plan_name": "Screen plan",
+				"rule_type": "Tiered Slab",
+				"commission_on": "Paid",
+				"slab_mode": "Marginal",
+				"slabs": [
+					{"from_amount": 0, "to_amount": 1000, "rate": 2},
+					{"from_amount": 1000, "to_amount": 0, "rate": 3},
+				],
+				"rates": [{"match_type": "Tag", "match_value": "ignored", "rate": 1}],
+				"is_active": 1,
+			}
+		)
+		self.assertEqual(created["name"], "Screen plan")
+		self.assertEqual(len(created["slabs"]), 2)
+		self.assertEqual(created["rates"], [])
+
+		edited = save_commission_plan(
+			{"name": "Screen plan", "plan_name": "Renamed?", "rule_type": "Flat %", "flat_rate": 5, "is_active": 0}
+		)
+		self.assertEqual((edited["name"], edited["plan_name"], edited["rule_type"], edited["slabs"]), ("Screen plan", "Screen plan", "Flat %", []))
+		self.assertEqual(frappe.db.get_value("Commission Plan", "Screen plan", "is_active"), 0)
+		self.assertIn("Screen plan", [p["name"] for p in get_commission_plans()])
+
+		with self.assertRaises(frappe.ValidationError):
+			save_commission_plan({"plan_name": "Bad plan", "rule_type": "Flat %", "flat_rate": 0})
+
+	def test_rep_cannot_manage_plans_or_adjustments(self):
+		plan = self.plan("Guard plan", flat_rate=5)
+		rep = self.rep(plan)
+		for fn, args in (
+			(save_commission_plan, ({"plan_name": "Nope", "rule_type": "Flat %", "flat_rate": 5},)),
+			(get_commission_plans, ()),
+			(assign_commission_plan, (rep.name, plan.name, 0)),
+			(create_adjustment, (rep.name, 10, "Bonus")),
+			(generate_statements, (nowdate()[:7],)),
+		):
+			with self.assertRaises(frappe.PermissionError, msg=fn.__name__):
+				self.as_user(rep.user, fn, *args)
+		self.assertFalse(frappe.db.exists("Commission Plan", "Nope"))
+
+	def test_assign_commission_plan(self):
+		rep = self.rep(None, active=0)
+		plan = self.plan("Assign plan", flat_rate=5)
+		result = assign_commission_plan(rep.name, plan.name, 1)
+		self.assertEqual((result["commission_plan"], result["commission_active"]), (plan.name, 1))
+		self.assertEqual(frappe.db.get_value("Sales Rep", rep.name, "commission_active"), 1)
+
+		with self.assertRaises(frappe.ValidationError):
+			assign_commission_plan(rep.name, None, 1)
+		frappe.db.set_value("Commission Plan", plan.name, "is_active", 0)
+		with self.assertRaises(frappe.ValidationError):
+			assign_commission_plan(rep.name, plan.name, 1)
+
+	def test_team_lists_reps_without_commission_with_their_plan(self):
+		plan = self.plan("Team plan", flat_rate=5)
+		rep = self.rep(plan, active=0)
+		(row,) = [r for r in get_team_commission("all") if r["sales_rep"] == rep.name]
+		self.assertEqual((row["commission_plan"], row["commission_active"], row["net"]), ("Team plan", 0, 0))
+
+	def test_create_adjustment(self):
+		frappe.db.set_default("currency", CURRENCY)
+		rep = self.rep(self.plan("Adj plan", flat_rate=5))
+		entry = create_adjustment(rep.name, 150, "Quarterly bonus")
+		create_adjustment(rep.name, -40, "Correction", beneficiary_type="Manager Override")
+
+		doc = frappe.get_doc("Commission Entry", entry["name"])
+		self.assertEqual((doc.entry_type, doc.status, doc.beneficiary_type, doc.earned_on), ("Adjustment", "Earned", "Rep", doc.posting_date))
+		self.assertEqual((doc.currency, doc.commission_plan, doc.adjustment_reason), (CURRENCY, "Adj plan", "Quarterly bonus"))
+
+		frappe.set_user(rep.user)
+		try:
+			summary = get_my_commission_summary()
+		finally:
+			frappe.set_user("Administrator")
+		self.assertEqual((summary["earned"], summary["reversed"], summary["net"]), (150, 40, 110))
+
+		with self.assertRaises(frappe.ValidationError):
+			create_adjustment(rep.name, 10, "  ")
+		with self.assertRaises(frappe.ValidationError):
+			create_adjustment(rep.name, 0, "Nothing")
+
+	def test_generate_statements(self):
+		frappe.db.set_default("currency", CURRENCY)
+		plan = self.plan("Gen plan", flat_rate=5)
+		with_entries = self.rep(plan)
+		without_entries = self.rep(plan)
+		inactive = self.rep(plan, active=0)
+		last_month = add_months(nowdate(), -1)
+		month = str(last_month)[:7]
+		for rep in (with_entries, inactive):
+			create_adjustment(rep.name, 25, "Bonus", posting_date=str(get_first_day(last_month)))
+
+		result = generate_statements(month)
+		self.assertEqual(len(result["created"]), 1)
+		statement = frappe.get_doc("Commission Statement", result["created"][0])
+		self.assertEqual((statement.sales_rep, statement.status, statement.net_payable), (with_entries.name, "Draft", 25))
+		self.assertEqual([s["rep"] for s in result["skipped"]], [without_entries.name])
+
+		again = generate_statements(month)
+		self.assertEqual(again["created"], [])
+		self.assertEqual({s["rep"] for s in again["skipped"]}, {with_entries.name, without_entries.name})
+
+		# A named rep is processed even when not commission-active.
+		single = generate_statements(month, inactive.name)
+		self.assertEqual(len(single["created"]), 1)
+
+		with self.assertRaises(frappe.ValidationError):
+			generate_statements("2026-13")
 
 	# -- Shopify order normalization -------------------------------------------
 

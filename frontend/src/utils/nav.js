@@ -18,6 +18,8 @@ export const NAV_ITEMS = [
   { label: 'Products', route: 'Products', icon: 'lucide-package' },
   // Everyone: a rep sees themselves and their team (Sales Rep permission_query_conditions).
   { label: 'Sales Reps', route: 'SalesReps', icon: 'lucide-user-round' },
+  // Everyone: a rep sees their own commission; managers also see the team and statements.
+  { label: 'Commission', route: 'Commission', icon: 'lucide-wallet' },
   { label: 'Reports', route: 'Reports', icon: 'lucide-chart-column', roles: MANAGERS },
   { label: 'Sync Log', route: 'SyncLogs', icon: 'lucide-scroll-text', roles: MANAGERS },
   { label: 'Sync Failures', route: 'SyncFailures', icon: 'lucide-triangle-alert', roles: MANAGERS },
@@ -50,6 +52,7 @@ const DOCTYPE_ROUTES = {
   Visit: 'Visit',
   'Platform Product': 'Product',
   'Sales Rep': 'SalesRep',
+  'Commission Statement': 'CommissionStatement',
   'Sync Log': 'SyncLogEntry',
 }
 

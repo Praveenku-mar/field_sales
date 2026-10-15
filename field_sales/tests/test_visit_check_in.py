@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import nowdate
+from frappe.utils import add_days, nowdate
 
 from field_sales.api import check_in, check_out
 
@@ -92,3 +92,23 @@ class TestVisitCheckIn(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 		self.assertEqual(self.status(), "Completed")
+
+	def test_cannot_check_in_before_the_visit_date(self):
+		self.visit.db_set("visit_date", add_days(nowdate(), 1))
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.check_in_as(self.rep_user)
+		self.assertIn("You can check in on that day", str(ctx.exception))
+		self.assertEqual(self.status(), "Planned")
+
+	def test_cannot_check_in_after_the_visit_date(self):
+		self.visit.db_set("visit_date", add_days(nowdate(), -1))
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.check_in_as(self.rep_user)
+		self.assertIn("that day has passed", str(ctx.exception))
+		self.assertEqual(self.status(), "Planned")
+
+	def test_moving_the_visit_to_today_reopens_check_in(self):
+		self.visit.db_set("visit_date", add_days(nowdate(), -1))
+		self.visit.db_set("visit_date", nowdate())
+		self.check_in_as(self.rep_user)
+		self.assertEqual(self.status(), "In Progress")

@@ -9,7 +9,7 @@ from frappe import _
 from frappe.auth import MAX_PASSWORD_SIZE
 from frappe.rate_limiter import rate_limit
 from frappe.query_builder.functions import Count, Sum
-from frappe.utils import flt, get_link_to_form, now_datetime
+from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
 from frappe.utils.password import check_password
 
 from field_sales.connectors import ConnectorError, get_connector
@@ -255,6 +255,23 @@ def sync_retailers(names: str | list) -> dict:
 	return {"message": _("Sync to store queued for {0} retailer(s)").format(len(names))}
 
 
+def _check_visit_date(doc) -> None:
+	"""A visit can only be checked in to on its own date (in the system time zone)."""
+	visit_date, today = getdate(doc.visit_date), getdate(nowdate())
+	if visit_date > today:
+		frappe.throw(
+			_("This visit is planned for {0}. You can check in on that day.").format(formatdate(visit_date)),
+			title=_("Not Yet"),
+		)
+	if visit_date < today:
+		frappe.throw(
+			_("This visit was planned for {0} and that day has passed. Ask your manager to move it to today.").format(
+				formatdate(visit_date)
+			),
+			title=_("Visit Date Has Passed"),
+		)
+
+
 @frappe.whitelist(methods=["POST"])
 def check_in(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
 	
@@ -264,6 +281,7 @@ def check_in(visit: str, latitude: float, longitude: float, accuracy: float | No
 	_check_own_visit(doc)
 	if doc.status != "Planned":
 		frappe.throw(_("Only a Planned visit can be checked in to. This visit is {0}.").format(_(doc.status)))
+	_check_visit_date(doc)
 
 	# Lock the rep so two tabs / devices cannot both open a visit at once.
 	frappe.db.get_value("Sales Rep", doc.sales_rep, "name", for_update=True)

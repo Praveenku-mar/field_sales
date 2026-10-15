@@ -220,11 +220,6 @@
         </div>
       </section>
 
-      <footer v-if="doc.isDirty" class="flex items-center justify-end gap-2 border-t border-desk-border px-8 py-4">
-        <Button variant="ghost" label="Discard" :disabled="saving || testing" @click="doc.reload()" />
-        <Button variant="solid" label="Save Changes" :loading="saving" :disabled="testing" @click="save" />
-      </footer>
-
       <!-- Opened by the header's Fetch Locations button; picking one and saving
            mirrors the desk's Select Default Location dialog. -->
       <Dialog v-model="locationDialog.open" title="Select Default Location">
@@ -398,7 +393,6 @@ const titleStatus = computed(() => {
   }
   return { status: 'Failed', label: `Failed · ${when}`, icon: 'lucide-circle-x' }
 })
-defineExpose({ fetchLocations, fetchingLocations, titleStatus })
 
 function setLocation(id) {
   const picked = locationOptions.value.find((o) => o.value === id)
@@ -500,4 +494,11 @@ function nowSql() {
   const p = (x) => String(x).padStart(2, '0')
   return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`
 }
+
+// The Settings page header renders Discard / Save Changes from these.
+const isDirty = computed(() => !!doc.isDirty)
+function discard() {
+  doc.reload()
+}
+defineExpose({ fetchLocations, fetchingLocations, titleStatus, isDirty, saving, testing, save, discard })
 </script>

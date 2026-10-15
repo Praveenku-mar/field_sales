@@ -11,9 +11,24 @@
         />
       </template>
       <template #actions>
+        <template v-if="session.isAdmin && tab === 'store' && storeForm?.isDirty">
+          <Button
+            variant="ghost"
+            label="Discard"
+            :disabled="storeForm.saving || storeForm.testing"
+            @click="storeForm.discard()"
+          />
+          <Button
+            variant="solid"
+            label="Save Changes"
+            :loading="storeForm.saving"
+            :disabled="storeForm.testing"
+            @click="storeForm.save()"
+          />
+        </template>
         <Button
           v-if="session.isAdmin && tab === 'store'"
-          variant="solid"
+          :variant="storeForm?.isDirty ? 'subtle' : 'solid'"
           label="Fetch Locations"
           icon-left="lucide-refresh-cw"
           :loading="!!storeForm?.fetchingLocations"

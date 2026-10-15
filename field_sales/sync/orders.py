@@ -15,6 +15,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, cint, now_datetime
 
+from field_sales.commission.engine import enqueue_create_entries
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.sync.customers import push_retailer
@@ -132,6 +133,8 @@ def push_order(field_order: str):
 		duration_ms=_elapsed_ms(start),
 		external_id=result.get("order_id") or result.get("draft_id"),
 	)
+	if result.get("order_id"):
+		enqueue_create_entries(field_order)
 	frappe.db.commit()
 	_notify(doc)
 
@@ -198,6 +201,7 @@ def link_completed_drafts():
 		if not order_id:
 			continue
 		frappe.db.set_value("Field Order", d.name, "external_order_id", order_id, update_modified=False)
+		enqueue_create_entries(d.name)
 		log_sync(
 			platform=conn.settings.platform,
 			operation="Confirm Order",

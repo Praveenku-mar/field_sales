@@ -47,7 +47,7 @@
    "fieldname": "operation",
    "fieldtype": "Select",
    "label": "Operation",
-   "options": "Test Connection\nToken Refresh\nProduct Sync\nStock Check\nCreate Customer\nUpdate Customer\nCreate Order\nConfirm Order\nWebhook\nRegister Webhooks\nOther",
+   "options": "Test Connection\nToken Refresh\nProduct Sync\nStock Check\nCreate Customer\nUpdate Customer\nCreate Order\nConfirm Order\nWebhook\nRegister Webhooks\nCommission\nOther",
    "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1

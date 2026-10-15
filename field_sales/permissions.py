@@ -30,6 +30,8 @@ REP_FIELD = {
 	"Visit": "sales_rep",
 	"Field Order": "sales_rep",
 	"Retailer": "sales_rep",
+	"Commission Entry": "sales_rep",
+	"Commission Statement": "sales_rep",
 	"Sales Rep": "name",
 }
 
@@ -114,6 +116,14 @@ def field_order_query(user: str | None = None) -> str:
 	return _query_conditions("Field Order", user)
 
 
+def commission_entry_query(user: str | None = None) -> str:
+	return _query_conditions("Commission Entry", user)
+
+
+def commission_statement_query(user: str | None = None) -> str:
+	return _query_conditions("Commission Statement", user)
+
+
 def retailer_query(user: str | None = None) -> str:
 	# Every retailer is listed; role permissions still decide who may read at all.
 	return ""
@@ -144,6 +154,14 @@ def visit_has_permission(doc, ptype: str | None = None, user: str | None = None)
 
 
 def field_order_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	return _rep_in_allowed(doc.sales_rep, user)
+
+
+def commission_entry_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	return _rep_in_allowed(doc.sales_rep, user)
+
+
+def commission_statement_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	return _rep_in_allowed(doc.sales_rep, user)
 
 

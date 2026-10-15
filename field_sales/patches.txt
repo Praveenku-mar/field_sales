@@ -6,6 +6,7 @@
 # Patches added in this section will be executed after doctypes are migrated
 field_sales.patches.v1_0.multi_location
 field_sales.patches.v1_0.discount_percent
+field_sales.patches.v1_0.commission_setup
 
 [post_fixture_sync]
 # Patches added in this section will be executed after fixtures and customizations

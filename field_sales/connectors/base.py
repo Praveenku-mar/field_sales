@@ -35,12 +35,42 @@ verifies and parses them through the connector, so everything after that is
 platform-neutral. A parsed event is::
 
 	{
-		"topic": "stock/update" | "product/update" | "product/delete" | other,
+		"topic": "stock/update" | "product/update" | "product/delete"
+			| "order/paid" | "order/fulfilled" | "order/cancelled" | "refund/create" | other,
 		"platform_topic": str,       # the store's own topic name, for logs
 		"event_id": str | None,      # unique per delivery; used to drop duplicates
 		"updated_at": str | None,    # ISO timestamp of the change, to order events
 		"payload": dict,             # the store's JSON body, untouched
 	}
+
+Normalized order dict (``get_order``), used for commission. Statuses are the
+platform's, mapped to these lowercase words::
+
+	{
+		"external_order_id": str,
+		"currency": str,
+		"financial_status": "pending" | "authorized" | "partially_paid" | "paid"
+			| "partially_refunded" | "refunded" | "voided" | "expired" | "",
+		"fulfillment_status": "fulfilled" | "partial" | "unfulfilled" | other lowercase,
+		"cancelled": bool,
+		"lines": [
+			{
+				"line_id": str,
+				"external_variant_id": str | None,   # None for custom lines (e.g. tax)
+				"qty": float,                        # all units, including refunded
+				"current_qty": float,                # units not refunded / removed
+				"unit_price": float,                 # before discounts and tax
+				"discount": float,                   # total discount allocated to the line
+				"product_type": str | None,
+				"tags": [str, ...],
+			},
+		],
+		"refunds": [
+			{"refund_id": str, "lines": [{"line_id": str, "qty": float, "amount": float}]},
+		],
+	}
+
+Amounts are in the order's own ``currency``.
 """
 
 from __future__ import annotations
@@ -57,6 +87,13 @@ if TYPE_CHECKING:
 STOCK_TOPIC = "stock/update"
 PRODUCT_UPDATE_TOPIC = "product/update"
 PRODUCT_DELETE_TOPIC = "product/delete"
+ORDER_PAID_TOPIC = "order/paid"
+ORDER_FULFILLED_TOPIC = "order/fulfilled"
+ORDER_CANCELLED_TOPIC = "order/cancelled"
+REFUND_CREATE_TOPIC = "refund/create"
+
+#: Topics that make the commission engine re-read the order.
+ORDER_TOPICS = (ORDER_PAID_TOPIC, ORDER_FULFILLED_TOPIC, ORDER_CANCELLED_TOPIC, REFUND_CREATE_TOPIC)
 
 NORMALIZED_PRODUCT_KEYS: tuple[str, ...] = (
 	"external_product_id",
@@ -245,6 +282,24 @@ class BaseConnector:
 
 		:param external_product_id: Plain platform product id.
 		:return: Normalized product dicts, one per variant; empty if the product no longer exists.
+		"""
+		raise NotImplementedError
+
+	def get_order(self, external_id: str) -> dict:
+		"""
+		Fetch the current state of one order, for commission.
+
+		:param external_id: Plain platform order id (``Field Order.external_order_id``).
+		:return: Normalized order dict (see the module docstring); empty dict if the order no longer exists.
+		"""
+		raise NotImplementedError
+
+	def order_id_from_event(self, payload: dict) -> str | None:
+		"""
+		Plain order id behind an order or refund webhook.
+
+		:param payload: ``payload`` of an ``ORDER_TOPICS`` event.
+		:return: The order id, or ``None`` if the payload carries none.
 		"""
 		raise NotImplementedError
 

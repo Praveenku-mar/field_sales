@@ -15,7 +15,13 @@ import frappe
 from frappe.utils import convert_utc_to_system_timezone, get_datetime, now_datetime
 
 from field_sales.connectors import get_connector
-from field_sales.connectors.base import PRODUCT_DELETE_TOPIC, PRODUCT_UPDATE_TOPIC, STOCK_TOPIC
+from field_sales.commission.engine import reconcile_order
+from field_sales.connectors.base import (
+	ORDER_TOPICS,
+	PRODUCT_DELETE_TOPIC,
+	PRODUCT_UPDATE_TOPIC,
+	STOCK_TOPIC,
+)
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
 from field_sales.sync.products import _archive, sync_one_product
 from field_sales.sync.stock import get_sell_locations, set_location_stock
@@ -44,6 +50,8 @@ def process_event(platform: str, event: dict) -> dict:
 			result = _process_product_update(conn, platform, event)
 		elif topic == PRODUCT_DELETE_TOPIC:
 			result = _process_product_delete(platform, event)
+		elif topic in ORDER_TOPICS:
+			result = _process_order_event(conn, event)
 		else:
 			result = {"note": "Ignored: unhandled topic"}
 	except Exception as e:
@@ -142,6 +150,15 @@ def _process_product_delete(platform: str, event: dict) -> dict:
 		pluck="name",
 	)
 	return {"archived": _archive(names)}
+
+
+def _process_order_event(conn, event: dict) -> dict:
+	"""Paid / fulfilled / cancelled / refund: re-read the order and reconcile its commission entries."""
+	external_order_id = conn.order_id_from_event(event.get("payload") or {})
+	if not external_order_id:
+		return {"note": "Ignored: no order id"}
+
+	return reconcile_order(external_order_id)
 
 
 def _log_fields(platform: str, event: dict, start: float) -> dict:

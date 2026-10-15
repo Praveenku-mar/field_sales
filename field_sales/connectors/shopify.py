@@ -27,8 +27,12 @@ from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime
 from frappe.utils.password import set_encrypted_password
 
 from field_sales.connectors.base import (
+	ORDER_CANCELLED_TOPIC,
+	ORDER_FULFILLED_TOPIC,
+	ORDER_PAID_TOPIC,
 	PRODUCT_DELETE_TOPIC,
 	PRODUCT_UPDATE_TOPIC,
+	REFUND_CREATE_TOPIC,
 	STOCK_TOPIC,
 	BaseConnector,
 	ConnectorError,
@@ -49,6 +53,10 @@ TOPIC_MAP = {
 	"inventory_levels/update": STOCK_TOPIC,
 	"products/update": PRODUCT_UPDATE_TOPIC,
 	"products/delete": PRODUCT_DELETE_TOPIC,
+	"orders/paid": ORDER_PAID_TOPIC,
+	"orders/fulfilled": ORDER_FULFILLED_TOPIC,
+	"orders/cancelled": ORDER_CANCELLED_TOPIC,
+	"refunds/create": REFUND_CREATE_TOPIC,
 }
 PRODUCT_VARIANT_LIMIT = 250
 
@@ -131,6 +139,42 @@ mutation($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
 ORDER_SEARCH = """
 query($q: String!) { orders(first: 1, query: $q) { nodes { id name } } }
 """
+
+ORDER_LINE_LIMIT = 250
+ORDER_REFUND_LIMIT = 50
+
+# Everything commission needs about one order (amounts are shopMoney).
+ORDER_QUERY = """
+query($id: ID!) {
+  order(id: $id) {
+    id
+    displayFinancialStatus
+    displayFulfillmentStatus
+    cancelledAt
+    currencyCode
+    tags
+    lineItems(first: %d) {
+      nodes {
+        id
+        quantity
+        currentQuantity
+        sku
+        originalUnitPriceSet { shopMoney { amount } }
+        discountAllocations { allocatedAmountSet { shopMoney { amount } } }
+        variant { id }
+        product { id productType tags }
+      }
+    }
+    refunds(first: %d) {
+      id
+      createdAt
+      refundLineItems(first: %d) {
+        nodes { lineItem { id } quantity subtotalSet { shopMoney { amount } } }
+      }
+    }
+  }
+}
+""" % (ORDER_LINE_LIMIT, ORDER_REFUND_LIMIT, ORDER_LINE_LIMIT)
 
 SHOP_CURRENCY_QUERY = "{ shop { currencyCode } }"
 
@@ -289,6 +333,16 @@ class ShopifyConnector(BaseConnector):
 			"location_id": from_gid(str(location_id)),
 			"available": flt(payload.get("available")),
 		}
+
+	def order_id_from_event(self, payload: dict) -> str | None:
+		"""``orders/*`` carry the order as ``id``; ``refunds/create`` carries it as ``order_id``."""
+		value = payload.get("order_id") or payload.get("id")
+		return from_gid(str(value)) if value else None
+
+	def get_order(self, external_id: str) -> dict:
+		"""Current state of one order, normalized (see ``connectors.base``); empty if it is gone."""
+		data = self._graphql(ORDER_QUERY, {"id": to_gid("Order", external_id)}, operation="Other")
+		return _normalize_order(data.get("order"))
 
 	def create_customer(self, retailer) -> dict:
 		"""
@@ -888,6 +942,59 @@ def _order_result(draft: dict) -> dict:
 		"draft_id": from_gid(draft.get("id")),
 		"order_id": from_gid(order.get("id")),
 		"order_name": order.get("name"),
+	}
+
+
+def _normalize_order(order: dict | None) -> dict:
+	"""Shopify order node -> neutral order dict; enums become lowercase words."""
+	if not order:
+		return {}
+
+	fulfillment = (order.get("displayFulfillmentStatus") or "").lower()
+	lines = []
+	for node in (order.get("lineItems") or {}).get("nodes") or []:
+		product = node.get("product") or {}
+		discount = sum(
+			flt(((a.get("allocatedAmountSet") or {}).get("shopMoney") or {}).get("amount"))
+			for a in node.get("discountAllocations") or []
+		)
+		lines.append(
+			{
+				"line_id": from_gid(node.get("id")),
+				"external_variant_id": from_gid((node.get("variant") or {}).get("id")),
+				"qty": flt(node.get("quantity")),
+				"current_qty": flt(node.get("currentQuantity")),
+				"unit_price": flt(((node.get("originalUnitPriceSet") or {}).get("shopMoney") or {}).get("amount")),
+				"discount": discount,
+				"product_type": product.get("productType") or None,
+				"tags": list(product.get("tags") or []),
+			}
+		)
+
+	refunds = []
+	for refund in order.get("refunds") or []:
+		refunds.append(
+			{
+				"refund_id": from_gid(refund.get("id")),
+				"lines": [
+					{
+						"line_id": from_gid((n.get("lineItem") or {}).get("id")),
+						"qty": flt(n.get("quantity")),
+						"amount": flt(((n.get("subtotalSet") or {}).get("shopMoney") or {}).get("amount")),
+					}
+					for n in (refund.get("refundLineItems") or {}).get("nodes") or []
+				],
+			}
+		)
+
+	return {
+		"external_order_id": from_gid(order.get("id")),
+		"currency": order.get("currencyCode"),
+		"financial_status": (order.get("displayFinancialStatus") or "").lower(),
+		"fulfillment_status": "partial" if fulfillment == "partially_fulfilled" else fulfillment,
+		"cancelled": bool(order.get("cancelledAt")),
+		"lines": lines,
+		"refunds": refunds,
 	}
 
 

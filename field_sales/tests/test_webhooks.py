@@ -314,14 +314,37 @@ class TestWebhooks(IntegrationTestCase):
 			kwargs = enqueue.call_args.kwargs
 			self.assertEqual(enqueue.call_args.args[0], "field_sales.sync.webhooks.process_event")
 			self.assertEqual(kwargs["platform"], "Shopify")
-			self.assertEqual(kwargs["event"]["topic"], STOCK_TOPIC)
-			self.assertEqual(kwargs["event"]["event_id"], event_id)
+			self.assertEqual(kwargs["webhook"]["topic"], STOCK_TOPIC)
+			self.assertEqual(kwargs["webhook"]["event_id"], event_id)
+			self.assertNotIn("event", kwargs)  # reserved by frappe.enqueue
 
 			# Same delivery again: acknowledged, not queued twice.
 			self.fake_request(body, self.headers(body, webhook_id=event_id))
 			second = receive()
 			self.assertEqual(second["message"], "duplicate")
 			enqueue.assert_called_once()
+
+	def test_receive_job_kwargs_reach_process_event(self):
+		"""Run the real frappe.enqueue (inline) so reserved-kwarg clashes show up."""
+		body = json.dumps(
+			{"inventory_item_id": 5001, "location_id": 100, "available": 4, "updated_at": "2026-10-14T10:00:00Z"}
+		).encode()
+		event_id = frappe.generate_hash(length=12)
+		self.fake_request(body, self.headers(body, webhook_id=event_id))
+		real_enqueue = frappe.enqueue
+
+		def run_inline(*args, **kwargs):
+			return real_enqueue(*args, now=True, **kwargs)
+
+		with (
+			patch("frappe.enqueue", side_effect=run_inline),
+			patch("field_sales.sync.webhooks.process_event") as job,
+		):
+			receive()
+
+		job.assert_called_once()
+		self.assertEqual(job.call_args.kwargs["platform"], "Shopify")
+		self.assertEqual(job.call_args.kwargs["webhook"]["event_id"], event_id)
 
 	def test_receive_ignores_when_disabled(self):
 		frappe.db.set_single_value("Store Connection", "enabled", 0)

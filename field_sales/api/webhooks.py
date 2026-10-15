@@ -46,11 +46,13 @@ def receive():
 		return _respond(200, "duplicate")
 
 	try:
+		# The job argument is `webhook`, not `event`: frappe.enqueue has its own `event`
+		# parameter (job-clearing label), so `event=` would be swallowed and never reach the job.
 		frappe.enqueue(
 			"field_sales.sync.webhooks.process_event",
 			queue="short",
 			platform=conn.platform,
-			event=event,
+			webhook=event,
 		)
 	except Exception:
 		# Not queued: forget the id so the store's retry of this delivery is accepted.

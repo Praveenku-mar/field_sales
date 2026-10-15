@@ -29,7 +29,7 @@ from field_sales.sync.stock import get_sell_locations, set_location_stock
 REALTIME_EVENT = "stock_updated"
 
 
-def process_event(platform: str, event: dict) -> dict:
+def process_event(platform: str, webhook: dict) -> dict:
 	"""
 	Apply one webhook event. Runs as a background job.
 
@@ -37,9 +37,11 @@ def process_event(platform: str, event: dict) -> dict:
 	and is re-raised so the job shows as failed.
 
 	:param platform: Platform the event came from (``Store Connection.platform``).
-	:param event: Neutral event from ``BaseConnector.parse_webhook``.
+	:param webhook: Neutral event from ``BaseConnector.parse_webhook``. Not named ``event``:
+		``frappe.enqueue`` reserves that keyword and would swallow it.
 	:return: Small summary of what was done (also the Sync Log's response).
 	"""
+	event = webhook
 	start = time.monotonic()
 	try:
 		conn = get_connector(require_enabled=False)

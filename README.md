@@ -14,7 +14,7 @@ bench install-app field_sales
 
 ### Commission webhooks (Shopify)
 
-Sales rep commission follows the order's state on the store. In the Shopify admin, add these webhook subscriptions (Settings > Notifications > Webhooks, or in the app configuration), all pointing at the same URL the stock and product webhooks already use, `https://<your-site>/api/method/field_sales.api.webhooks.receive`:
+Sales rep commission follows the order's state on the store. Subscribe these topics through the app itself (GraphQL `webhookSubscriptionCreate` with the app's token, or the app configuration), all pointing at the same URL the stock and product webhooks use, `https://<your-site>/api/method/field_sales.api.webhooks.receive`. Don't add them under Shopify admin > Settings > Notifications > Webhooks: Field Sales verifies the signature with the app's client secret, and admin-created webhooks may be signed with a different key.
 
 - `orders/paid`
 - `orders/fulfilled`

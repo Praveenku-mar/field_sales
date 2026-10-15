@@ -42,3 +42,21 @@ export const REPORT_LINKS = [
     roles: MANAGERS,
   },
 ]
+
+// Records with a page in this app (route :name is the docname). Anything else opens in the desk.
+const DOCTYPE_ROUTES = {
+  'Field Order': 'Order',
+  Retailer: 'Retailer',
+  Visit: 'Visit',
+  'Platform Product': 'Product',
+  'Sales Rep': 'SalesRep',
+  'Sync Log': 'SyncLogEntry',
+}
+
+/** Where a notification's document lives: `{ route }` inside the SPA, else `{ href }` in the desk. */
+export function documentTarget(doctype, name) {
+  if (!doctype || !name) return null
+  const routeName = DOCTYPE_ROUTES[doctype]
+  if (routeName) return { route: { name: routeName, params: { name } } }
+  return { href: `/app/${doctype.toLowerCase().replace(/\s+/g, '-')}/${encodeURIComponent(name)}` }
+}

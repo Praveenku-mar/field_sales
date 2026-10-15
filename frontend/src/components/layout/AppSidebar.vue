@@ -14,8 +14,11 @@
           <kbd class="mr-2 text-xs text-ink-gray-4">Ctrl K</kbd>
         </template>
       </SidebarItem>
-      <SidebarItem label="Notification" icon="lucide-bell" style="height: 2.5rem" href="/app/notification-log" target="_blank">
+      <SidebarItem label="Notification" icon="lucide-bell" style="height: 2.5rem" :route="{ name: 'Notifications' }" :active="route.name === 'Notifications'">
         <template #prefix><span class="lucide-bell size-6 text-ink-gray-6" /></template>
+        <template v-if="counts.data?.unread_notifications" #suffix>
+          <span class="mr-2 text-xs font-medium tabular-nums text-ink-red-5">{{ counts.data.unread_notifications }}</span>
+        </template>
       </SidebarItem>
 
       <div class="h-6 shrink-0" />
@@ -52,7 +55,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Sidebar, SidebarCollapseToggle, SidebarHeader, SidebarItem, Tooltip, createResource } from 'frappe-ui'
 import { useSessionStore } from '@/stores/session'
@@ -94,4 +97,8 @@ watch(collapsed, (v) => {
 
 // Counts change as people work; refresh them when moving between pages.
 watch(() => route.name, () => counts.reload())
+// The Notifications page announces read/unread changes made without leaving it.
+const reloadCounts = () => counts.reload()
+onMounted(() => window.addEventListener('fs:notifications-changed', reloadCounts))
+onBeforeUnmount(() => window.removeEventListener('fs:notifications-changed', reloadCounts))
 </script>

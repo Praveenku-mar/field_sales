@@ -6,7 +6,7 @@ frappe.get_list, so the Sales Rep hierarchy rules apply as they do in the desk."
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, flt, get_first_day, nowdate
+from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.permissions import hierarchy_filters
@@ -142,7 +142,26 @@ def get_sidebar_counts() -> dict:
 	return {
 		"retailers": _count("Retailer", {"status": "Active"}),
 		"failed_orders": _count(**_preset_args("failed_orders")),
+		"unread_notifications": frappe.db.count(
+			"Notification Log", {"for_user": frappe.session.user, "read": 0}
+		),
 	}
+
+
+@frappe.whitelist()
+def get_notifications(limit: int = 50) -> list[dict]:
+	"""The current user's latest Notification Log rows, newest first (subject as plain text)."""
+	_check_access()
+	rows = frappe.get_all(
+		"Notification Log",
+		filters={"for_user": frappe.session.user},
+		fields=["name", "subject", "document_type", "document_name", "from_user", "read", "type", "creation"],
+		order_by="creation desc",
+		limit_page_length=min(cint(limit) or 50, 200),
+	)
+	for row in rows:
+		row["subject"] = strip_html(row.subject or "")
+	return rows
 
 
 @frappe.whitelist()

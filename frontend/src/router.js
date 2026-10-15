@@ -101,6 +101,12 @@ const routes = [
     meta: { title: 'Sync Failures', roles: MANAGERS },
   },
   {
+    path: '/notifications',
+    name: 'Notifications',
+    component: () => import('@/pages/Notifications.vue'),
+    meta: { title: 'Notifications' },
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/pages/Settings.vue'),

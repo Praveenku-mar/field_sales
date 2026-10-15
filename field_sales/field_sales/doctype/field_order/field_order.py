@@ -6,8 +6,10 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
+from field_sales.connectors import ConnectorError
 from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.sync.orders import enqueue_push_order
+from field_sales.sync.stock import fetch_live_stock, get_location_stock, get_sell_locations, live_stock_enabled
 
 
 class FieldOrder(Document):
@@ -17,12 +19,16 @@ class FieldOrder(Document):
 
 	def validate(self):
 		self._validate_visit()
+		self._validate_location()
+		self._set_row_stock()
 		self._validate_item_quantities()
 		self._validate_no_duplicate_products()
 		self._compute_item_amounts()
 		self._compute_totals()
+		self._validate_discount()
 
 	def before_submit(self):
+		self._apply_live_stock()
 		self._block_on_stock_warning()
 
 	def on_update(self):
@@ -65,6 +71,45 @@ class FieldOrder(Document):
 		if not self.sales_rep:
 			self.sales_rep = visit.sales_rep
 
+	def _validate_location(self):
+		"""
+		A draft sells from one location: the Store Connection default when none is picked, and
+		otherwise one of its ``Sell from here`` locations.
+
+		Skipped while the Store Connection has no locations, so orders can be made before it is set up.
+		"""
+		if self.docstatus != 0:
+			return
+		locations = {loc["location_id"]: loc for loc in get_sell_locations()}
+		if not locations:
+			return
+
+		if not self.location_id:
+			self.location_id = next(loc["location_id"] for loc in locations.values() if loc["is_default"])
+		if self.location_id not in locations:
+			frappe.throw(
+				_("Location {0} is not one the shop sells from. Pick one of: {1}").format(
+					self.location_id, ", ".join(loc["location_name"] for loc in locations.values())
+				)
+			)
+		self.location_name = locations[self.location_id]["location_name"]
+
+	def _set_row_stock(self):
+		"""
+		Rows show the stored stock at the order's location (Product Stock), on every draft save.
+
+		Not a ``fetch_from``: Frappe re-fetches those on every save, from Platform Product,
+		which only holds the default location's stock. "Refresh Stock" saves the live figure
+		at the order's location before saving the order, so the rows show it. A submitted
+		order keeps the stock it was submitted against (``_apply_live_stock``).
+		"""
+		if self.docstatus != 0:
+			return
+		stock = get_location_stock([row.product for row in self.items], self.location_id)
+		for row in self.items:
+			if row.product in stock:
+				row.available_qty = stock[row.product]
+
 	def _validate_item_quantities(self):
 		"""Every line item must have qty > 0."""
 		for row in self.items:
@@ -87,6 +132,57 @@ class FieldOrder(Document):
 					).format(row.idx, row.product_title or row.product, seen[row.product])
 				)
 			seen[row.product] = row.idx
+
+	def _validate_discount(self):
+		"""
+		The discount % must be 0-100 and, for anyone but a manager, within the order's rep limit.
+
+		Checked when a draft is saved or an order is submitted (so an amended order is checked
+		again), not on later updates of a submitted order or on cancel.
+		"""
+		percent = flt(self.discount_percent)
+		if not 0 <= percent <= 100:
+			frappe.throw(_("Discount % must be between 0 and 100."))
+		if self.docstatus == 2 or self.get("_action") in ("cancel", "update_after_submit"):
+			return
+		if percent <= 0 or frappe.session.user == "Administrator":
+			return
+		if {"Sales Manager", "System Manager"} & set(frappe.get_roles()):
+			return
+
+		rep = frappe.db.get_value(
+			"Sales Rep", self.sales_rep, ["full_name", "max_discount_pct"], as_dict=True
+		) or frappe._dict()
+		limit = flt(rep.max_discount_pct)
+		name = rep.full_name or self.sales_rep or frappe.session.user
+		if limit <= 0:
+			frappe.throw(_("{0} cannot give a discount on orders. Ask a manager.").format(name))
+		if percent > limit:
+			frappe.throw(_("Max discount for {0} is {1}%").format(name, limit))
+
+	def _apply_live_stock(self):
+		"""
+		Re-check tracked items against the store's current stock, not the last sync.
+
+		Every way of submitting (desk, app, API) goes through here. Skipped when the
+		store connection is off or has no default location; then the stored stock is
+		used, as before. If the store cannot be reached the submit is stopped: an
+		order must not be sent on stock that may be out of date.
+		"""
+		if not live_stock_enabled():
+			return
+		try:
+			live = fetch_live_stock([row.product for row in self.items], self.location_id)
+		except ConnectorError as e:
+			frappe.throw(
+				_("Could not check live stock on the store, so the order was not submitted: {0}").format(e.message),
+				title=_("Live stock unavailable"),
+			)
+
+		for row in self.items:
+			if row.product in live:
+				row.available_qty = live[row.product]
+		self._compute_item_amounts()  # recalculates stock_warning on the live quantities
 
 	def _block_on_stock_warning(self):
 		"""Prevent submission when any item exceeds tracked inventory."""
@@ -147,6 +243,9 @@ class FieldOrder(Document):
 		self.net_total = flt(sum(flt(r.amount) for r in self.items), self.precision("net_total"))
 		self.tax_amount = flt(
 			flt(self.net_total) * flt(self.tax_percent) / 100, self.precision("tax_amount")
+		)
+		self.discount_amount = flt(
+			flt(self.net_total) * flt(self.discount_percent) / 100, self.precision("discount_amount")
 		)
 		self.grand_total = flt(
 			flt(self.net_total) + flt(self.tax_amount) - flt(self.discount_amount),

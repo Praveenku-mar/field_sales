@@ -3,6 +3,7 @@ import path from 'path'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import frappeui from 'frappe-ui/vite'
+import { VitePWA } from 'vite-plugin-pwa'
 
 // `yarn dev` serves the app on :8080 and proxies /api, /app, /login, /assets,
 // /files to the bench web server (:8000, read from common_site_config.json).
@@ -29,6 +30,38 @@ export default defineConfig({
       },
     }),
     vue(),
+    // Installable PWA. The service worker (src/sw.js) only precaches the built assets;
+    // the HTML is rendered by Frappe with boot data and is never cached.
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
+      registerType: 'autoUpdate',
+      injectRegister: null,
+      // main.js registers the worker (injectRegister: null); the manifest link is in index.html.
+      manifestFilename: 'manifest.webmanifest',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,woff2,svg,png}'],
+      },
+      manifest: {
+        name: 'Field Sales',
+        short_name: 'Field Sales',
+        description: 'Visits, orders and stock for field sales reps',
+        start_url: '/fieldsales',
+        scope: '/fieldsales',
+        id: '/fieldsales',
+        display: 'standalone',
+        background_color: '#ffffff',
+        theme_color: '#ffffff',
+        icons: [
+          { src: '/assets/field_sales/manifest/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/assets/field_sales/manifest/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/assets/field_sales/manifest/maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: '/assets/field_sales/manifest/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      devOptions: { enabled: false },
+    }),
   ],
   server: {
     allowedHosts: benchSites,

@@ -3,12 +3,18 @@
     <PageHeader :title="d.retailer_name || name" :status="d.status">
       <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
       <template #actions>
-        <Button v-if="d.status === 'Planned'" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
+        <Button
+          v-if="session.isManager"
+          label="Edit"
+          icon-left="lucide-pencil"
+          :disabled="!d.name"
+          @click="editOpen = true"
+        />
+        <Button v-if="d.status === 'Planned' && isOwnVisit" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
         <template v-if="d.status === 'In Progress'">
-          <Button label="New Order" icon-left="lucide-shopping-cart" :href="newOrderUrl" />
+          <Button label="New Order" icon-left="lucide-shopping-cart" @click="newOrderOpen = true" />
           <Button label="Check Out" icon-left="lucide-log-out" variant="solid" :loading="busy" @click="startCheckOut" />
         </template>
-        <Button label="Open in Desk" icon-left="lucide-external-link" :href="`/app/visit/${encodeURIComponent(name)}`" />
       </template>
     </PageHeader>
 
@@ -36,7 +42,7 @@
 
         <SectionCard title="Orders from this Visit" flush>
           <template v-if="canOrder" #actions>
-            <Button label="New Order" icon-left="lucide-plus" size="sm" :href="newOrderUrl" />
+            <Button label="New Order" icon-left="lucide-plus" size="sm" @click="newOrderOpen = true" />
           </template>
           <DataTable :columns="orderColumns" :rows="orders.data || []" :loading="orders.loading" :row-route="(r) => ({ name: 'Order', params: { name: r.name } })" empty-icon="lucide-shopping-cart" empty-title="No orders from this visit">
             <template #cell-status="{ row }">
@@ -80,6 +86,10 @@
         </div>
       </template>
     </Dialog>
+
+    <!-- Managers only: session.isManager gates the Edit button above. -->
+    <VisitDialog v-model="editOpen" :visit="name" @updated="doc.reload()" />
+    <NewOrderDialog v-model="newOrderOpen" :retailer="d.retailer" :visit="name" :sales-rep="d.sales_rep" />
   </div>
 </template>
 
@@ -93,8 +103,18 @@ import MapEmbed from '@/components/MapEmbed.vue'
 import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import VisitDialog from '@/components/VisitDialog.vue'
+import NewOrderDialog from '@/components/NewOrderDialog.vue'
+import { useSessionStore } from '@/stores/session'
 import { callMethod, getPosition } from '@/utils/api'
 import { formatCurrency, formatDate, formatTime, plural, today } from '@/utils/format'
+
+const session = useSessionStore()
+// Only the assigned rep checks in (the server enforces it too). A Sales Rep is named
+// after its user, so the rep's name is the user's email.
+const isOwnVisit = computed(() => !!d.value.sales_rep && d.value.sales_rep === session.user)
+const editOpen = ref(false)
+const newOrderOpen = ref(false)
 
 const props = defineProps({ name: { type: String, required: true } })
 
@@ -107,7 +127,7 @@ const orders = createResource({ url: 'field_sales.api.get_visit_orders', params:
 const canOrder = computed(() => ['In Progress', 'Completed'].includes(d.value.status))
 
 const details = computed(() => [
-  { label: 'Retailer', value: d.value.retailer_name, route: d.value.retailer && { name: 'Retailer', params: { name: d.value.retailer } } },
+  { label: 'Customer', value: d.value.retailer_name, route: d.value.retailer && { name: 'Retailer', params: { name: d.value.retailer } } },
   { label: 'City', value: d.value.city },
   { label: 'Sales Rep', value: d.value.sales_rep_name },
   { label: 'Date', value: formatDate(d.value.visit_date) },
@@ -120,11 +140,11 @@ const geo = computed(() => [
     value: !d.value.check_in_time
       ? 'Not checked in'
       : d.value.within_geofence
-        ? `Inside (${Math.round(d.value.distance_from_retailer_m || 0)} m from the retailer)`
-        : `Outside — ${Math.round(d.value.distance_from_retailer_m || 0)} m from the retailer`,
+        ? `Inside (${Math.round(d.value.distance_from_retailer_m || 0)} m from the customer)`
+        : `Outside — ${Math.round(d.value.distance_from_retailer_m || 0)} m from the customer`,
   },
   { label: 'GPS accuracy', value: d.value.location_accuracy_m ? `± ${Math.round(d.value.location_accuracy_m)} m` : null },
-  { label: 'Map shows', value: d.value.latitude ? 'Where the rep checked in' : 'The retailer (no check-in yet)' },
+  { label: 'Map shows', value: d.value.latitude ? 'Where the rep checked in' : 'The customer (no check-in yet)' },
 ])
 const outcome = computed(() => [
   { label: 'Order Taken', value: d.value.order_taken ? 'Yes' : 'No' },
@@ -146,14 +166,11 @@ const banner = computed(() => {
     return { text: `Planned for ${formatDate(d.value.visit_date)} and not checked in.`, class: 'bg-surface-amber-1 text-ink-amber-7' }
   }
   if (d.value.check_in_time && !d.value.within_geofence) {
-    return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the retailer.`, class: 'bg-surface-amber-1 text-ink-amber-7' }
+    return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the customer.`, class: 'bg-surface-amber-1 text-ink-amber-7' }
   }
   return null
 })
 
-const newOrderUrl = computed(
-  () => `/app/field-order/new?retailer=${encodeURIComponent(d.value.retailer || '')}&visit=${encodeURIComponent(props.name)}&sales_rep=${encodeURIComponent(d.value.sales_rep || '')}`,
-)
 const orderColumns = [
   { key: 'name', label: 'Order' },
   { key: 'order_date', label: 'Date', format: formatDate },

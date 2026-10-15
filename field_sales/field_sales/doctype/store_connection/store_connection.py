@@ -12,6 +12,31 @@ class StoreConnection(Document):
 	def validate(self):
 		self._normalize_shopify_store_url()
 		self._clear_token_on_credential_change()
+		self._validate_locations()
+
+	def _validate_locations(self):
+		"""
+		Location ids are unique, and the default location is always a ``Sell from here`` row
+		(added or ticked for you, rather than refusing the save).
+		"""
+		seen = set()
+		for row in self.locations:
+			row.location_id = (row.location_id or "").strip()
+			if row.location_id in seen:
+				frappe.throw(_("Row {0}: Location {1} is listed twice").format(row.idx, row.location_id))
+			seen.add(row.location_id)
+
+		default_id = (self.default_location_id or "").strip()
+		self.default_location_id = default_id
+		if not default_id:
+			return
+
+		default_row = next((r for r in self.locations if r.location_id == default_id), None)
+		if not default_row:
+			default_row = self.append("locations", {"location_id": default_id, "location_name": self.default_location_name})
+		default_row.sell_from = 1
+		if default_row.location_name and not self.default_location_name:
+			self.default_location_name = default_row.location_name
 
 	def _clear_token_on_credential_change(self):
 		"""Drop the cached access token when the store or app credentials change."""

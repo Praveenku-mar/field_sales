@@ -13,8 +13,13 @@
   "col_break_main",
   "territory",
   "monthly_target",
+  "max_discount_pct",
   "reports_to",
-  "active"
+  "active",
+  "commission_section",
+  "commission_plan",
+  "col_break_commission",
+  "commission_active"
  ],
  "fields": [
   {
@@ -61,6 +66,12 @@
    "description": "Order value expected per calendar month; Rep Performance prorates it over the selected period"
   },
   {
+   "fieldname": "max_discount_pct",
+   "fieldtype": "Percent",
+   "label": "Max Discount % per Order",
+   "description": "Highest discount this rep can give on one order. Empty = no discount."
+  },
+  {
    "fieldname": "reports_to",
    "fieldtype": "Link",
    "label": "Reports To",
@@ -72,6 +83,29 @@
    "label": "Active",
    "default": "1",
    "in_standard_filter": 1
+  },
+  {
+   "fieldname": "commission_section",
+   "fieldtype": "Section Break",
+   "label": "Commission"
+  },
+  {
+   "fieldname": "commission_plan",
+   "fieldtype": "Link",
+   "label": "Commission Plan",
+   "options": "Commission Plan",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "col_break_commission",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "commission_active",
+   "fieldtype": "Check",
+   "label": "Commission Active",
+   "default": "0",
+   "description": "Earn commission on orders. Needs a Commission Plan."
   }
  ],
  "in_create": 0,

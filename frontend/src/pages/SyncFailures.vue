@@ -12,11 +12,13 @@
     <div class="space-y-5 px-5 pb-6">
       <SectionCard :title="`Field Orders (${orders.count.data ?? '…'})`" flush>
         <DataTable
+          class="max-h-[60vh]"
           :columns="orderColumns"
           :rows="orders.list.data || []"
           :loading="orders.list.list.loading"
           :total="orders.count.data"
           :has-more="orders.list.hasNextPage"
+          v-model:page-length="orders.pageSize.value"
           :row-route="(r) => ({ name: 'Order', params: { name: r.name } })"
           empty-icon="lucide-circle-check"
           empty-title="No failed orders"
@@ -33,16 +35,18 @@
         </DataTable>
       </SectionCard>
 
-      <SectionCard :title="`Retailers (${retailers.count.data ?? '…'})`" flush>
+      <SectionCard :title="`Customers (${retailers.count.data ?? '…'})`" flush>
         <DataTable
+          class="max-h-[60vh]"
           :columns="retailerColumns"
           :rows="retailers.list.data || []"
           :loading="retailers.list.list.loading"
           :total="retailers.count.data"
           :has-more="retailers.list.hasNextPage"
+          v-model:page-length="retailers.pageSize.value"
           :row-route="(r) => ({ name: 'Retailer', params: { name: r.name } })"
           empty-icon="lucide-circle-check"
-          empty-title="No failed retailers"
+          empty-title="No failed customers"
           @load-more="retailers.list.next()"
         >
           <template #cell-retailer_name="{ row }">
@@ -93,7 +97,7 @@ const common = [
   { key: 'actions', label: '', align: 'right' },
 ]
 const orderColumns = [{ key: 'retailer_name', label: 'Order' }, ...common]
-const retailerColumns = [{ key: 'retailer_name', label: 'Retailer' }, ...common]
+const retailerColumns = [{ key: 'retailer_name', label: 'Customer' }, ...common]
 
 function refresh() {
   orders.refresh()

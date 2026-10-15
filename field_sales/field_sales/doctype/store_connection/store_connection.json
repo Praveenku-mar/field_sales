@@ -37,10 +37,22 @@
   "default_location_name",
   "order_mode",
   "product_sync_frequency",
+  "locations_section",
+  "locations",
   "status_section",
   "last_test_status",
   "col_break_status",
-  "last_tested_on"
+  "last_tested_on",
+  "shop_name",
+  "invoice_section",
+  "send_order_confirmation",
+  "col_break_invoice",
+  "company_name",
+  "company_address",
+  "company_state",
+  "company_gstin",
+  "company_phone",
+  "company_email"
  ],
  "fields": [
   {
@@ -243,12 +255,79 @@
    "fieldtype": "Datetime",
    "label": "Last Tested On",
    "read_only": 1
+  },
+  {
+   "description": "Store name from the last successful Test Connection; shown next to the page title.",
+   "fieldname": "shop_name",
+   "fieldtype": "Data",
+   "label": "Shop Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "locations_section",
+   "fieldtype": "Section Break",
+   "label": "Locations"
+  },
+  {
+   "fieldname": "locations",
+   "fieldtype": "Table",
+   "label": "Locations",
+   "options": "Store Location",
+   "description": "Stock locations reps can sell from. The default location is always one of them."
+  },
+  {
+   "fieldname": "invoice_section",
+   "fieldtype": "Section Break",
+   "label": "Invoice"
+  },
+  {
+   "fieldname": "send_order_confirmation",
+   "fieldtype": "Check",
+   "label": "Send Order Confirmation",
+   "default": "1",
+   "description": "Email the customer a tax invoice once the store confirms the order"
+  },
+  {
+   "fieldname": "company_name",
+   "fieldtype": "Data",
+   "label": "Company Name"
+  },
+  {
+   "fieldname": "company_address",
+   "fieldtype": "Small Text",
+   "label": "Company Address"
+  },
+  {
+   "fieldname": "col_break_invoice",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_state",
+   "fieldtype": "Data",
+   "label": "State",
+   "description": "Decides CGST + SGST (same state as the customer) or IGST"
+  },
+  {
+   "fieldname": "company_gstin",
+   "fieldtype": "Data",
+   "label": "GSTIN"
+  },
+  {
+   "fieldname": "company_phone",
+   "fieldtype": "Data",
+   "label": "Phone"
+  },
+  {
+   "fieldname": "company_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
   }
  ],
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-09 09:36:35.000000",
+ "modified": "2026-10-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

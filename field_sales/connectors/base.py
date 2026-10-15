@@ -29,6 +29,48 @@ Normalized product dict (one per *variant*)::
 		"status": "Active" | "Draft" | "Archived",
 		"track_inventory": bool,
 	}
+
+Webhooks: the store pushes events to ``field_sales.api.webhooks.receive``, which
+verifies and parses them through the connector, so everything after that is
+platform-neutral. A parsed event is::
+
+	{
+		"topic": "stock/update" | "product/update" | "product/delete"
+			| "order/paid" | "order/fulfilled" | "order/cancelled" | "refund/create" | other,
+		"platform_topic": str,       # the store's own topic name, for logs
+		"event_id": str | None,      # unique per delivery; used to drop duplicates
+		"updated_at": str | None,    # ISO timestamp of the change, to order events
+		"payload": dict,             # the store's JSON body, untouched
+	}
+
+Normalized order dict (``get_order``), used for commission. Statuses are the
+platform's, mapped to these lowercase words::
+
+	{
+		"external_order_id": str,
+		"currency": str,
+		"financial_status": "pending" | "authorized" | "partially_paid" | "paid"
+			| "partially_refunded" | "refunded" | "voided" | "expired" | "",
+		"fulfillment_status": "fulfilled" | "partial" | "unfulfilled" | other lowercase,
+		"cancelled": bool,
+		"lines": [
+			{
+				"line_id": str,
+				"external_variant_id": str | None,   # None for custom lines (e.g. tax)
+				"qty": float,                        # all units, including refunded
+				"current_qty": float,                # units not refunded / removed
+				"unit_price": float,                 # before discounts and tax
+				"discount": float,                   # total discount allocated to the line
+				"product_type": str | None,
+				"tags": [str, ...],
+			},
+		],
+		"refunds": [
+			{"refund_id": str, "lines": [{"line_id": str, "qty": float, "amount": float}]},
+		],
+	}
+
+Amounts are in the order's own ``currency``.
 """
 
 from __future__ import annotations
@@ -40,6 +82,18 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
 if TYPE_CHECKING:
 	from frappe.model.document import Document
 
+
+#: Platform-neutral webhook topics; ``parse_webhook`` maps each platform's own topics to these.
+STOCK_TOPIC = "stock/update"
+PRODUCT_UPDATE_TOPIC = "product/update"
+PRODUCT_DELETE_TOPIC = "product/delete"
+ORDER_PAID_TOPIC = "order/paid"
+ORDER_FULFILLED_TOPIC = "order/fulfilled"
+ORDER_CANCELLED_TOPIC = "order/cancelled"
+REFUND_CREATE_TOPIC = "refund/create"
+
+#: Topics that make the commission engine re-read the order.
+ORDER_TOPICS = (ORDER_PAID_TOPIC, ORDER_FULFILLED_TOPIC, ORDER_CANCELLED_TOPIC, REFUND_CREATE_TOPIC)
 
 NORMALIZED_PRODUCT_KEYS: tuple[str, ...] = (
 	"external_product_id",
@@ -109,7 +163,8 @@ class BaseConnector:
 		"""
 		Verify credentials and reachability.
 
-		:return: ``{"ok": bool, "shop_name": str, "message": str}``
+		:return: ``{"ok": bool, "shop_name": str, "shop_domain": str, "scopes": [str, ...], "message": str}``;
+			``scopes`` are the permissions granted to the app (empty if the platform has none or on failure).
 		"""
 		raise NotImplementedError
 
@@ -188,6 +243,65 @@ class BaseConnector:
 		:return: URL, or ``None`` if the platform has no such page.
 		"""
 		return None
+
+	def verify_webhook(self, headers, raw_body: bytes) -> bool:
+		"""
+		Check that a webhook request really comes from the configured store.
+
+		:param headers: Request headers (case-insensitive mapping).
+		:param raw_body: The request body exactly as received; signatures cover these bytes.
+		:return: ``True`` if the signature and sender are valid; ``False`` if anything is missing or wrong.
+		"""
+		raise NotImplementedError
+
+	def parse_webhook(self, headers, raw_body: bytes) -> dict:
+		"""
+		Turn a verified webhook request into a neutral event.
+
+		:param headers: Request headers (case-insensitive mapping).
+		:param raw_body: The request body exactly as received.
+		:return: ``{"topic", "platform_topic", "event_id", "updated_at", "payload"}``
+			(see the module docstring); ``topic`` is one of ``STOCK_TOPIC``,
+			``PRODUCT_UPDATE_TOPIC``, ``PRODUCT_DELETE_TOPIC``, or the platform topic if unmapped.
+		"""
+		raise NotImplementedError
+
+	def handle_stock_event(self, payload: dict) -> dict | None:
+		"""
+		Read a stock-change payload.
+
+		:param payload: ``payload`` of a ``STOCK_TOPIC`` event.
+		:return: ``{"external_inventory_id": str, "location_id": str, "available": float}``
+			(plain ids), or ``None`` if the payload is not a stock event.
+		"""
+		raise NotImplementedError
+
+	def get_product(self, external_product_id: str) -> list[dict]:
+		"""
+		Fetch every variant of one product.
+
+		:param external_product_id: Plain platform product id.
+		:return: Normalized product dicts, one per variant; empty if the product no longer exists.
+		"""
+		raise NotImplementedError
+
+	def get_order(self, external_id: str) -> dict:
+		"""
+		Fetch the current state of one order, for commission.
+
+		:param external_id: Plain platform order id (``Field Order.external_order_id``).
+		:return: Normalized order dict (see the module docstring); empty dict if the order no longer exists.
+		"""
+		raise NotImplementedError
+
+	def order_id_from_event(self, payload: dict) -> str | None:
+		"""
+		Plain order id behind an order or refund webhook.
+
+		:param payload: ``payload`` of an ``ORDER_TOPICS`` event.
+		:return: The order id, or ``None`` if the payload carries none.
+		"""
+		raise NotImplementedError
 
 	# ------------------------------------------------------------------
 	# Shared helpers

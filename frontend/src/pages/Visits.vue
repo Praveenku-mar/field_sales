@@ -1,12 +1,13 @@
 <template>
-  <div>
+  <!-- Full height: the table fills what is left and scrolls inside its card -->
+  <div class="flex h-full flex-col">
     <PageHeader title="Visits">
       <template #actions>
-        <Button label="New Visit" icon-left="lucide-plus" variant="solid" href="/app/visit/new" />
+        <Button label="New Visit" icon-left="lucide-plus" variant="solid" @click="newVisitOpen = true" />
       </template>
     </PageHeader>
-    <div class="space-y-3 px-5 pb-5">
-      <ListFilters v-model="model" search-placeholder="Search retailer" :tabs="tabs" :fields="fields">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+      <ListFilters v-model="model" search-placeholder="Search customer" :tabs="tabs" :fields="fields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
       <DataTable
@@ -15,6 +16,7 @@
         :loading="list.list.loading"
         :total="count.data"
         :has-more="list.hasNextPage"
+        v-model:page-length="pageSize"
         :row-route="(row) => ({ name: 'Visit', params: { name: row.name } })"
         empty-icon="lucide-map-pin-check"
         empty-title="No visits found"
@@ -33,10 +35,12 @@
         </template>
       </DataTable>
     </div>
+    <VisitDialog v-model="newVisitOpen" />
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { Button } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
@@ -44,8 +48,11 @@ import ListFilters from '@/components/ListFilters.vue'
 import PresetChip from '@/components/PresetChip.vue'
 import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import VisitDialog from '@/components/VisitDialog.vue'
 import { useDocList } from '@/composables/useDocList'
 import { formatDate, formatTime, today } from '@/utils/format'
+
+const newVisitOpen = ref(false)
 
 const tabs = [
   { label: 'Today', value: 'today' },
@@ -55,7 +62,7 @@ const tabs = [
 ]
 const fields = [{ fieldname: 'status', label: 'Status', options: ['', 'Planned', 'In Progress', 'Completed', 'Cancelled'] }]
 const columns = [
-  { key: 'retailer_name', label: 'Retailer' },
+  { key: 'retailer_name', label: 'Customer' },
   { key: 'sales_rep_name', label: 'Sales Rep' },
   { key: 'visit_date', label: 'Date', format: formatDate },
   { key: 'check_in_time', label: 'Check-in', format: (v) => (v ? formatTime(v) : '—') },
@@ -74,7 +81,7 @@ function buildFilters(m) {
 }
 
 const route = useRoute()
-const { model, list, count, presetLabel } = useDocList({
+const { model, list, count, presetLabel, pageSize } = useDocList({
   doctype: 'Visit',
   fields: ['name', 'retailer_name', 'city', 'sales_rep_name', 'visit_date', 'status', 'check_in_time', 'time_on_site_min', 'within_geofence', 'distance_from_retailer_m'],
   orderBy: 'visit_date desc, modified desc',

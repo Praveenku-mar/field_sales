@@ -12,6 +12,10 @@ cached encrypted on Store Connection and refreshed shortly before it expires
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import re
 import time
 from datetime import timedelta
@@ -22,9 +26,21 @@ from frappe import _
 from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime
 from frappe.utils.password import set_encrypted_password
 
-from field_sales.connectors.base import BaseConnector, ConnectorError
+from field_sales.connectors.base import (
+	ORDER_CANCELLED_TOPIC,
+	ORDER_FULFILLED_TOPIC,
+	ORDER_PAID_TOPIC,
+	PRODUCT_DELETE_TOPIC,
+	PRODUCT_UPDATE_TOPIC,
+	REFUND_CREATE_TOPIC,
+	STOCK_TOPIC,
+	BaseConnector,
+	ConnectorError,
+)
 
-REQUEST_TIMEOUT = 30  # seconds
+# (connect, read) seconds. A short connect limit means an unreachable address (e.g. a broken
+# IPv6 route) is given up quickly and the next one (IPv4) is tried; replies still get 30 s.
+REQUEST_TIMEOUT = (5, 30)
 TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 DEFAULT_TOKEN_TTL = 24 * 60 * 60  # used if Shopify omits expires_in
 THROTTLE_MIN_AVAILABLE = 100  # query cost points
@@ -34,19 +50,40 @@ STOCK_BATCH_SIZE = 50
 
 STATUS_MAP = {"ACTIVE": "Active", "DRAFT": "Draft", "ARCHIVED": "Archived"}
 
-PRODUCTS_QUERY = """
-query($cursor: String) {
-  productVariants(first: %d, after: $cursor) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
+# Shopify topic -> neutral topic (see ``connectors.base``).
+TOPIC_MAP = {
+	"inventory_levels/update": STOCK_TOPIC,
+	"products/update": PRODUCT_UPDATE_TOPIC,
+	"products/delete": PRODUCT_DELETE_TOPIC,
+	"orders/paid": ORDER_PAID_TOPIC,
+	"orders/fulfilled": ORDER_FULFILLED_TOPIC,
+	"orders/cancelled": ORDER_CANCELLED_TOPIC,
+	"refunds/create": REFUND_CREATE_TOPIC,
+}
+PRODUCT_VARIANT_LIMIT = 250
+
+# Fields of one variant node, shared by the full product sync and single-product fetch.
+VARIANT_FIELDS = """
       id title sku barcode price compareAtPrice
       image { url }
       inventoryItem { id tracked }
       product { id title status productType featuredImage { url } collections(first: 1) { nodes { title } } }
-    }
+"""
+
+PRODUCTS_QUERY = """
+query($cursor: String) {
+  productVariants(first: %d, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { %s }
   }
 }
-""" % PAGE_SIZE
+""" % (PAGE_SIZE, VARIANT_FIELDS)
+
+PRODUCT_QUERY = """
+query($id: ID!) {
+  product(id: $id) { variants(first: %d) { nodes { %s } } }
+}
+""" % (PRODUCT_VARIANT_LIMIT, VARIANT_FIELDS)
 
 CUSTOMER_CREATE = """
 mutation($input: CustomerInput!) {
@@ -105,6 +142,42 @@ ORDER_SEARCH = """
 query($q: String!) { orders(first: 1, query: $q) { nodes { id name } } }
 """
 
+ORDER_LINE_LIMIT = 250
+ORDER_REFUND_LIMIT = 50
+
+# Everything commission needs about one order (amounts are shopMoney).
+ORDER_QUERY = """
+query($id: ID!) {
+  order(id: $id) {
+    id
+    displayFinancialStatus
+    displayFulfillmentStatus
+    cancelledAt
+    currencyCode
+    tags
+    lineItems(first: %d) {
+      nodes {
+        id
+        quantity
+        currentQuantity
+        sku
+        originalUnitPriceSet { shopMoney { amount } }
+        discountAllocations { allocatedAmountSet { shopMoney { amount } } }
+        variant { id }
+        product { id productType tags }
+      }
+    }
+    refunds(first: %d) {
+      id
+      createdAt
+      refundLineItems(first: %d) {
+        nodes { lineItem { id } quantity subtotalSet { shopMoney { amount } } }
+      }
+    }
+  }
+}
+""" % (ORDER_LINE_LIMIT, ORDER_REFUND_LIMIT, ORDER_LINE_LIMIT)
+
 SHOP_CURRENCY_QUERY = "{ shop { currencyCode } }"
 
 # Shopify needs a code for an order-level fixed discount; this one is shown on the order.
@@ -148,18 +221,22 @@ class ShopifyConnector(BaseConnector):
 	# ------------------------------------------------------------------
 
 	def test_connection(self) -> dict:
-		"""Query the shop's name; never raises for platform errors, returns ``ok=False`` instead."""
+		"""Query the shop and the app's granted scopes; never raises for platform errors, returns ``ok=False`` instead."""
 		try:
 			data = self._graphql(
-				"{ shop { name myshopifyDomain } }", operation="Test Connection"
+				"{ shop { name myshopifyDomain } currentAppInstallation { accessScopes { handle } } }",
+				operation="Test Connection",
 			)
 		except ConnectorError as e:
-			return {"ok": False, "shop_name": "", "message": e.message}
+			return {"ok": False, "shop_name": "", "shop_domain": self.shop_domain, "scopes": [], "message": e.message}
 
 		shop = data.get("shop") or {}
+		scopes = ((data.get("currentAppInstallation") or {}).get("accessScopes")) or []
 		return {
 			"ok": True,
 			"shop_name": shop.get("name") or "",
+			"shop_domain": shop.get("myshopifyDomain") or self.shop_domain,
+			"scopes": [s["handle"] for s in scopes if s.get("handle")],
 			"message": _("Connected to {0} ({1})").format(shop.get("name"), shop.get("myshopifyDomain")),
 		}
 
@@ -206,6 +283,68 @@ class ShopifyConnector(BaseConnector):
 				stock.setdefault(i, 0.0)
 
 		return stock
+
+	def get_product(self, external_product_id: str) -> list[dict]:
+		"""Every variant of one product as normalized dicts; empty if the product was deleted."""
+		data = self._graphql(
+			PRODUCT_QUERY, {"id": to_gid("Product", external_product_id)}, operation="Product Sync"
+		)
+		product = data.get("product") or {}
+		return [_normalize_variant(v) for v in (product.get("variants") or {}).get("nodes") or []]
+
+	def verify_webhook(self, headers, raw_body: bytes) -> bool:
+		"""HMAC-SHA256 of the body (keyed with the client secret) must match, from this shop."""
+		secret = self.settings.get_password("shopify_client_secret", raise_exception=False)
+		signature = headers.get("X-Shopify-Hmac-Sha256")
+		shop = headers.get("X-Shopify-Shop-Domain")
+		if not secret or not signature or not shop:
+			return False
+
+		digest = hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()
+		expected = base64.b64encode(digest).decode()
+		signature_ok = hmac.compare_digest(expected.encode(), signature.strip().encode())
+		return signature_ok and shop.strip().lower() == self.shop_domain.lower()
+
+	def parse_webhook(self, headers, raw_body: bytes) -> dict:
+		"""Neutral event from Shopify's ``X-Shopify-*`` headers and JSON body."""
+		platform_topic = headers.get("X-Shopify-Topic") or ""
+		try:
+			payload = json.loads(raw_body or b"{}")
+		except ValueError:
+			payload = {}
+		if not isinstance(payload, dict):
+			payload = {}
+
+		return {
+			"topic": TOPIC_MAP.get(platform_topic, platform_topic),
+			"platform_topic": platform_topic,
+			"event_id": headers.get("X-Shopify-Webhook-Id") or None,
+			"updated_at": payload.get("updated_at"),
+			"payload": payload,
+		}
+
+	def handle_stock_event(self, payload: dict) -> dict | None:
+		"""``inventory_levels/update`` payload -> plain ids and quantity; ``None`` if ids are missing."""
+		inventory_id = payload.get("inventory_item_id")
+		location_id = payload.get("location_id")
+		if not inventory_id or not location_id:
+			return None
+
+		return {
+			"external_inventory_id": from_gid(str(inventory_id)),
+			"location_id": from_gid(str(location_id)),
+			"available": flt(payload.get("available")),
+		}
+
+	def order_id_from_event(self, payload: dict) -> str | None:
+		"""``orders/*`` carry the order as ``id``; ``refunds/create`` carries it as ``order_id``."""
+		value = payload.get("order_id") or payload.get("id")
+		return from_gid(str(value)) if value else None
+
+	def get_order(self, external_id: str) -> dict:
+		"""Current state of one order, normalized (see ``connectors.base``); empty if it is gone."""
+		data = self._graphql(ORDER_QUERY, {"id": to_gid("Order", external_id)}, operation="Other")
+		return _normalize_order(data.get("order"))
 
 	def create_customer(self, retailer) -> dict:
 		"""
@@ -761,11 +900,20 @@ def _field_order_tag(field_order) -> str:
 
 
 def _order_tags(field_order) -> list[str]:
-	return [t for t in ("field-sales", field_order.sales_rep, _field_order_tag(field_order)) if t]
+	# Shopify tags cannot contain commas.
+	location = (
+		f"Location: {field_order.location_name or field_order.location_id}".replace(",", " ")
+		if field_order.location_id
+		else None
+	)
+	return [t for t in ("field-sales", field_order.sales_rep, _field_order_tag(field_order), location) if t]
 
 
 def _order_note(field_order) -> str:
-	return f"Field Order {field_order.name} \u00b7 Rep {field_order.sales_rep}"
+	note = f"Field Order {field_order.name} \u00b7 Rep {field_order.sales_rep}"
+	if field_order.location_id:
+		note += f" \u00b7 Location {field_order.location_name or field_order.location_id}"
+	return note
 
 
 def _tax_line_item(field_order, currency: str) -> dict | None:
@@ -796,6 +944,59 @@ def _order_result(draft: dict) -> dict:
 		"draft_id": from_gid(draft.get("id")),
 		"order_id": from_gid(order.get("id")),
 		"order_name": order.get("name"),
+	}
+
+
+def _normalize_order(order: dict | None) -> dict:
+	"""Shopify order node -> neutral order dict; enums become lowercase words."""
+	if not order:
+		return {}
+
+	fulfillment = (order.get("displayFulfillmentStatus") or "").lower()
+	lines = []
+	for node in (order.get("lineItems") or {}).get("nodes") or []:
+		product = node.get("product") or {}
+		discount = sum(
+			flt(((a.get("allocatedAmountSet") or {}).get("shopMoney") or {}).get("amount"))
+			for a in node.get("discountAllocations") or []
+		)
+		lines.append(
+			{
+				"line_id": from_gid(node.get("id")),
+				"external_variant_id": from_gid((node.get("variant") or {}).get("id")),
+				"qty": flt(node.get("quantity")),
+				"current_qty": flt(node.get("currentQuantity")),
+				"unit_price": flt(((node.get("originalUnitPriceSet") or {}).get("shopMoney") or {}).get("amount")),
+				"discount": discount,
+				"product_type": product.get("productType") or None,
+				"tags": list(product.get("tags") or []),
+			}
+		)
+
+	refunds = []
+	for refund in order.get("refunds") or []:
+		refunds.append(
+			{
+				"refund_id": from_gid(refund.get("id")),
+				"lines": [
+					{
+						"line_id": from_gid((n.get("lineItem") or {}).get("id")),
+						"qty": flt(n.get("quantity")),
+						"amount": flt(((n.get("subtotalSet") or {}).get("shopMoney") or {}).get("amount")),
+					}
+					for n in (refund.get("refundLineItems") or {}).get("nodes") or []
+				],
+			}
+		)
+
+	return {
+		"external_order_id": from_gid(order.get("id")),
+		"currency": order.get("currencyCode"),
+		"financial_status": (order.get("displayFinancialStatus") or "").lower(),
+		"fulfillment_status": "partial" if fulfillment == "partially_fulfilled" else fulfillment,
+		"cancelled": bool(order.get("cancelledAt")),
+		"lines": lines,
+		"refunds": refunds,
 	}
 
 

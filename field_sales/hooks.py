@@ -96,9 +96,12 @@ add_to_apps_screen = [
 	}
 ]
 
-# Desktop app (frontend/, built into public/frontend): every /fieldsales/* path serves www/fieldsales.html
+# Desktop app (frontend/, built into public/frontend): every /fieldsales/* path serves www/fieldsales.html.
+# /fs is a short alias for the same app; the router picks its base from the URL.
 website_route_rules = [
 	{"from_route": "/fieldsales/<path:app_path>", "to_route": "fieldsales"},
+	{"from_route": "/fs", "to_route": "fieldsales"},
+	{"from_route": "/fs/<path:app_path>", "to_route": "fieldsales"},
 ]
 
 # Generators
@@ -192,6 +195,8 @@ permission_query_conditions = {
 	"Sales Rep": "field_sales.permissions.sales_rep_query",
 	"Field Order": "field_sales.permissions.field_order_query",
 	"Retailer": "field_sales.permissions.retailer_query",
+	"Commission Entry": "field_sales.permissions.commission_entry_query",
+	"Commission Statement": "field_sales.permissions.commission_statement_query",
 }
 
 has_permission = {
@@ -199,6 +204,8 @@ has_permission = {
 	"Sales Rep": "field_sales.permissions.sales_rep_has_permission",
 	"Field Order": "field_sales.permissions.field_order_has_permission",
 	"Retailer": "field_sales.permissions.retailer_has_permission",
+	"Commission Entry": "field_sales.permissions.commission_entry_has_permission",
+	"Commission Statement": "field_sales.permissions.commission_statement_has_permission",
 }
 
 # Document Events
@@ -235,6 +242,10 @@ scheduler_events = {
 		# Daily team summary to each manager, in the system timezone.
 		"0 20 * * *": [
 			"field_sales.daily_summary.send_daily_summary",
+		],
+		# Draft Commission Statements for last month, on the 1st.
+		"0 2 1 * *": [
+			"field_sales.commission.statements.generate_monthly_statements",
 		],
 	},
 }
@@ -333,3 +344,10 @@ require_type_annotated_api_methods = True
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+
+# Fixtures
+# ------------
+# The Field Sales Order and Field Sales Invoice print formats (created on the site, versioned here).
+fixtures = [
+	{"dt": "Print Format", "filters": [["name", "in", ["Field Sales Order", "Field Sales Invoice"]]]},
+]

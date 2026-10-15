@@ -21,10 +21,12 @@ frappe.ui.form.on("Field Order", {
 	},
 
 	refresh: function (frm) {
+		_set_location_options(frm);
 		_highlight_stock_warnings(frm);
 		_show_order_summary(frm);
 		_add_stock_button(frm);
 		_show_sync_status(frm);
+		_show_discount_limit(frm);
 	},
 
 	// Live stock check right before submit; returning the promise makes the
@@ -73,6 +75,10 @@ frappe.ui.form.on("Field Order", {
 		});
 	},
 
+	sales_rep: function (frm) {
+		_show_discount_limit(frm);
+	},
+
 	visit: function (frm) {
 		if (!frm.doc.visit) return;
 		// Picking a visit fills its retailer and rep.
@@ -83,11 +89,19 @@ frappe.ui.form.on("Field Order", {
 		});
 	},
 
+	// A new location means different stock: save and re-check it live on a draft.
+	location_id: function (frm) {
+		if (frm.is_new() || frm.doc.docstatus !== 0 || !frm.doc.location_id) return;
+		frm.save().then(function () {
+			return _refresh_stock(frm);
+		});
+	},
+
 	tax_percent: function (frm) {
 		_recalc_totals(frm);
 	},
 
-	discount_amount: function (frm) {
+	discount_percent: function (frm) {
 		_recalc_totals(frm);
 	},
 });
@@ -97,6 +111,25 @@ frappe.ui.form.on("Field Order", {
 // ---------------------------------------------------------------------------
 
 frappe.ui.form.on("Field Order Item", {
+	// Stock at the order's location (the row field is not fetched from the product, which
+	// only holds the default location's stock). The server sets it again on save.
+	product: function (frm, cdt, cdn) {
+		var row = locals[cdt][cdn];
+		if (!row.product) return;
+		frappe
+			.call({
+				method: "field_sales.api.get_live_stock",
+				args: { products: [row.product], location_id: frm.doc.location_id || null },
+			})
+			.then(function (r) {
+				var live = r.message || {};
+				if (row.product in live) {
+					frappe.model.set_value(cdt, cdn, "available_qty", live[row.product]);
+					_highlight_stock_warnings(frm);
+				}
+			});
+	},
+
 	qty: function (frm, cdt, cdn) {
 		_recalc_row(frm, cdt, cdn);
 	},
@@ -228,6 +261,21 @@ function _listen_for_sync(frm) {
 	});
 }
 
+// Offer the Store Connection's "Sell from here" locations in the Location select.
+function _set_location_options(frm) {
+	frappe.call({ method: "field_sales.api.get_sell_locations" }).then(function (r) {
+		var options = (r.message || []).map(function (loc) {
+			return { label: loc.location_name, value: loc.location_id };
+		});
+		// An order made at a location that is no longer sold from keeps showing it.
+		if (frm.doc.location_id && !options.some(function (o) { return o.value === frm.doc.location_id; })) {
+			options.push({ label: frm.doc.location_name || frm.doc.location_id, value: frm.doc.location_id });
+		}
+		frm.set_df_property("location_id", "options", [{ label: "", value: "" }].concat(options));
+		frm.refresh_field("location_id");
+	});
+}
+
 // ---------------------------------------------------------------------------
 // Summary bar
 // ---------------------------------------------------------------------------
@@ -250,6 +298,26 @@ function _show_order_summary(frm) {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+// Show the rep's discount limit under Discount %.
+function _show_discount_limit(frm) {
+	if (frappe.user.has_role(["Sales Manager", "System Manager"])) {
+		frm.set_df_property("discount_percent", "description", __("Managers are not limited"));
+		return;
+	}
+	if (!frm.doc.sales_rep) {
+		frm.set_df_property("discount_percent", "description", "");
+		return;
+	}
+	frappe.db.get_value("Sales Rep", frm.doc.sales_rep, "max_discount_pct").then(function (r) {
+		var max = flt((r.message || {}).max_discount_pct);
+		frm.set_df_property(
+			"discount_percent",
+			"description",
+			max > 0 ? __("Max {0}% for this rep", [max]) : __("This rep cannot give a discount")
+		);
+	});
+}
 
 // Sales Rep for an order without a visit: a rep takes it under their own name
 // (they can order for any retailer); a manager gets the retailer's rep.
@@ -301,14 +369,16 @@ function _recalc_totals(frm) {
 	// Rounded like the server does, so the form shows what will be saved.
 	net_total = flt(net_total, precision("net_total"));
 	var tax_amount = flt(net_total * flt(frm.doc.tax_percent) / 100, precision("tax_amount"));
+	var discount_amount = flt(net_total * flt(frm.doc.discount_percent) / 100, precision("discount_amount"));
 	var grand_total = flt(
-		net_total + tax_amount - flt(frm.doc.discount_amount),
+		net_total + tax_amount - discount_amount,
 		precision("grand_total")
 	);
 
 	frm.set_value("total_qty", total_qty);
 	frm.set_value("net_total", net_total);
 	frm.set_value("tax_amount", tax_amount);
+	frm.set_value("discount_amount", discount_amount);
 	frm.set_value("grand_total", grand_total);
 }
 

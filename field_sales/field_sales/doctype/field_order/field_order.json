@@ -17,6 +17,8 @@
   "sales_rep",
   "order_date",
   "delivery_date",
+  "location_id",
+  "location_name",
   "items_section",
   "items",
   "totals_section",
@@ -25,6 +27,7 @@
   "net_total",
   "tax_percent",
   "tax_amount",
+  "discount_percent",
   "discount_amount",
   "grand_total",
   "notes_tab",
@@ -33,14 +36,21 @@
   "sync_tab",
   "platform_sync_section",
   "platform",
-  "location_id",
   "external_draft_id",
   "external_order_id",
   "col_break_sync",
   "sync_status",
   "sync_attempts",
   "last_sync_attempt",
-  "sync_error"
+  "sync_error",
+  "invoice_tab",
+  "invoice_section",
+  "invoice_no",
+  "invoice_date",
+  "store_order_name",
+  "col_break_invoice",
+  "confirmation_sent_on",
+  "confirmation_status"
  ],
  "fields": [
   {
@@ -161,9 +171,15 @@
    "read_only": 1
   },
   {
+   "fieldname": "discount_percent",
+   "fieldtype": "Percent",
+   "label": "Discount %"
+  },
+  {
    "fieldname": "discount_amount",
    "fieldtype": "Currency",
-   "label": "Discount Amount"
+   "label": "Discount Amount",
+   "read_only": 1
   },
   {
    "fieldname": "grand_total",
@@ -207,9 +223,10 @@
   },
   {
    "fieldname": "location_id",
-   "fieldtype": "Data",
-   "label": "Location ID",
-   "read_only": 1
+   "fieldtype": "Select",
+   "label": "Location",
+   "options": "",
+   "description": "Stock is checked against this store location"
   },
   {
    "fieldname": "external_draft_id",
@@ -256,13 +273,70 @@
    "fieldtype": "Small Text",
    "label": "Sync Error",
    "read_only": 1
+  },
+  {
+   "fieldname": "location_name",
+   "fieldtype": "Data",
+   "label": "Location Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "invoice_tab",
+   "fieldtype": "Tab Break",
+   "label": "Invoice"
+  },
+  {
+   "fieldname": "invoice_section",
+   "fieldtype": "Section Break",
+   "label": "Invoice"
+  },
+  {
+   "fieldname": "invoice_no",
+   "fieldtype": "Data",
+   "label": "Invoice No",
+   "unique": 1,
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "invoice_date",
+   "fieldtype": "Date",
+   "label": "Invoice Date",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "store_order_name",
+   "fieldtype": "Data",
+   "label": "Store Order No",
+   "description": "The store's own order number, e.g. #1006",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "col_break_invoice",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "confirmation_sent_on",
+   "fieldtype": "Datetime",
+   "label": "Confirmation Sent On",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "confirmation_status",
+   "fieldtype": "Small Text",
+   "label": "Confirmation Status",
+   "read_only": 1,
+   "no_copy": 1
   }
  ],
  "in_create": 0,
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-10 17:10:00.000000",
+ "modified": "2026-10-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

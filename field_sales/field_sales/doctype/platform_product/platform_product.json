@@ -12,6 +12,7 @@
   "variant_title",
   "sku",
   "barcode",
+  "hsn_code",
   "image",
   "col_break_product",
   "collection",
@@ -22,6 +23,7 @@
   "compare_at_price",
   "col_break_price",
   "available_qty",
+  "stock_updated_at",
   "location_id",
   "track_inventory",
   "platform_link_section",
@@ -65,6 +67,12 @@
    "fieldname": "barcode",
    "fieldtype": "Data",
    "label": "Barcode"
+  },
+  {
+   "fieldname": "hsn_code",
+   "fieldtype": "Data",
+   "label": "HSN Code",
+   "description": "Printed on the tax invoice"
   },
   {
    "fieldname": "image",
@@ -123,6 +131,12 @@
    "label": "Available Qty",
    "read_only": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "stock_updated_at",
+   "fieldtype": "Datetime",
+   "label": "Stock Updated At",
+   "read_only": 1
   },
   {
    "fieldname": "location_id",
@@ -193,7 +207,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-10 17:00:00.000000",
+ "modified": "2026-10-14 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Platform Product",

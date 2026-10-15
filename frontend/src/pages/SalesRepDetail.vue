@@ -3,9 +3,10 @@
     <PageHeader :title="d.full_name || name" :status="d.name ? (d.active ? 'Active' : 'Inactive') : null">
       <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
       <template #actions>
-        <Dropdown v-if="d.name" :options="moreActions" align="end">
+        <Dropdown v-if="d.name && moreActions.length" :options="moreActions" align="end">
           <Button variant="ghost" icon="lucide-ellipsis" aria-label="More actions" />
         </Dropdown>
+        <Button v-if="canChangePassword" label="Change Password" icon-left="lucide-key-round" @click="openPassword" />
         <Button v-if="canEdit" label="Edit" icon-left="lucide-pencil" variant="solid" @click="openEdit" />
       </template>
     </PageHeader>
@@ -70,14 +71,13 @@
             </dl>
           </template>
           <div class="p-4 pt-1">
-            <Button v-if="session.isManager" class="w-full" label="Open Rep Performance" :href="reportUrl" />
           </div>
         </div>
 
-        <SectionCard title="Retailers">
+        <SectionCard title="Customers">
           <div class="flex items-baseline justify-between">
             <span class="text-2xl font-semibold tabular-nums text-ink-gray-9">{{ retailerCount.data ?? '—' }}</span>
-            <span class="text-ink-gray-5">active retailers assigned</span>
+            <span class="text-ink-gray-5">active customers assigned</span>
           </div>
         </SectionCard>
       </div>
@@ -88,6 +88,14 @@
         <FormControl v-model="edit.mobile" label="Mobile" type="tel" class="sm:col-span-2" />
         <FormControl v-model="edit.territory" label="Territory" />
         <FormControl v-model.number="edit.monthly_target" label="Monthly Target" type="number" min="0" />
+        <FormControl
+          v-model.number="edit.max_discount_pct"
+          label="Max Discount % per Order"
+          type="number"
+          min="0"
+          max="100"
+          description="Empty = no discount"
+        />
         <div class="space-y-1.5 sm:col-span-2">
           <div class="text-sm text-ink-gray-6">Reports To</div>
           <LinkField
@@ -102,12 +110,83 @@
             placeholder="No manager"
           />
         </div>
+        <div class="space-y-1.5 sm:col-span-2">
+          <div class="text-sm text-ink-gray-6">Commission Plan</div>
+          <LinkField
+            v-model="edit.commission_plan"
+            class="w-full"
+            doctype="Commission Plan"
+            :filters="{ is_active: 1 }"
+            :label="d.commission_plan"
+            placeholder="No plan"
+          />
+          <Checkbox v-model="edit.commission_active" label="Commission Active" />
+        </div>
         <Checkbox v-model="edit.active" label="Active" class="sm:col-span-2" />
       </div>
       <template #actions>
         <div class="flex justify-end gap-2">
           <Button label="Cancel" @click="editOpen = false" />
           <Button variant="solid" label="Save" :loading="doc.setValue.loading" @click="saveEdit" />
+        </div>
+      </template>
+    </Dialog>
+
+    <Dialog v-model="passwordOpen" title="Change password" size="md" @after-leave="resetPassword">
+      <form id="change-password" class="space-y-4" @submit.prevent="savePassword">
+        <p class="text-sm text-ink-gray-6">
+          <template v-if="isSelf">Change the password you sign in with ({{ d.user }}).</template>
+          <template v-else>
+            New password for <span class="font-medium text-ink-gray-9">{{ d.full_name || d.user }}</span> ({{ d.user }}).
+          </template>
+        </p>
+        <FormControl
+          v-if="isSelf"
+          v-model="password.old"
+          label="Current Password"
+          :type="password.show ? 'text' : 'password'"
+          autocomplete="current-password"
+          required
+        />
+        <FormControl
+          v-model="password.value"
+          label="New Password"
+          :type="password.show ? 'text' : 'password'"
+          autocomplete="new-password"
+          required
+        >
+          <template #suffix>
+            <button
+              type="button"
+              class="flex text-ink-gray-5 hover:text-ink-gray-8"
+              :aria-label="password.show ? 'Hide password' : 'Show password'"
+              @click="password.show = !password.show"
+            >
+              <span :class="password.show ? 'lucide-eye-off' : 'lucide-eye'" class="size-4" />
+            </button>
+          </template>
+        </FormControl>
+        <FormControl
+          v-model="password.confirm"
+          label="Confirm Password"
+          :type="password.show ? 'text' : 'password'"
+          autocomplete="new-password"
+          required
+        />
+        <p v-if="passwordMismatch" class="text-xs text-ink-red-5" aria-live="polite">The passwords do not match.</p>
+        <Checkbox v-model="password.logout" :label="isSelf ? 'Sign out of my other devices' : 'Sign the rep out of all devices'" />
+      </form>
+      <template #actions>
+        <div class="flex justify-end gap-2">
+          <Button label="Cancel" :disabled="password.saving" @click="passwordOpen = false" />
+          <Button
+            type="submit"
+            form="change-password"
+            variant="solid"
+            label="Update Password"
+            :loading="password.saving"
+            :disabled="!passwordReady"
+          />
         </div>
       </template>
     </Dialog>
@@ -138,6 +217,7 @@ import Achievement from '@/components/Achievement.vue'
 import LinkField from '@/components/LinkField.vue'
 import { useSessionStore } from '@/stores/session'
 import { formatCurrency, formatDate, formatNumber, orderStatus } from '@/utils/format'
+import { callMethod } from '@/utils/api'
 
 const props = defineProps({ name: { type: String, required: true } })
 const session = useSessionStore()
@@ -147,6 +227,10 @@ const d = computed(() => doc.doc || {})
 const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.error || ''))
 // Sales Rep is writable by managers only (doctype permissions).
 const canEdit = computed(() => !!d.value.name && session.isManager)
+// Everyone on their own page (with the current password); managers on their reps' pages.
+// The server also keeps manager and System Manager passwords to System Managers.
+const isSelf = computed(() => !!d.value.user && d.value.user === session.user)
+const canChangePassword = computed(() => !!d.value.user && (isSelf.value || canEdit.value))
 
 // The manager's name; the document only stores their ID.
 const manager = createResource({
@@ -169,6 +253,11 @@ const details = computed(() => [
     route: d.value.reports_to && { name: 'SalesRep', params: { name: d.value.reports_to } },
   },
   { label: 'Monthly Target', value: d.value.monthly_target ? formatCurrency(d.value.monthly_target, undefined, 0) : null },
+  { label: 'Max Discount', value: d.value.max_discount_pct > 0 ? `${d.value.max_discount_pct}%` : 'No discount' },
+  {
+    label: 'Commission Plan',
+    value: d.value.commission_plan ? `${d.value.commission_plan}${d.value.commission_active ? '' : ' (commission off)'}` : 'No plan',
+  },
 ])
 
 // ---------------------------------------------------------------- related lists
@@ -203,7 +292,7 @@ const visits = createListResource({
 })
 const visitColumns = [
   { key: 'visit_date', label: 'Date', format: formatDate },
-  { key: 'retailer_name', label: 'Retailer' },
+  { key: 'retailer_name', label: 'Customer' },
   { key: 'city', label: 'City' },
   { key: 'time_on_site_min', label: 'On Site', align: 'right', format: (v, r) => (r.status === 'Completed' ? `${v || 0} min` : '—') },
   { key: 'status', label: 'Status' },
@@ -219,7 +308,7 @@ const orders = createListResource({
 })
 const orderColumns = [
   { key: 'name', label: 'Order' },
-  { key: 'retailer_name', label: 'Retailer' },
+  { key: 'retailer_name', label: 'Customer' },
   { key: 'order_date', label: 'Date', format: formatDate },
   { key: 'grand_total', label: 'Total', align: 'right', format: (v) => formatCurrency(v) },
   { key: 'sync_status', label: 'Status' },
@@ -246,15 +335,12 @@ const monthRows = computed(() => [
   { label: 'Visits completed', value: `${formatNumber(m.value.completed_visits)} of ${formatNumber(m.value.planned_visits)}` },
   { label: 'Missed visits', value: formatNumber(m.value.missed_visits), alert: m.value.missed_visits > 0 },
   { label: 'Visit → order', value: pct(m.value.conversion_pct) },
-  { label: 'Retailers visited', value: formatNumber(m.value.retailers_visited) },
+  { label: 'Customers visited', value: formatNumber(m.value.retailers_visited) },
   { label: 'Failed syncs', value: formatNumber(m.value.failed_syncs), alert: m.value.failed_syncs > 0 },
 ])
 
-const reportUrl = computed(() => `/app/query-report/Rep Performance?sales_rep=${encodeURIComponent(props.name)}`)
 
 const moreActions = computed(() => [
-  { label: 'Open in Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = `/app/sales-rep/${encodeURIComponent(props.name)}`) },
-  { label: 'Open User', icon: 'lucide-user-cog', onClick: () => (window.location.href = `/app/user/${encodeURIComponent(props.name)}`), condition: () => session.isAdmin },
 ].filter((a) => !a.condition || a.condition()))
 
 // ---------------------------------------------------------------- edit
@@ -262,17 +348,30 @@ const moreActions = computed(() => [
 const editOpen = ref(false)
 const edit = reactive({})
 // full_name is fetched from the User, so it is not editable here.
-const EDIT_FIELDS = ['mobile', 'territory', 'monthly_target', 'reports_to', 'active']
+const EDIT_FIELDS = ['mobile', 'territory', 'monthly_target', 'max_discount_pct', 'reports_to', 'active', 'commission_plan', 'commission_active']
 
 function openEdit() {
   EDIT_FIELDS.forEach((f) => (edit[f] = d.value[f] ?? null))
   edit.active = !!d.value.active
+  edit.commission_active = !!d.value.commission_active
   editOpen.value = true
 }
 
 async function saveEdit() {
   try {
-    await doc.setValue.submit({ ...edit, active: edit.active ? 1 : 0, monthly_target: edit.monthly_target || 0 })
+    // The plan is saved through its own method, which checks it is an active plan.
+    const { commission_plan, commission_active, ...rest } = edit
+    await doc.setValue.submit({ ...rest, active: edit.active ? 1 : 0, monthly_target: edit.monthly_target || 0,
+      max_discount_pct: edit.max_discount_pct === '' || edit.max_discount_pct == null ? null : edit.max_discount_pct,
+    })
+    if ((commission_plan || null) !== (d.value.commission_plan || null) || !!commission_active !== !!d.value.commission_active) {
+      await callMethod('field_sales.commission.api.assign_commission_plan', {
+        sales_rep: props.name,
+        commission_plan: commission_plan || null,
+        commission_active: commission_active ? 1 : 0,
+      })
+      await doc.reload()
+    }
     editOpen.value = false
     toast.success('Sales rep updated')
     month.reload()
@@ -281,4 +380,41 @@ async function saveEdit() {
   }
 }
 
+// ---------------------------------------------------------------- password
+
+const passwordOpen = ref(false)
+const emptyPassword = () => ({ old: '', value: '', confirm: '', show: false, logout: true, saving: false })
+const password = reactive(emptyPassword())
+const passwordMismatch = computed(() => !!password.confirm && password.value !== password.confirm)
+const passwordReady = computed(
+  () => !!password.value && password.value === password.confirm && (!isSelf.value || !!password.old),
+)
+
+function openPassword() {
+  resetPassword()
+  passwordOpen.value = true
+}
+
+function resetPassword() {
+  Object.assign(password, emptyPassword())
+}
+
+async function savePassword() {
+  if (!passwordReady.value) return
+  password.saving = true
+  try {
+    await callMethod('field_sales.api.set_sales_rep_password', {
+      sales_rep: props.name,
+      new_password: password.value,
+      logout_all_sessions: password.logout ? 1 : 0,
+      old_password: isSelf.value ? password.old : undefined,
+    })
+    passwordOpen.value = false
+    toast.success('Password updated')
+  } catch {
+    // callMethod already toasted the error (e.g. the password policy). The input is kept.
+  } finally {
+    password.saving = false
+  }
+}
 </script>

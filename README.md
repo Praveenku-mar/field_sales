@@ -12,6 +12,17 @@ bench get-app $URL_OF_THIS_REPO --branch develop
 bench install-app field_sales
 ```
 
+### Commission webhooks (Shopify)
+
+Sales rep commission follows the order's state on the store. Subscribe these topics through the app itself (GraphQL `webhookSubscriptionCreate` with the app's token, or the app configuration), all pointing at the same URL the stock and product webhooks use, `https://<your-site>/api/method/field_sales.api.webhooks.receive`. Don't add them under Shopify admin > Settings > Notifications > Webhooks: Field Sales verifies the signature with the app's client secret, and admin-created webhooks may be signed with a different key.
+
+- `orders/paid`
+- `orders/fulfilled`
+- `orders/cancelled`
+- `refunds/create`
+
+Each event makes Field Sales re-read the order from Shopify and update the commission entries, so repeated or late deliveries are harmless. Orders that were not placed from Field Sales are ignored. Commission statements for the previous month are drafted automatically on the 1st of every month.
+
 ### Contributing
 
 This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:

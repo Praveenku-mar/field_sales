@@ -6,7 +6,7 @@ frappe.get_list, so the Sales Rep hierarchy rules apply as they do in the desk."
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, flt, get_first_day, nowdate
+from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.permissions import hierarchy_filters
@@ -56,7 +56,7 @@ def get_attention_presets(today: str | None = None) -> dict[str, dict]:
 		},
 		"pending_retailers": {
 			"doctype": "Retailer",
-			"label": _("Retailers waiting to sync"),
+			"label": _("Customers waiting to sync"),
 			"filters": [["sync_status", "=", "Pending"], *mine],
 		},
 		"out_of_stock": {
@@ -71,8 +71,25 @@ def get_attention_presets(today: str | None = None) -> dict[str, dict]:
 		},
 		"failed_retailers": {
 			"doctype": "Retailer",
-			"label": _("Retailers that failed to sync"),
+			"label": _("Customers that failed to sync"),
 			"filters": [["sync_status", "=", "Failed"], *mine],
+		},
+	}
+
+
+def get_card_presets(today: str | None = None) -> dict[str, dict]:
+	"""
+	Presets for dashboard cards outside "Needs attention" (which the lists open).
+
+	``get_list_preset`` serves these exactly like the attention presets.
+	"""
+	today = today or nowdate()
+	return {
+		"orders_today": {
+			"doctype": "Field Order",
+			"label": _("Orders submitted today"),
+			# The same filters the "Orders Today" card counts.
+			"filters": [["docstatus", "=", 1], ["order_date", "=", today]],
 		},
 	}
 
@@ -84,7 +101,7 @@ def get_list_preset(key: str) -> dict:
 	Only the definition: the list itself is fetched with get_list, under the user's permissions.
 	"""
 	_check_access()
-	preset = get_attention_presets().get(key)
+	preset = get_attention_presets().get(key) or get_card_presets().get(key)
 	if not preset:
 		frappe.throw(_("Unknown list preset: {0}").format(key), frappe.DoesNotExistError)
 	return {"key": key, **preset}
@@ -125,7 +142,26 @@ def get_sidebar_counts() -> dict:
 	return {
 		"retailers": _count("Retailer", {"status": "Active"}),
 		"failed_orders": _count(**_preset_args("failed_orders")),
+		"unread_notifications": frappe.db.count(
+			"Notification Log", {"for_user": frappe.session.user, "read": 0}
+		),
 	}
+
+
+@frappe.whitelist()
+def get_notifications(limit: int = 50) -> list[dict]:
+	"""The current user's latest Notification Log rows, newest first (subject as plain text)."""
+	_check_access()
+	rows = frappe.get_all(
+		"Notification Log",
+		filters={"for_user": frappe.session.user},
+		fields=["name", "subject", "document_type", "document_name", "from_user", "read", "type", "creation"],
+		order_by="creation desc",
+		limit_page_length=min(cint(limit) or 50, 200),
+	)
+	for row in rows:
+		row["subject"] = strip_html(row.subject or "")
+	return rows
 
 
 @frappe.whitelist()
@@ -281,7 +317,8 @@ def get_order_sync_info(field_order: str) -> dict:
 		except ConnectorError:
 			pass  # store disconnected: the panel shows the IDs without a link
 	return {
-		"location_name": location_name if doc.location_id in (None, "", location_id) else doc.location_id,
+		"location_name": doc.location_name
+		or (location_name if doc.location_id in (None, "", location_id) else doc.location_id),
 		"max_attempts": MAX_AUTO_ATTEMPTS,
 		"store_url": store_url,
 	}

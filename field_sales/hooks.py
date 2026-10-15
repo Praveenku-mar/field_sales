@@ -347,7 +347,7 @@ require_type_annotated_api_methods = True
 
 # Fixtures
 # ------------
-# The Field Sales Order print format (created on the site, versioned here).
+# The Field Sales Order and Field Sales Invoice print formats (created on the site, versioned here).
 fixtures = [
-	{"dt": "Print Format", "filters": [["name", "=", "Field Sales Order"]]},
+	{"dt": "Print Format", "filters": [["name", "in", ["Field Sales Order", "Field Sales Invoice"]]]},
 ]

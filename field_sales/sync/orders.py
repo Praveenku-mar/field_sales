@@ -18,6 +18,7 @@ from frappe.utils import add_to_date, cint, now_datetime
 from field_sales.commission.engine import enqueue_create_entries
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
+from field_sales.sync.confirmation import enqueue_order_confirmation
 from field_sales.sync.customers import push_retailer
 from field_sales.sync.notify import notify_sync_result
 
@@ -114,6 +115,7 @@ def push_order(field_order: str):
 		{
 			"external_draft_id": result.get("draft_id"),
 			"external_order_id": result.get("order_id"),
+			"store_order_name": result.get("order_name"),
 			"platform": platform,
 			# The location the rep picked stays; only an order without one gets the default.
 			"location_id": doc.location_id or conn.settings.default_location_id,
@@ -135,6 +137,7 @@ def push_order(field_order: str):
 	)
 	if result.get("order_id"):
 		enqueue_create_entries(field_order)
+		enqueue_order_confirmation(field_order)
 	frappe.db.commit()
 	_notify(doc)
 
@@ -202,6 +205,7 @@ def link_completed_drafts():
 			continue
 		frappe.db.set_value("Field Order", d.name, "external_order_id", order_id, update_modified=False)
 		enqueue_create_entries(d.name)
+		enqueue_order_confirmation(d.name)
 		log_sync(
 			platform=conn.settings.platform,
 			operation="Confirm Order",

@@ -12,6 +12,7 @@
   "variant_title",
   "sku",
   "barcode",
+  "hsn_code",
   "image",
   "col_break_product",
   "collection",
@@ -66,6 +67,12 @@
    "fieldname": "barcode",
    "fieldtype": "Data",
    "label": "Barcode"
+  },
+  {
+   "fieldname": "hsn_code",
+   "fieldtype": "Data",
+   "label": "HSN Code",
+   "description": "Printed on the tax invoice"
   },
   {
    "fieldname": "image",

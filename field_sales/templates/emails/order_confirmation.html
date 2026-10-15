@@ -1,0 +1,55 @@
+<p>{{ _("Hello {0},").format(customer) }}</p>
+
+<p>
+	{{ _("Thank you for your order. It is confirmed as {0}. Your tax invoice {1} is attached.").format(order_no, invoice_no) }}
+</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+	<thead>
+		<tr>
+			<th style="text-align: left; padding: 6px 8px; border-bottom: 1px solid #d1d5db;">{{ _("Item") }}</th>
+			<th style="text-align: right; padding: 6px 8px; border-bottom: 1px solid #d1d5db;">{{ _("Qty") }}</th>
+			<th style="text-align: right; padding: 6px 8px; border-bottom: 1px solid #d1d5db;">{{ _("Amount") }}</th>
+		</tr>
+	</thead>
+	<tbody>
+		{% for item in items %}
+		<tr>
+			<td style="padding: 6px 8px; border-bottom: 1px solid #ededed;">
+				{{ item.title }}{% if item.variant %} <span style="color: #6b7280;">— {{ item.variant }}</span>{% endif %}
+			</td>
+			<td style="padding: 6px 8px; border-bottom: 1px solid #ededed; text-align: right;">{{ item.qty }}</td>
+			<td style="padding: 6px 8px; border-bottom: 1px solid #ededed; text-align: right;">{{ item.amount }}</td>
+		</tr>
+		{% endfor %}
+	</tbody>
+	<tfoot>
+		<tr>
+			<td colspan="2" style="padding: 6px 8px; text-align: right;">{{ _("Net Total") }}</td>
+			<td style="padding: 6px 8px; text-align: right;">{{ net_total }}</td>
+		</tr>
+		{% if discount %}
+		<tr>
+			<td colspan="2" style="padding: 6px 8px; text-align: right;">{{ _("Discount") }}</td>
+			<td style="padding: 6px 8px; text-align: right;">− {{ discount }}</td>
+		</tr>
+		{% endif %}
+		{% if tax %}
+		<tr>
+			<td colspan="2" style="padding: 6px 8px; text-align: right;">{{ _("GST") }}</td>
+			<td style="padding: 6px 8px; text-align: right;">{{ tax }}</td>
+		</tr>
+		{% endif %}
+		<tr>
+			<td colspan="2" style="padding: 8px; text-align: right; font-weight: bold;">{{ _("Total") }}</td>
+			<td style="padding: 8px; text-align: right; font-weight: bold;">{{ grand_total }}</td>
+		</tr>
+	</tfoot>
+</table>
+
+<p>{{ _("Your sales representative is {0}. Please reach out to them for anything about this order.").format(sales_rep) }}</p>
+
+<p>
+	{{ _("Regards,") }}<br>
+	{{ company or _("Field Sales") }}
+</p>

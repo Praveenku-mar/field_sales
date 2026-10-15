@@ -326,6 +326,41 @@
           />
         </div>
       </div>
+
+      <!-- Invoice and confirmation email -->
+      <div v-if="d.docstatus === 1" class="fs-card">
+        <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+          <span class="lucide-file-text size-4 text-ink-gray-7" />
+          <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Invoice</h2>
+        </div>
+        <dl class="divide-y divide-outline-gray-1 px-4">
+          <div v-for="item in invoiceRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+            <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
+            <dd class="min-w-0 break-words text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">{{ item.value }}</dd>
+          </div>
+        </dl>
+        <div class="space-y-2 p-4 pt-1">
+          <div v-if="confirmationError" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+            <span class="lucide-circle-alert mt-px size-4 shrink-0" />
+            <div class="min-w-0 break-words">{{ d.confirmation_status }}</div>
+          </div>
+          <Button
+            class="w-full"
+            label="Download Invoice"
+            icon-left="lucide-download"
+            :href="invoiceUrl"
+            target="_blank"
+          />
+          <Button
+            v-if="d.external_order_id"
+            class="w-full"
+            label="Resend Email"
+            icon-left="lucide-mail"
+            :loading="sending"
+            @click="resendConfirmation"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Add Multiple -->
@@ -375,7 +410,7 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, nextTick, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { RouterLink, onBeforeRouteLeave, useRouter } from 'vue-router'
 import {
   Button,
@@ -942,6 +977,84 @@ async function retrySync() {
     setTimeout(() => doc.reload(), 4000)
   } finally {
     retrying.value = false
+  }
+}
+// ---------------------------------------------------------------- invoice
+
+const invoiceUrl = computed(
+  () => `/api/method/frappe.utils.print_format.download_pdf?doctype=Field%20Order&name=${encodeURIComponent(props.name)}&format=Field%20Sales%20Invoice`,
+)
+const confirmationError = computed(() => (d.value.confirmation_status || '').startsWith('Error'))
+
+const invoiceRows = computed(() => {
+  const o = d.value
+  const sent = o.confirmation_sent_on ? `${relativeDay(o.confirmation_sent_on)}, ${formatTime(o.confirmation_sent_on)}` : null
+  const status = o.confirmation_status || ''
+  return [
+    { label: 'Invoice No', value: o.invoice_no || 'Not issued', muted: !o.invoice_no },
+    { label: 'Store Order No', value: o.store_order_name || '—', muted: !o.store_order_name },
+    {
+      label: 'Email',
+      // Sent: when and to whom; skipped: why; errors show in the box below.
+      value: status.startsWith('Sending') ? 'Sending…' : sent ? `${status || 'Sent'} · ${sent}` : confirmationError.value ? 'Failed' : status || 'Not sent yet',
+      muted: !sent && !confirmationError.value && !status.startsWith('Skipped'),
+    },
+  ]
+})
+
+const resending = ref(false)
+const sending = computed(() => resending.value || (d.value.confirmation_status || '').startsWith('Sending'))
+let pollTimer = null
+function stopPolling() {
+  clearTimeout(pollTimer)
+  pollTimer = null
+}
+onBeforeUnmount(stopPolling)
+// An order opened while its email is still being sent: follow it too.
+watch(
+  () => (d.value.confirmation_status || '').startsWith('Sending'),
+  (busy) => busy && !pollTimer && pollConfirmation(),
+  { immediate: true },
+)
+
+/** Reload the order every 3 s (for up to 2 min) until the background job has written its result. */
+function pollConfirmation() {
+  stopPolling()
+  const until = Date.now() + 120000
+  const tick = async () => {
+    try {
+      await doc.reload()
+    } catch {
+      // keep trying until the time is up
+    }
+    const status = d.value.confirmation_status || ''
+    if (!status.startsWith('Sending')) {
+      resending.value = false
+      if (status.startsWith('Sent to')) toast.success(status)
+      else if (status.startsWith('Skipped')) toast.info(status)
+      else toast.error(status || 'Email was not sent')
+      return stopPolling()
+    }
+    if (Date.now() >= until) {
+      resending.value = false
+      toast.info('Still sending — check again later')
+      return stopPolling()
+    }
+    pollTimer = setTimeout(tick, 3000)
+  }
+  pollTimer = setTimeout(tick, 3000)
+}
+
+async function resendConfirmation() {
+  resending.value = true
+  try {
+    await callMethod('field_sales.sync.confirmation.resend_order_confirmation', { name: props.name })
+    toast.info('Sending email…')
+    await doc.reload()
+    pollConfirmation()
+  } catch (e) {
+    resending.value = false
+    throw e
   }
 }
 </script>

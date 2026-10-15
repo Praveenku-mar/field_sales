@@ -479,6 +479,31 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual((rows[0]["override"], rows[0]["net"]), (13.5, 13.5))
 		self.assertEqual(run_summary({**filters, "location_id": "no-such-location"})[1], [])
 
+	def test_rep_commission_summary_paid_and_unpaid(self):
+		rep = self.rep(self.plan("Rpt paid plan", flat_rate=10))
+		self.field_order(rep, [("1", 4, 250)], "7014")
+		line = [{"variant": "1", "qty": 4, "price": 250}]
+		self.reconcile(self.store_order("7014", line))
+		today = nowdate()
+		filters = {"from_date": get_first_day(today), "to_date": get_last_day(today), "sales_rep": rep.name}
+
+		def paid_columns():
+			(row,) = run_summary(filters)[1]
+			return row["net"], row["paid"], row["unpaid"]
+
+		self.assertEqual(paid_columns(), (100, 0, 100))
+
+		statement = build_statement(rep.name, get_first_day(today), get_last_day(today))
+		statement.submit()
+		# Approved is not paid yet.
+		self.assertEqual(paid_columns(), (100, 0, 100))
+
+		mark_paid(statement.name, payment_reference="UTR-2")
+		refunded = self.store_order("7014", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))])
+		self.reconcile(refunded)
+		# The paid 100 stays paid; the refund's -25 Adjustment is on no statement yet.
+		self.assertEqual(paid_columns(), (75, 100, -25))
+
 	# -- Statement screens API ---------------------------------------------------
 
 	def draft_statement(self, rep):

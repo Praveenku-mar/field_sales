@@ -13,6 +13,9 @@ The period filters entries by their posting date. Columns, per rep:
 * Reversed: refunds on the earned entries, plus negative Adjustments.
 * Override: the rep's manager-override entries, net of their own reversals, once earned.
 * Net: Earned - Reversed + Override.
+* Paid: the part of Net whose entries are on a Commission Statement marked Paid.
+* Unpaid: Net - Paid (entries on Draft or Approved statements, or on none yet).
+  Pending entries stay out of both, as they are out of Net.
 
 The store is single, so the "store" filter is the Field Order's Store Location (``location_id``).
 Non-admins see only their own rep and the reps under it.
@@ -49,6 +52,8 @@ def get_columns() -> list[dict]:
 		{"fieldname": "reversed", "label": _("Reversed"), **money},
 		{"fieldname": "override", "label": _("Override"), **money},
 		{"fieldname": "net", "label": _("Net"), **money},
+		{"fieldname": "paid", "label": _("Paid"), **money},
+		{"fieldname": "unpaid", "label": _("Unpaid"), **money},
 		{"fieldname": "currency", "label": _("Currency"), "fieldtype": "Link", "options": "Currency", "hidden": 1},
 	]
 
@@ -83,23 +88,29 @@ def get_data(filters) -> list[dict]:
 			"discount_pct",
 			"amount",
 			"reversed_amount",
+			"commission_statement",
 		],
 	)
+	paid_statements = _paid_statements(entries)
 
 	# Keyed by (rep, currency): amounts of different currencies are never added together.
 	totals = defaultdict(lambda: defaultdict(float))
 	for e in entries:
 		t = totals[(e.sales_rep, e.currency)]
 		amount, reversed_amount = flt(e.amount), flt(e.reversed_amount)
+		# This entry's share of Net, for the Paid column.
+		net = 0
 
 		if e.beneficiary_type == "Manager Override":
 			# Only earned money counts as override; pending stays out of the net.
 			if e.entry_type == "Adjustment":
-				t["override"] += amount
+				net = amount
 			elif e.earned_on:
-				t["override"] += amount - reversed_amount
+				net = amount - reversed_amount
+			t["override"] += net
 		elif e.entry_type == "Adjustment":
 			t["earned" if amount > 0 else "reversed"] += amount if amount > 0 else -amount
+			net = amount
 		else:
 			base = flt(e.base_amount)
 			t["sales"] += base
@@ -109,10 +120,15 @@ def get_data(filters) -> list[dict]:
 			elif e.earned_on:
 				t["earned"] += amount
 				t["reversed"] += reversed_amount
+				net = amount - reversed_amount
+
+		if e.commission_statement in paid_statements:
+			t["paid"] += net
 
 	period = f"{getdate(filters.from_date)} to {getdate(filters.to_date)}"
 	data = []
 	for (rep, currency), t in sorted(totals.items()):
+		net = t["earned"] - t["reversed"] + t["override"]
 		data.append(
 			{
 				"sales_rep": rep,
@@ -123,11 +139,23 @@ def get_data(filters) -> list[dict]:
 				"pending": t["pending"],
 				"reversed": t["reversed"],
 				"override": t["override"],
-				"net": t["earned"] - t["reversed"] + t["override"],
+				"net": net,
+				"paid": t["paid"],
+				"unpaid": net - t["paid"],
 				"currency": currency,
 			}
 		)
 	return data
+
+
+def _paid_statements(entries) -> set[str]:
+	"""Names of the Paid statements among the entries' statements (one query)."""
+	names = {e.commission_statement for e in entries if e.commission_statement}
+	if not names:
+		return set()
+	return set(
+		frappe.get_all("Commission Statement", filters={"name": ("in", list(names)), "status": "Paid"}, pluck="name")
+	)
 
 
 def _reps_in_scope(filters) -> list[str]:

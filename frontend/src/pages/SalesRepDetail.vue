@@ -6,7 +6,13 @@
         <Dropdown v-if="d.name && moreActions.length" :options="moreActions" align="end">
           <Button variant="ghost" icon="lucide-ellipsis" aria-label="More actions" />
         </Dropdown>
-        <Button v-if="canChangePassword" label="Change Password" icon-left="lucide-key-round" @click="openPassword" />
+        <Button v-if="canSendReset" label="Send Reset Link" icon-left="lucide-mail" @click="openReset" />
+        <Button
+          v-if="canChangePassword"
+          :label="isSelf ? 'Change Password' : 'Set Password'"
+          icon-left="lucide-key-round"
+          @click="openPassword"
+        />
         <Button v-if="canEdit" label="Edit" icon-left="lucide-pencil" variant="solid" @click="openEdit" />
       </template>
     </PageHeader>
@@ -132,7 +138,7 @@
       </template>
     </Dialog>
 
-    <Dialog v-model="passwordOpen" title="Change password" size="md" @after-leave="resetPassword">
+    <Dialog v-model="passwordOpen" :title="isSelf ? 'Change password' : 'Set password'" size="md" @after-leave="resetPassword">
       <form id="change-password" class="space-y-4" @submit.prevent="savePassword">
         <p class="text-sm text-ink-gray-6">
           <template v-if="isSelf">Change the password you sign in with ({{ d.user }}).</template>
@@ -190,6 +196,23 @@
         </div>
       </template>
     </Dialog>
+
+    <!-- Reset link (someone else's password) -->
+    <Dialog v-model="resetOpen" title="Send password reset link" size="md">
+      <div class="space-y-4">
+        <p class="text-base text-ink-gray-7">
+          Email a password reset link to <span class="font-medium text-ink-gray-9">{{ d.full_name || d.user }}</span> ({{ d.user }})?
+          The link works once and expires after the time set in System Settings.
+        </p>
+        <Checkbox v-model="reset.logout" label="Also sign the rep out of all devices now" />
+      </div>
+      <template #actions>
+        <div class="flex justify-end gap-2">
+          <Button label="Cancel" :disabled="reset.sending" @click="resetOpen = false" />
+          <Button variant="solid" label="Send Link" icon-left="lucide-mail" :loading="reset.sending" @click="sendReset" />
+        </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -227,10 +250,12 @@ const d = computed(() => doc.doc || {})
 const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.error || ''))
 // Sales Rep is writable by managers only (doctype permissions).
 const canEdit = computed(() => !!d.value.name && session.isManager)
-// Everyone on their own page (with the current password); managers on their reps' pages.
-// The server also keeps manager and System Manager passwords to System Managers.
+// Your own page: Change Password (with the current password). Someone else's: managers
+// email a reset link; System Managers can also set the password directly (when email is
+// down). The server keeps users with roles beyond Field Sales Rep to System Managers.
 const isSelf = computed(() => !!d.value.user && d.value.user === session.user)
-const canChangePassword = computed(() => !!d.value.user && (isSelf.value || canEdit.value))
+const canChangePassword = computed(() => !!d.value.user && (isSelf.value || (canEdit.value && session.isAdmin)))
+const canSendReset = computed(() => !!d.value.user && !isSelf.value && canEdit.value)
 
 // The manager's name; the document only stores their ID.
 const manager = createResource({
@@ -415,6 +440,32 @@ async function savePassword() {
     // callMethod already toasted the error (e.g. the password policy). The input is kept.
   } finally {
     password.saving = false
+  }
+}
+
+// ---------------------------------------------------------------- reset link
+
+const resetOpen = ref(false)
+const reset = reactive({ logout: false, sending: false })
+
+function openReset() {
+  Object.assign(reset, { logout: false, sending: false })
+  resetOpen.value = true
+}
+
+async function sendReset() {
+  reset.sending = true
+  try {
+    const { email } = await callMethod('field_sales.api.send_sales_rep_password_reset', {
+      sales_rep: d.value.name,
+      logout_all_sessions: reset.logout ? 1 : 0,
+    })
+    resetOpen.value = false
+    toast.success(`Reset link sent to ${email}`)
+  } catch {
+    // callMethod already toasted the error (e.g. no outgoing email).
+  } finally {
+    reset.sending = false
   }
 }
 </script>

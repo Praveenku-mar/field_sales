@@ -7,7 +7,9 @@
 import frappe
 from frappe import _
 from frappe.auth import MAX_PASSWORD_SIZE
+from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.rate_limiter import rate_limit
+from frappe.sessions import clear_sessions
 from frappe.query_builder.functions import Count, Sum
 from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
 from frappe.utils.password import check_password
@@ -24,6 +26,8 @@ from field_sales.sync.stock import get_sell_locations as _get_sell_locations
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
 
 VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
+# Roles a user may hold for a manager to reset their password (the rest are automatic roles).
+REP_ONLY_ROLES = {"Field Sales Rep", "All", "Guest", "Desk User"}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -211,8 +215,8 @@ def set_sales_rep_password(
 	Set a new password for a Sales Rep's user, from the app's Sales Rep page.
 
 	- Your own (any rep): needs ``old_password``. Signing out keeps this session.
-	- Someone else's: whoever may edit that Sales Rep (managers, within their hierarchy).
-	  Only a System Manager may reset a manager's or System Manager's password.
+	- Someone else's: System Managers only, for when email is down. Managers send the
+	  rep a reset link instead (``send_sales_rep_password_reset``).
 
 	Nobody may reset Administrator's here. The password policy still applies (User.validate).
 	Rate limited per user, since a wrong ``old_password`` is a password guess.
@@ -232,8 +236,9 @@ def set_sales_rep_password(
 		rep.check_permission("write")
 		if user in ("Administrator", "Guest"):
 			frappe.throw(_("The password of {0} cannot be changed here").format(user), frappe.PermissionError)
-		if VISIT_MANAGER_ROLES & set(frappe.get_roles(user)) and not is_admin():
-			frappe.throw(_("Only a System Manager can change a manager's password"), frappe.PermissionError)
+		if not is_admin():
+			frappe.throw(_("Send the rep a reset link instead"), frappe.PermissionError)
+		_check_password_target(user)
 
 	if not new_password or len(new_password) > MAX_PASSWORD_SIZE:
 		frappe.throw(_("Enter a valid new password"))
@@ -243,6 +248,59 @@ def set_sales_rep_password(
 	user_doc.logout_all_sessions = frappe.utils.cint(logout_all_sessions)
 	# Reps and Sales Managers cannot write User in the desk; the checks above stand in for that.
 	user_doc.save(ignore_permissions=True)
+
+
+@frappe.whitelist(methods=["POST"])
+@rate_limit(limit=10, seconds=60 * 60, user_based=True, ip_based=False)
+def send_sales_rep_password_reset(sales_rep: str, logout_all_sessions: int = 0) -> dict:
+	"""
+	Email a Sales Rep's user a one-time password reset link (Frappe's own
+	``/update-password`` flow), from the app's Sales Rep page.
+
+	Whoever may edit that Sales Rep (managers above it in Reports To, System Managers),
+	for users who pass ``_check_password_target``. Not for your own account: use
+	Change Password. The link itself is never returned.
+
+	:param logout_all_sessions: Also sign the rep out of every device now.
+	:return: ``{"email": user}``
+	"""
+	rep = frappe.get_doc("Sales Rep", sales_rep)
+	user = rep.user
+	if not user:
+		frappe.throw(_("Sales Rep {0} has no user").format(sales_rep))
+	if user == frappe.session.user:
+		frappe.throw(_("Use Change Password for your own account"))
+
+	rep.check_permission("write")
+	if user in ("Administrator", "Guest"):
+		frappe.throw(_("The password of {0} cannot be changed here").format(user), frappe.PermissionError)
+	_check_password_target(user)
+
+	user_doc = frappe.get_doc("User", user)
+	if not user_doc.enabled:
+		frappe.throw(_("User {0} is disabled. Enable the user before sending a reset link.").format(user))
+	# The account Frappe will send through: enabled *and* default outgoing, or site config's mail_server.
+	if not EmailAccount.find_default_outgoing():
+		frappe.throw(_("Outgoing email is not set up. Add one under Settings > Outgoing Email."))
+
+	# Stores a hashed one-time key on the User and emails the link; the link is not kept here.
+	user_doc._reset_password(send_email=True)
+	if frappe.utils.cint(logout_all_sessions):
+		clear_sessions(user=user, force=True)
+	return {"email": user}
+
+
+def _check_password_target(user: str) -> None:
+	"""
+	Whose password a manager may reset (directly or by link). A Sales Rep can be linked to
+	any existing user, so check the user's roles, not the rep: outside a System Manager,
+	only plain reps' passwords may be reset here.
+	"""
+	if set(frappe.get_roles(user)) - REP_ONLY_ROLES and not is_admin():
+		frappe.throw(
+			_("Only a System Manager can change the password of a user with roles beyond Field Sales Rep"),
+			frappe.PermissionError,
+		)
 
 
 @frappe.whitelist(methods=["POST"])

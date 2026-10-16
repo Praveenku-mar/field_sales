@@ -14,6 +14,7 @@ from field_sales.utils.geo import DEFAULT_GEOFENCE_RADIUS_M, has_coords, haversi
 # Written only by field_sales.api.check_in / check_out, never taken from the client.
 CHECK_IN_FIELDS = ("check_in_time", "check_out_time", "latitude", "longitude", "location_accuracy_m")
 CHECK_IN_STATUSES = ("In Progress", "Completed")
+RETAILER_POSITION_FIELDS = ("retailer_latitude", "retailer_longitude")
 
 
 class Visit(Document):
@@ -74,6 +75,11 @@ class Visit(Document):
 			return
 
 		before = self.get_doc_before_save()
+		# The retailer's position at check-in is what the geofence was measured against: keep it
+		# (also stops fetch_from moving it later when the Retailer's location changes).
+		if before and before.check_in_time:
+			for fieldname in RETAILER_POSITION_FIELDS:
+				self.set(fieldname, before.get(fieldname))
 		for fieldname in CHECK_IN_FIELDS:
 			if self._normalized(fieldname, self) != self._normalized(fieldname, before):
 				frappe.throw(

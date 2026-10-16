@@ -5,6 +5,7 @@ const COORD_PRECISION = 6;
 
 frappe.ui.form.on("Retailer", {
 	refresh(frm) {
+		lock_location(frm);
 		add_use_my_location_button(frm);
 		draw_pin_if_missing(frm);
 		bind_map_locate(frm);
@@ -195,8 +196,24 @@ function bind_map_locate(frm, attempts = 20) {
 // "Use My Location"
 // ----------------------------------------------------------------------
 
+// Matches Retailer._guard_location: reps set a retailer's first location; after that only
+// managers move it, and only managers change the geofence radius.
+function location_locked(frm) {
+	return !is_location_editor() && !frm.is_new() && has_coords(frm.doc);
+}
+
+function is_location_editor() {
+	return frappe.user.has_role(["Sales Manager", "System Manager"]);
+}
+
+function lock_location(frm) {
+	const locked = location_locked(frm) ? 1 : 0;
+	["latitude", "longitude", "location_map"].forEach((f) => frm.set_df_property(f, "read_only", locked));
+	frm.set_df_property("geofence_radius_m", "read_only", is_location_editor() ? 0 : 1);
+}
+
 function add_use_my_location_button(frm) {
-	if (!frm.has_perm("write")) return;
+	if (!frm.has_perm("write") || location_locked(frm)) return;
 
 	frm.add_custom_button(__("Use My Location"), () => {
 		if (!navigator.geolocation) {

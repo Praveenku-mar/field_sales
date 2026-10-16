@@ -17,6 +17,7 @@ Store access goes through a platform-neutral connector layer; only `connectors/s
 - `field_sales/commission/` – commission engine, monthly statements, commission API.
 - `field_sales/visit_import.py` – Excel/CSV visit import.
 - `field_sales/permissions.py` – reports_to hierarchy permission rules.
+- `field_sales/utils/` – `geo.py` (distance), `guards.py` (`keep_server_fields()`, `is_system_manager()`).
 - `field_sales/daily_summary.py` – daily email to managers.
 - `field_sales/www/fieldsales.{py,html}` – SPA shell page and boot data.
 - `field_sales/templates/emails/` – email templates (order confirmation, daily summary).
@@ -88,7 +89,7 @@ Store access goes through a platform-neutral connector layer; only `connectors/s
 - Run: `bench start` (web, workers, scheduler, socketio). SPA dev server: `cd frontend && yarn dev` (port 8080, proxies to bench; `FS_DEV_PORT` to change).
 - Build SPA: `cd frontend && yarn build` (→ `field_sales/public/frontend`, `www/fieldsales.html`, PWA `sw.js`).
 - Migrate: `bench --site <site> migrate`.
-- Tests: `bench --site fieldsales-test.localhost run-tests --app field_sales [--module field_sales.tests.test_x]` — only on the dedicated test site (`allow_tests`).
+- Tests: `bench --site fieldsales-test.localhost run-tests --app field_sales [--module field_sales.tests.test_x]` — only on the dedicated test site (`allow_tests`). Needs Redis on 11000/13000 (`bench start` or `redis-server config/redis_*.conf`); without it ~130 tests error in `global_search.sync_value_in_queue`.
 - Manual commission sync: `bench --site <site> execute field_sales.commission.engine.reconcile_order --kwargs "{'external_order_id': '<id>'}"`.
 - Deploy: TODO: verify (no deploy scripts in the repo).
 
@@ -105,6 +106,7 @@ Store access goes through a platform-neutral connector layer; only `connectors/s
 - The SPA's only realtime use is `composables/useRealtime.js → onDoctypeEvent()` (Order Detail: live price/stock); sidebar counts still poll every 60 s and some pages poll for job results. The socket goes to `hostname:socketio_port` when `dev_server` (boot values from `www/fieldsales.py → get_boot()`), else the page origin — production needs nginx proxying `/socket.io`; a tunnel to the dev server gets no realtime.
 - Field Order Item `rate` is sent to the store as the line price, so for non-managers the server sets it to the product's current price on save (read-only is only a UI hint; REST could set it) — except a saved row whose product and rate are unchanged (`get_doc_before_save()`), so a rep's save keeps a manager's rate and the price the draft was made at. An amended order's rows are new rows, so they get current prices.
 - Price webhooks never change `rate` on order rows: draft rows show "Price changed" (`OrderDetail.vue → priceChange()`) with Apply (for a rep, any rate change becomes the product's current price, which is the same thing); the announced price is the one stored after the re-fetch, so out-of-order deliveries can't announce a stale price.
+- Geofence can't be moved by reps: a located Retailer's latitude/longitude and any `geofence_radius_m` are manager-only (`retailer.py → _guard_location()`; reps may set the first location, check-in sets it via `frappe.db.set_value`). A checked-in Visit keeps the retailer position it was measured against (`visit.py → _guard_check_in_fields()`, `RETAILER_POSITION_FIELDS`); without that, the read-only `fetch_from` re-fetches the Retailer's current position on every save and recomputes the distance.
 - Check-in only on the visit's date (system time zone) and only by the assigned rep; check-out is not date-limited and managers may check out a rep's visit.
 - Excel import is manager-only and re-validates every row server-side on create; uploads are private and deleted after a successful import.
 - Notification Log "Alert" type is delivered even to the sender, so `Visit._notify_rep()` skips self-assignments itself.
@@ -112,3 +114,5 @@ Store access goes through a platform-neutral connector layer; only `connectors/s
 - Print formats render with wkhtmltopdf (old WebKit): no flexbox/grid — lay out with tables; colours need `-webkit-print-color-adjust: exact` (see "Field Sales Order" in `fixtures/print_format.json`). Fixtures only re-sync when their `modified` is newer than the site's.
 - `create_sales_rep()` can link any existing User, so rep-scoped actions on the *user* must check that user's roles: `_check_password_target()` lets non-System Managers reset only users whose roles are within `REP_ONLY_ROLES` (Field Sales Rep + automatic roles).
 - Frappe only sends system email through an Email Account that is enabled **and** default outgoing (or site config `mail_server`); an enabled non-default account is not enough. Check with `EmailAccount.find_default_outgoing()`.
+- Field Order Item `available_qty` is always the server's stored stock at the order's location (`_set_row_stock()`, on draft saves *and* the submit save), never the client's; don't set it from Platform Product, which holds only the default location's stock and would also undo `_apply_live_stock()`.
+- Store ids and sync state on Field Order (`SYNC_FIELDS`) and Retailer (`SERVER_FIELDS`) are server-only: `validate()` undoes client changes (`utils/guards.py → keep_server_fields()`; new and duplicated docs start clean; System Managers may correct saved ones). Sync code must write them with `db_set` / `frappe.db.set_value`, or save with `flags.ignore_sync` (Retailer). `location_id` is deliberately not guarded: it is the user's pick, checked by `_validate_location()`. Field Order has no `amended_from`, so cancelled orders are redone by Duplicate.

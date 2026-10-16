@@ -200,3 +200,53 @@ class TestOrderPricing(IntegrationTestCase):
 		row.external_variant_id = "92"
 		self.assertEqual(flt(_draft_line_item(row, "INR")["priceOverride"]["amount"]), PRICE)
 		self.assertEqual(flt(_order_line_item(row, "INR")["priceSet"]["shopMoney"]["amount"]), PRICE)
+
+	# -- stock -------------------------------------------------------------
+
+	def stock_order(self, qty):
+		"""A rep's draft for `qty` of a tracked product with 5 in stock; live stock is off, so stored stock decides."""
+		frappe.db.set_single_value("Store Connection", "default_location_id", "")
+		tracked = frappe.get_doc(
+			{**self.product.as_dict(), "name": None, "external_variant_id": "94", "track_inventory": 1, "available_qty": 5}
+		).insert(ignore_permissions=True)
+		frappe.set_user(self.rep_user)
+		try:
+			order = frappe.get_doc(
+				{
+					"doctype": "Field Order",
+					"retailer": self.retailer.name,
+					"sales_rep": self.rep.name,
+					"order_date": nowdate(),
+					"items": [{"product": tracked.name, "qty": qty, "rate": PRICE}],
+				}
+			).insert()
+		finally:
+			frappe.set_user("Administrator")
+		return frappe.get_doc("Field Order", order.name).as_dict()
+
+	def as_rep(self, fn, doc):
+		frappe.set_user(self.rep_user)
+		try:
+			return fn(doc)
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_rep_cannot_raise_available_qty_on_save(self):
+		doc = self.stock_order(10)
+		doc["items"][0]["available_qty"] = 9999
+		self.as_rep(frappe.client.save, doc)
+		row = frappe.get_doc("Field Order", doc["name"]).items[0]
+		self.assertEqual((flt(row.available_qty), row.stock_warning), (5, 1))
+
+	def test_rep_cannot_submit_over_stock_with_raised_available_qty(self):
+		doc = self.stock_order(10)
+		doc["items"][0]["available_qty"] = 9999
+		doc["items"][0]["stock_warning"] = 0
+		with self.assertRaisesRegex(frappe.ValidationError, "exceeds available stock"):
+			self.as_rep(frappe.client.submit, doc)
+		self.assertEqual(frappe.db.get_value("Field Order", doc["name"], "docstatus"), 0)
+
+	def test_order_within_stock_submits(self):
+		doc = self.stock_order(3)
+		self.as_rep(frappe.client.submit, doc)
+		self.assertEqual(frappe.db.get_value("Field Order", doc["name"], "docstatus"), 1)

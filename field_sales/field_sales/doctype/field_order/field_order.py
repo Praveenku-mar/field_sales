@@ -10,9 +10,20 @@ from field_sales.connectors import ConnectorError
 from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import fetch_live_stock, get_location_stock, get_sell_locations, live_stock_enabled
+from field_sales.utils.guards import is_system_manager, keep_server_fields
 
 # May set a line's rate other than the product's price.
 PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
+# Written only by the store sync (db_set); location_id is the user's pick and is validated instead.
+SYNC_FIELDS = (
+	"platform",
+	"external_draft_id",
+	"external_order_id",
+	"sync_status",
+	"sync_attempts",
+	"last_sync_attempt",
+	"sync_error",
+)
 
 
 class FieldOrder(Document):
@@ -21,6 +32,7 @@ class FieldOrder(Document):
 	# ------------------------------------------------------------------
 
 	def validate(self):
+		self._keep_sync_fields()
 		self._validate_visit()
 		self._validate_location()
 		self._set_row_stock()
@@ -56,6 +68,16 @@ class FieldOrder(Document):
 	# ------------------------------------------------------------------
 	# Validation helpers
 	# ------------------------------------------------------------------
+
+	def _keep_sync_fields(self):
+		"""
+		Store ids and sync state come from the sync, never the client: a planted
+		external_draft_id would make push_order reuse (Draft mode) or delete (Confirmed mode)
+		another order's draft. New orders, amended and duplicated ones included, start
+		unsynced; a System Manager may correct a saved one.
+		"""
+		if self.is_new() or not is_system_manager():
+			keep_server_fields(self, SYNC_FIELDS)
 
 	def _validate_visit(self):
 		"""The visit must be to the same retailer; the order defaults to the visit's rep."""
@@ -100,14 +122,16 @@ class FieldOrder(Document):
 
 	def _set_row_stock(self):
 		"""
-		Rows show the stored stock at the order's location (Product Stock), on every draft save.
+		Rows show the stored stock at the order's location (Product Stock), on every draft
+		save and on submit, never the client's value (read-only is only a UI hint): the
+		submit's stock check (``_block_on_stock_warning``) relies on it.
 
 		Not a ``fetch_from``: Frappe re-fetches those on every save, from Platform Product,
 		which only holds the default location's stock. "Refresh Stock" saves the live figure
 		at the order's location before saving the order, so the rows show it. A submitted
 		order keeps the stock it was submitted against (``_apply_live_stock``).
 		"""
-		if self.docstatus != 0:
+		if self.docstatus != 0 and self.get("_action") != "submit":
 			return
 		stock = get_location_stock([row.product for row in self.items], self.location_id)
 		for row in self.items:

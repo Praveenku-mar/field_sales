@@ -31,3 +31,21 @@ export function getPosition() {
     )
   })
 }
+
+/**
+ * The Platform Product whose barcode is exactly `code`, or null. A UPC-A code may be
+ * stored as 12 digits or read as a 13-digit EAN with a leading 0, so both are tried.
+ */
+export async function findProductByBarcode(code, { fields = ['name'], filters = {} } = {}) {
+  const variants = new Set([code])
+  if (/^0\d{12}$/.test(code)) variants.add(code.slice(1))
+  if (/^\d{12}$/.test(code)) variants.add(`0${code}`)
+  const [product] = await createResource({ url: 'frappe.client.get_list' }).submit({
+    doctype: 'Platform Product',
+    fields,
+    filters: { ...filters, barcode: ['in', [...variants]] },
+    order_by: 'status asc, modified desc',
+    limit_page_length: 1,
+  })
+  return product || null
+}

@@ -90,16 +90,20 @@
                The results panel is in flow — it makes room instead of overlapping
                the items table. -->
           <div v-if="editable">
-            <TextInput
-              ref="quickSearchEl"
-              v-model="quickQuery"
-              placeholder="Search a product to add — name, SKU or barcode"
-              @keydown.enter.prevent="quickRows.length && quickAdd(quickRows[0])"
-              @blur="quickOpen = false"
-              @focus="quickSearch.data && (quickOpen = true)"
-            >
-              <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
-            </TextInput>
+            <div class="flex items-center gap-2">
+              <TextInput
+                ref="quickSearchEl"
+                v-model="quickQuery"
+                class="flex-1"
+                placeholder="Search a product to add — name, SKU or barcode"
+                @keydown.enter.prevent="quickRows.length && quickAdd(quickRows[0])"
+                @blur="quickOpen = false"
+                @focus="quickSearch.data && (quickOpen = true)"
+              >
+                <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+              </TextInput>
+              <Button icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
+            </div>
             <ul
               v-if="quickOpen && (quickSearch.loading || quickRows.length)"
               class="mt-1 max-h-72 overflow-y-auto rounded-4 border border-outline-gray-2 bg-surface-base py-1"
@@ -397,6 +401,8 @@
       </template>
     </Dialog>
 
+    <BarcodeScanner v-model="scanOpen" @scanned="onScanned" />
+
     <!-- Confirmations -->
     <Dialog v-model="confirm.open" :title="confirm.title" :message="confirm.message" :icon="confirm.icon" :theme="confirm.theme">
       <template #actions>
@@ -432,9 +438,10 @@ import PageHeader from '@/components/PageHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import LinkField from '@/components/LinkField.vue'
+import BarcodeScanner from '@/components/BarcodeScanner.vue'
 import { useSessionStore } from '@/stores/session'
 import { useSellLocations } from '@/composables/useSellLocations'
-import { callMethod } from '@/utils/api'
+import { callMethod, findProductByBarcode } from '@/utils/api'
 import { formatCurrency, formatDate, formatNumber, formatTime, orderStatus, relativeDay } from '@/utils/format'
 
 const props = defineProps({ name: { type: String, required: true } })
@@ -689,6 +696,32 @@ function quickAdd(p) {
   quickActive.value = null
   quickSearch.setData(null)
   nextTick(() => quickSearchEl.value?.$el?.querySelector('input')?.focus())
+}
+
+// Camera scan: the scanned product goes onto the order with qty 1, or +1 if it is already there.
+const scanOpen = ref(false)
+async function onScanned(code) {
+  let product
+  try {
+    product = await findProductByBarcode(code, { fields: ['name', ...PRODUCT_FIELDS], filters: { status: 'Active' } })
+  } catch {
+    toast.error('Could not look up the barcode. Try again.')
+    return
+  }
+  if (!product) {
+    toast.warning(`No product with barcode ${code}`)
+    return
+  }
+  const row = form.value.items.find((r) => r.product === product.name)
+  if (row) {
+    row.qty = (+row.qty || 0) + 1
+    toast.success(`${productLabel(product)} — qty ${row.qty}`)
+  } else {
+    // An empty row left by Add Row is filled first rather than left dangling.
+    form.value.items = form.value.items.filter((r) => r.product)
+    addRow(product)
+    toast.success(`Added ${productLabel(product)}`)
+  }
 }
 
 const selected = ref(new Set())

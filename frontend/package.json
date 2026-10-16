@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "frappe-ui": "1.0.0-rc.2",
+    "html5-qrcode": "2.3.8",
     "leaflet": "^1.9.4",
     "pinia": "^2.3.1",
     "vue": "^3.5.13",

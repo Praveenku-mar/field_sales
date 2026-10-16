@@ -9,6 +9,8 @@
     >
       <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
     </TextInput>
+    <!-- Beside the search box, e.g. a barcode scan button -->
+    <slot name="search-actions" />
     <TabButtons v-if="tabs.length" v-model="tab" :options="tabs" />
     <div v-for="field in fields" :key="field.fieldname" class="w-40">
       <FormControl

@@ -17,7 +17,10 @@
       </template>
     </PageHeader>
     <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
-      <ListFilters v-model="model" search-placeholder="Search title or SKU" :tabs="tabs">
+      <ListFilters v-model="model" search-placeholder="Search title, SKU or barcode" :tabs="tabs">
+        <template #search-actions>
+          <Button icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
+        </template>
         <PresetChip :label="presetLabel" />
       </ListFilters>
       <DataTable
@@ -51,21 +54,23 @@
         <template #cell-status="{ value }"><StatusPill :status="value === 'Active' ? 'Active' : value" /></template>
       </DataTable>
     </div>
+    <BarcodeScanner v-model="scanOpen" @scanned="onScanned" />
   </div>
 </template>
 
 <script setup>
 import { onBeforeUnmount, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Button, call, toast } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
 import ListFilters from '@/components/ListFilters.vue'
 import PresetChip from '@/components/PresetChip.vue'
 import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
+import BarcodeScanner from '@/components/BarcodeScanner.vue'
 import { useDocList } from '@/composables/useDocList'
 import { formatCurrency, formatNumber } from '@/utils/format'
-import { callMethod } from '@/utils/api'
+import { callMethod, findProductByBarcode } from '@/utils/api'
 import { useSessionStore } from '@/stores/session'
 
 const LOW_STOCK = 5
@@ -99,12 +104,26 @@ const { model, list, count, refresh, presetLabel, pageSize } = useDocList({
   fields: ['name', 'product_title', 'variant_title', 'collection', 'sku', 'price', 'available_qty', 'track_inventory', 'status', 'image'],
   orderBy: 'product_title asc',
   buildFilters,
-  searchFields: ['product_title', 'variant_title', 'sku'],
+  searchFields: ['product_title', 'variant_title', 'sku', 'barcode'],
   // ?preset=… (dashboard cards) shows exactly what the card counted, under the "All" tab;
   // ?tab=… opens a tab directly.
   initial: { tab: route.query.preset ? 'all' : route.query.tab || 'Active' },
   preset: route.query.preset || null,
 })
+
+// ---------------------------------------------------------------- barcode scan
+
+const router = useRouter()
+const scanOpen = ref(false)
+async function onScanned(code) {
+  try {
+    const product = await findProductByBarcode(code)
+    if (product) router.push({ name: 'Product', params: { name: product.name } })
+    else toast.warning(`No product with barcode ${code}`)
+  } catch {
+    toast.error('Could not look up the barcode. Try again.')
+  }
+}
 
 function stockClass(qty) {
   return qty <= 0 ? 'font-medium text-ink-red-5' : qty <= LOW_STOCK ? 'text-ink-amber-7' : 'text-ink-green-7'

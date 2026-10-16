@@ -403,6 +403,27 @@ class ShopifyConnector(BaseConnector):
 			"available": flt(payload.get("available")),
 		}
 
+	def handle_product_event(self, payload: dict) -> list[dict] | None:
+		"""``products/update`` payload -> plain variant ids and prices; ``None`` if it has no variants."""
+		variants = payload.get("variants")
+		if not variants:
+			return None
+
+		prices = []
+		for variant in variants:
+			variant_id = variant.get("id") if isinstance(variant, dict) else None
+			if not variant_id or variant.get("price") in (None, ""):
+				raise ConnectorError(_("Product webhook has a variant without an id or price."), code="BAD_PAYLOAD")
+			compare_at = variant.get("compare_at_price")
+			prices.append(
+				{
+					"external_variant_id": from_gid(str(variant_id)),
+					"price": flt(variant["price"]),
+					"compare_at_price": flt(compare_at) if compare_at not in (None, "") else None,
+				}
+			)
+		return prices
+
 	def order_id_from_event(self, payload: dict) -> str | None:
 		"""``orders/*`` carry the order as ``id``; ``refunds/create`` carries it as ``order_id``."""
 		value = payload.get("order_id") or payload.get("id")

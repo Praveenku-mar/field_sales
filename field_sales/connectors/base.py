@@ -289,6 +289,17 @@ class BaseConnector:
 		"""
 		raise NotImplementedError
 
+	def handle_product_event(self, payload: dict) -> list[dict] | None:
+		"""
+		Read the variant prices from a product-change payload.
+
+		:param payload: ``payload`` of a ``PRODUCT_UPDATE_TOPIC`` event.
+		:return: ``[{"external_variant_id": str, "price": float, "compare_at_price": float | None}]``
+			(plain ids), or ``None`` if the payload carries no variants.
+		:raises ConnectorError: if a variant cannot be read (code ``"BAD_PAYLOAD"``).
+		"""
+		raise NotImplementedError
+
 	def get_product(self, external_product_id: str) -> list[dict]:
 		"""
 		Fetch every variant of one product.

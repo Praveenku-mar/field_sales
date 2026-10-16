@@ -202,6 +202,15 @@
                       <span class="lucide-triangle-alert size-3" />
                       Exceeds stock — only {{ formatNumber(row.available_qty) }} available
                     </div>
+                    <div v-if="editable && priceChange(row) != null" class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-amber-7">
+                      <span class="flex items-center gap-1">
+                        <span class="lucide-tag size-3" />
+                        Price changed: {{ formatCurrency(row.rate) }} → {{ formatCurrency(priceChange(row)) }}
+                      </span>
+                      <button type="button" class="font-medium text-ink-gray-9 underline underline-offset-2" @click="applyNewPrice(row)">
+                        Apply new price
+                      </button>
+                    </div>
                   </td>
                   <td class="cell font-mono text-xs text-ink-gray-6">{{ row.sku || '—' }}</td>
                   <td class="cell text-right tabular-nums">
@@ -441,6 +450,7 @@ import LinkField from '@/components/LinkField.vue'
 import BarcodeScanner from '@/components/BarcodeScanner.vue'
 import { useSessionStore } from '@/stores/session'
 import { useSellLocations } from '@/composables/useSellLocations'
+import { onDoctypeEvent } from '@/composables/useRealtime'
 import { callMethod, findProductByBarcode } from '@/utils/api'
 import { formatCurrency, formatDate, formatNumber, formatTime, orderStatus, relativeDay } from '@/utils/format'
 
@@ -787,6 +797,44 @@ watch(
   },
 )
 
+// ---------------------------------------------------------------- live price and stock
+
+// Store webhooks announce price and stock changes (sync/webhooks.py). Products not on the
+// order show the new figures in the search results and Add Multiple; rows already on a
+// draft keep their rate and only offer the new price. Submitted orders are left alone.
+const newPrices = ref({}) // product -> latest store price announced while the page is open
+const priceChange = (row) => {
+  const price = row.product ? newPrices.value[row.product] : null
+  return price != null && +price !== +row.rate ? price : null
+}
+function applyNewPrice(row) {
+  row.rate = newPrices.value[row.product]
+}
+watch(() => props.name, () => (newPrices.value = {}))
+
+// Update listed products (search results, Add Multiple) in place.
+function patchListed(products, values) {
+  for (const resource of [quickSearch, picker]) {
+    if (resource.data?.some((p) => products.includes(p.name))) {
+      resource.setData(resource.data.map((p) => (products.includes(p.name) ? { ...p, ...values } : p)))
+    }
+  }
+}
+
+onDoctypeEvent('Platform Product', 'product_price_updated', ({ product, price, compare_at_price }) => {
+  patchListed([product], { price, compare_at_price })
+  if (editable.value && productNames.value.includes(product)) newPrices.value = { ...newPrices.value, [product]: price }
+})
+
+onDoctypeEvent('Platform Product', 'stock_updated', ({ products, available_qty, location_id }) => {
+  listedStock.value = { ...listedStock.value, ...Object.fromEntries(products.map((n) => [`${location_id}|${n}`, available_qty])) }
+  // Platform Product.available_qty is the default location's figure.
+  if (location_id === defaultLocation.value?.location_id) patchListed(products, { available_qty })
+  const orderLocation = form.value?.location_id || defaultLocation.value?.location_id
+  if (editable.value && location_id === orderLocation) {
+    form.value.items.filter((r) => products.includes(r.product)).forEach((r) => (r.available_qty = available_qty))
+  }
+})
 
 // Switching a draft to another location: save the order there, then re-check its rows live
 // at the new location (the server also swaps the rows' stock for the stored figures on save).

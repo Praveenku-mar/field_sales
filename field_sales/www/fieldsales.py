@@ -40,6 +40,9 @@ def get_boot() -> dict:
 			"csrf_token": frappe.sessions.get_csrf_token(),
 			"default_route": _app_base(),
 			"sysdefaults": frappe.defaults.get_defaults(),
+			# Realtime socket (composables/useRealtime.js): its own port under bench start.
+			"socketio_port": frappe.conf.socketio_port,
+			"dev_server": frappe._dev_server,
 		}
 	)
 

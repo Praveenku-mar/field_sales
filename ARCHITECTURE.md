@@ -1,0 +1,109 @@
+# Architecture
+
+## Overview
+Field Sales is a Frappe v16 app (no ERPNext) for a brand's field reps: they check in at retail shops with GPS, take orders against live store stock, and the orders sync to the online store (Shopify today). Managers track visits, orders, sync health and sales-rep commission.
+Backend: Python on Frappe (DocTypes, whitelisted APIs, RQ background jobs, scheduler). Frontend: a Vue 3 + frappe-ui SPA (Vite, Pinia, Tailwind) served at `/fieldsales` (alias `/fs`), plus standard Desk forms, reports and number cards.
+Store access goes through a platform-neutral connector layer; only `connectors/shopify.py` knows Shopify (Admin GraphQL).
+
+## Folder map
+- `field_sales/hooks.py` – permissions hooks, scheduler, fixtures, website routes, app-screen entry.
+- `field_sales/field_sales/doctype/` – DocTypes and their controllers (see Modules).
+- `field_sales/field_sales/report/` – script reports: `rep_performance`, `rep_commission_summary`.
+- `field_sales/field_sales/{number_card,dashboard_chart,workspace,page,notification}/` – Desk dashboard pieces, the "Field Order Sync Failed" Notification.
+- `field_sales/api/` – whitelisted actions (`__init__.py`), dashboard data (`dashboard.py`), public webhook endpoint (`webhooks.py`).
+- `field_sales/frontend_api.py` – read APIs for the SPA (session, sidebar counts, search, dashboard, notifications).
+- `field_sales/connectors/` – `base.py` neutral contract + `ConnectorError`; `shopify.py` implementation; `__init__.py → get_connector()`.
+- `field_sales/sync/` – background jobs: products, stock, customers, orders, webhooks, order confirmation email, realtime notify.
+- `field_sales/commission/` – commission engine, monthly statements, commission API.
+- `field_sales/visit_import.py` – Excel/CSV visit import.
+- `field_sales/permissions.py` – reports_to hierarchy permission rules.
+- `field_sales/daily_summary.py` – daily email to managers.
+- `field_sales/www/fieldsales.{py,html}` – SPA shell page and boot data.
+- `field_sales/templates/emails/` – email templates (order confirmation, daily summary).
+- `field_sales/fixtures/print_format.json` – "Field Sales Order" and "Field Sales Invoice" print formats.
+- `field_sales/patches/v1_0/` – data patches (listed in `patches.txt`).
+- `field_sales/tests/` – integration tests (one file per feature).
+- `frontend/src/` – SPA: `pages/`, `components/` (+ `layout/`), `composables/`, `stores/session.js`, `utils/` (`nav.js`, `api.js`, `format.js`), `router.js`, `sw.js` (PWA worker).
+- `field_sales/public/frontend/` – Vite build output (generated; not edited by hand).
+
+## Data flow
+1. **Products & stock in:** scheduler → `sync/products.py → scheduled_sync()` → `connector.get_products()` → Platform Product + Product Stock rows. Live stock on order: `sync/stock.py → fetch_live_stock()`. Store pushes `inventory_levels/update`, `products/update|delete` webhooks (step 5).
+2. **Customers out:** Retailer `on_update` → `sync/customers.py → enqueue_push()` → `push_retailer()` → `connector.create_customer()` → `external_customer_id`.
+3. **Visit:** rep checks in/out via `api/__init__.py → check_in() / check_out()` (GPS, geofence, own visit, visit date). Creating/reassigning a Visit notifies the rep (Notification Log).
+4. **Order out:** Field Order `on_submit` → `sync/orders.py → enqueue_push_order()` → `push_order()` → `connector.create_order()` (Draft mode: draft order; Confirmed mode: real order). On an order id: `commission/engine.py → enqueue_create_entries()` and `sync/confirmation.py → enqueue_order_confirmation()`. Draft mode gets its order id later from `link_completed_drafts()` (cron). Failures: `retry_failed_orders()` (cron), Sync Log, "Field Order Sync Failed" Notification.
+5. **Webhooks in:** store → `api/webhooks.py → receive()` (HMAC verify, dedupe by delivery id in Redis, enqueue) → `sync/webhooks.py → process_event()` → stock/product updates or `commission/engine.py → reconcile_order()` for order paid/fulfilled/cancelled/refund.
+6. **Commission:** `reconcile_order()` re-reads the order (`connector.get_order()`) and sets entries to match the store's current state → monthly `commission/statements.py → generate_monthly_statements()` → Approve (submit) → `mark_paid()`.
+7. **Emails:** order confirmation with invoice PDF (`sync/confirmation.py`), daily manager summary (`daily_summary.py`), Frappe Notifications; sent via the default outgoing Email Account.
+8. Every store call writes a Sync Log (`sync_log.py → log_sync() / log_sync_durable()`).
+
+## Modules
+**Visits** – plan, check in/out with GPS and geofence. Entry: `doctype/visit/visit.py → Visit` (`_guard_check_in_fields()`, `_compute_distance_and_geofence()`, `_notify_rep()`); `api/__init__.py → check_in(), check_out(), _check_visit_date(), _check_own_visit()`; `utils/geo.py → haversine_m()`. UI: `pages/Visits.vue`, `pages/VisitDetail.vue`, `components/VisitDialog.vue`.
+
+**Visit import** – Excel/CSV bulk planning (Sales Manager/System Manager). `visit_import.py → download_visit_template(), preview_visit_import(), create_visits_from_import(), _check_import_access()`. UI: `components/VisitImport.vue` (Visits page, `?tab=import`).
+
+**Orders** – order entry with stock checks, discount limit, tax. `doctype/field_order/field_order.py → FieldOrder` (`validate()`, `_validate_discount()`, `before_submit() → _apply_live_stock()`, `on_submit()`); `sync/orders.py → push_order(), retry_failed_orders(), link_completed_drafts()`. UI: `pages/Orders.vue`, `pages/OrderDetail.vue`, `components/NewOrderDialog.vue`.
+
+**Order confirmation & invoice** – one email per order once it reaches the store, GST tax invoice PDF. `sync/confirmation.py → send_order_confirmation(), resend_order_confirmation(), _build_pdf()` (60 s cap); print format "Field Sales Invoice" (fixture); company details on Store Connection (Invoice section). UI: Invoice card in `OrderDetail.vue`, `components/InvoiceSettings.vue`.
+
+**Products & stock** – `sync/products.py → sync_products(), sync_one_product()`; `sync/stock.py → get_sell_locations(), set_location_stock(), fetch_live_stock()`. DocTypes: Platform Product, Product Stock, Store Location (child of Store Connection). UI: `pages/Products.vue`, `pages/ProductDetail.vue`.
+
+**Barcode scanning** – camera scan via `components/BarcodeScanner.vue` (html5-qrcode; EAN-13/8, UPC-A/E, Code 128; emits `scanned`, releases the camera on close). Lookup `utils/api.js → findProductByBarcode()` (exact match on Platform Product `barcode`, tries UPC-A with/without leading 0). Scan buttons: Products page (opens the product; slot `search-actions` in `ListFilters.vue`) and the Order Detail item search (`onScanned()`: adds qty 1 or +1). Typed/USB-scanner input goes through the normal search boxes (barcode is a search field).
+
+**Customers (Retailer)** – `doctype/retailer/retailer.py`; push in `sync/customers.py → push_retailer()`.
+
+**Sales reps & hierarchy** – Sales Rep (`autoname field:user`, `reports_to`, `max_discount_pct`, commission plan). `permissions.py → get_allowed_reps()` (own rep + all below), `_query_conditions()`, `*_has_permission()`; `api/__init__.py → create_sales_rep()`.
+
+**Commission** – plans (Flat %, Product Rate, Tiered Slab, Per Order), discount penalty, manager overrides, lifecycle Pending → Earned → Reversed/Cancelled, Adjustments for locked entries. `commission/engine.py → create_entries(), reconcile_order(), resolve_rate(), slab_rate(), penalty_multiplier()`; `commission/statements.py → generate_monthly_statements(), build_statement(), regenerate_statement(), mark_paid(), marginal_commission()`; `commission/api.py → get_my_commission_summary(), get_team_commission(), get_commission_entries(), save_commission_plan(), assign_commission_plan(), create_adjustment(), generate_statements(), approve_statement()`. DocTypes: Commission Plan (+ Rate, Slab), Commission Entry, Commission Statement (+ Entry). UI: `pages/Commission.vue`, `pages/CommissionStatement.vue`, `components/CommissionPlanDialog.vue`, `AssignPlanDialog.vue`, `CommissionAdjustmentDialog.vue`, `GenerateStatementsDialog.vue`.
+
+**Reports** – `report/rep_performance/rep_performance.py → execute()`; `report/rep_commission_summary/rep_commission_summary.py → execute(), get_data(), _paid_statements()`. In-app: `pages/Reports.vue` (list from `utils/nav.js → REPORT_LINKS`), `pages/RepPerformance.vue`, `pages/RepCommission.vue` (both call `frappe.desk.query_report.run`).
+
+**Sync monitoring** – Sync Log DocType (`clear_old_logs()` daily), `api/__init__.py → get_sync_failures(), retry_sync(), retry_all_sync_failures()`. UI: `pages/SyncLogs.vue`, `SyncLogDetail.vue`, `SyncFailures.vue`.
+
+**Settings** – Store Connection (Single): platform, credentials, token, locations, order mode, invoice/company details, `metafields_ready_on`. `api/__init__.py → test_connection(), get_locations()`. UI: `pages/Settings.vue` (tabs Store / Email / Invoice), `components/StoreConnectionForm.vue`, `EmailAccountSettings.vue`.
+
+**Notifications & shell** – `frontend_api.py → get_session(), get_sidebar_counts(), get_notifications(), search()`; `www/fieldsales.py → get_context(), has_app_access(), get_boot()`. UI: `components/layout/` (AppLayout, AppSidebar, MobileTabBar, CommandPalette, TopBar, UserMenu), `pages/Notifications.vue`, `pages/Dashboard.vue`.
+
+## External services
+- **Shopify Admin GraphQL**, version from `Store Connection.shopify_api_version` (currently `2026-10`). Auth: client-credentials grant (`connectors/shopify.py → _request_new_token()`), token stored encrypted on Store Connection, refreshed 5 min before expiry. Needs scopes for products, inventory, customers, draft orders, orders (`write_orders` for Confirmed mode; read for commission). App and store must be in the same Shopify organization (client-credentials rule).
+- **Shopify webhooks** → `/api/method/field_sales.api.webhooks.receive`; topics `inventory_levels/update`, `products/update`, `products/delete`, `orders/paid`, `orders/fulfilled`, `orders/cancelled`, `refunds/create`. Subscriptions are created outside this app (no registration helper in code; the Sync Log "Register Webhooks" operation is unused).
+- **Order metafields** (app-owned, namespace `$app:field_sales`): `field_order_no`, `sales_rep`; definitions created by `connectors/shopify.py → ensure_order_metafields()`.
+- **WooCommerce / Odoo** – fields exist on Store Connection; no connector implemented (`connectors/__init__.py → get_connector()` only maps Shopify).
+- **Email** – Frappe default outgoing Email Account (configured in Settings → Email).
+- **PDF** – wkhtmltopdf via Frappe (`frappe.utils.pdf.get_pdf`).
+- **Camera** – `html5-qrcode` (npm) in the SPA; uses the browser's BarcodeDetector when available.
+- **Maps** – Leaflet in the SPA (`components/MapEmbed.vue`, `MapPickerDialog.vue`); tiles from OpenStreetMap, place search via OSM Nominatim (`MapPickerDialog.vue`).
+- **Env vars / secrets**: none read from the environment; credentials live in Store Connection (Password fields). `frappe.conf.developer_mode` affects the SPA shell. Site config `host_name` must be reachable locally (see Gotchas).
+
+## Conventions
+- Python: tabs, docstrings on public functions, `_()` for user-facing text, type annotations on all whitelisted methods (`require_type_annotated_api_methods = True`).
+- Store-specific code only in `connectors/`; callers use neutral shapes documented in `connectors/base.py`. Platform ids are stored plain (no `gid://`).
+- Store failures raise `ConnectorError(message, code, http_status, details, partial)`; sync jobs catch it, mark the record Failed, write Sync Log, and do not re-raise; other exceptions are re-raised after logging.
+- Background work: `frappe.enqueue(..., enqueue_after_commit=True, job_id=..., deduplicate=True)`. Never pass `event=` as a job kwarg (reserved by `frappe.enqueue`).
+- Permissions: rep-scoped DocTypes use `permissions.REP_FIELD` + hooks `permission_query_conditions` / `has_permission`; manager actions check Sales Manager / System Manager.
+- Roles: System Manager, Sales Manager, Field Sales Rep.
+- Frontend: frappe-ui components, `PageHeader`, `SectionCard`, `DataTable` (page-size footer), `StatusPill`, `NumberCard`, `EmptyState`; page tabs kept in `?tab=`; nav in `utils/nav.js`. Only Tailwind classes present in the frappe-ui 1.0 build (e.g. no `bg-surface-white`).
+- Tests: `field_sales/tests/test_*.py`, `frappe.tests.IntegrationTestCase`, store mocked by patching connector methods; per-test rollback in `tearDown` (class-level rollback only otherwise).
+
+## Commands
+- Run: `bench start` (web, workers, scheduler, socketio). SPA dev server: `cd frontend && yarn dev` (port 8080, proxies to bench; `FS_DEV_PORT` to change).
+- Build SPA: `cd frontend && yarn build` (→ `field_sales/public/frontend`, `www/fieldsales.html`, PWA `sw.js`).
+- Migrate: `bench --site <site> migrate`.
+- Tests: `bench --site fieldsales-test.localhost run-tests --app field_sales [--module field_sales.tests.test_x]` — only on the dedicated test site (`allow_tests`).
+- Manual commission sync: `bench --site <site> execute field_sales.commission.engine.reconcile_order --kwargs "{'external_order_id': '<id>'}"`.
+- Deploy: TODO: verify (no deploy scripts in the repo).
+
+## Gotchas
+- Store Connection is a Single; `frappe.db.get_single_value` returns `0001-01-01` for an unset Datetime — read via `frappe.get_single(...)` instead.
+- Commission is state-based: replayed or out-of-order webhooks are safe; entries on Approved/Paid statements are never edited — corrections become negative Adjustments (so Unpaid can go below zero).
+- Commission entries keep the rate they were created with; editing a plan doesn't change existing entries. Tiered Slab rates are provisional until the statement is built.
+- Field Order tax is calculated before the discount (invoice prints the Field Order's own amounts). TODO: verify with accounting whether tax should follow the discount.
+- Draft mode: the store order (and commission, confirmation email, metafields) only exists once the draft is completed; Shopify doesn't copy draft metafields to the order, so `link_completed_drafts()` sets them.
+- Retry de-duplication finds an existing order by `source_identifier` (Field Order name), falling back to the legacy `field-order-<name>` tag.
+- PDF generation fetches print CSS from the site's `host_name`; a public/unreachable `host_name` (e.g. a tunnel URL) makes wkhtmltopdf hang — capped at 60 s in `sync/confirmation.py`.
+- Shopify requests use a (5 s connect, 30 s read) timeout; a broken IPv6 route otherwise stalls each call.
+- Webhook signatures are verified with the app's client secret; webhooks created in Shopify admin may use a different key and fail verification.
+- The SPA has no realtime socket; sidebar counts poll every 60 s and on route change; some pages poll for job results.
+- Check-in only on the visit's date (system time zone) and only by the assigned rep; check-out is not date-limited and managers may check out a rep's visit.
+- Excel import is manager-only and re-validates every row server-side on create; uploads are private and deleted after a successful import.
+- Notification Log "Alert" type is delivered even to the sender, so `Visit._notify_rep()` skips self-assignments itself.
+- Camera (barcode scan) and GPS only work in a secure context: HTTPS or `localhost`. Plain `http://<LAN-IP>` on a phone shows "Camera not available".

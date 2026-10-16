@@ -207,6 +207,7 @@
                         <span class="lucide-tag size-3" />
                         Price changed: {{ formatCurrency(row.rate) }} → {{ formatCurrency(priceChange(row)) }}
                       </span>
+                      <!-- For a rep the server sets a changed rate to the product's current price: the same thing. -->
                       <button type="button" class="font-medium text-ink-gray-9 underline underline-offset-2" @click="applyNewPrice(row)">
                         Apply new price
                       </button>
@@ -231,8 +232,9 @@
                     <span v-else class="block px-3 tabular-nums" :class="isShort(row) && 'text-ink-red-6'">{{ formatNumber(row.qty, 3) }}</span>
                   </td>
                   <td class="cell p-0 text-right">
+                    <!-- Only managers may set a rate other than the product's price (the server resets it otherwise). -->
                     <input
-                      v-if="editable"
+                      v-if="editable && session.isManager"
                       v-model.number="row.rate"
                       type="number"
                       min="0"

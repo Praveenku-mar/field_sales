@@ -11,6 +11,9 @@ from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import fetch_live_stock, get_location_stock, get_sell_locations, live_stock_enabled
 
+# May set a line's rate other than the product's price.
+PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
+
 
 class FieldOrder(Document):
 	# ------------------------------------------------------------------
@@ -25,6 +28,7 @@ class FieldOrder(Document):
 		self._validate_no_duplicate_products()
 		self._compute_item_amounts()
 		self._compute_totals()
+		self._validate_amounts()
 		self._validate_discount()
 
 	def before_submit(self):
@@ -206,30 +210,45 @@ class FieldOrder(Document):
 	def _compute_item_amounts(self):
 		"""
 		For every child row:
+		  - rate = the Platform Product's price, unless the user may override prices
+		    (PRICE_OVERRIDE_ROLES): the rate is sent to the store as the line's price.
+		    A saved row whose product and rate are unchanged keeps its rate, so a rep's
+		    save does not undo a manager's price (or move a draft to a newer store price).
 		  - amount = qty × rate
 		  - stock_warning = 1  iff  track_inventory is set on the product
 		                            AND qty > available_qty
 
-		Fetches track_inventory for all products in a single query to
+		Fetches price and track_inventory for all products in a single query to
 		avoid N+1 DB hits.
 		"""
 		products = [row.product for row in self.items if row.product]
 
-		track_map = {}
+		product_map = {}
 		if products:
-			track_map = {
-				r.name: r.track_inventory
+			product_map = {
+				r.name: r
 				for r in frappe.get_all(
 					"Platform Product",
 					filters={"name": ["in", products]},
-					fields=["name", "track_inventory"],
+					fields=["name", "price", "track_inventory"],
 				)
 			}
+		may_override_price = bool(PRICE_OVERRIDE_ROLES & set(frappe.get_roles()))
+		before = self.get_doc_before_save()
+		saved_rows = {r.name: r for r in before.items} if before else {}
 
 		for row in self.items:
+			product = product_map.get(row.product)
+			saved = saved_rows.get(row.name)
+			unchanged = saved and saved.product == row.product and flt(saved.rate) == flt(row.rate)
+			if product and not may_override_price and not unchanged:
+				row.rate = flt(product.price)
+			if flt(row.rate) < 0:
+				frappe.throw(_("Row {0}: Rate cannot be negative.").format(row.idx))
+
 			row.amount = flt(flt(row.qty) * flt(row.rate), row.precision("amount"))
 
-			tracks = track_map.get(row.product, 0)
+			tracks = product.track_inventory if product else 0
 			row.stock_warning = (
 				1 if tracks and flt(row.qty) > flt(row.available_qty) else 0
 			)
@@ -251,6 +270,16 @@ class FieldOrder(Document):
 			flt(self.net_total) + flt(self.tax_amount) - flt(self.discount_amount),
 			self.precision("grand_total"),
 		)
+
+
+	def _validate_amounts(self):
+		"""Bounds on what is sent to the store as the order's tax and discount."""
+		if not 0 <= flt(self.tax_percent) <= 100:
+			frappe.throw(_("Tax % must be between 0 and 100."))
+		if flt(self.discount_amount) < 0:
+			frappe.throw(_("Discount cannot be negative."))
+		if flt(self.discount_amount) > flt(self.net_total) + flt(self.tax_amount):
+			frappe.throw(_("Discount cannot be more than the order total."))
 
 
 def on_doctype_update():

@@ -27,6 +27,7 @@ frappe.ui.form.on("Field Order", {
 		_add_stock_button(frm);
 		_show_sync_status(frm);
 		_show_discount_limit(frm);
+		_lock_rate(frm);
 	},
 
 	// Live stock check right before submit; returning the promise makes the
@@ -298,6 +299,12 @@ function _show_order_summary(frm) {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+// Only managers may set a rate other than the product's price; the server resets it for others.
+function _lock_rate(frm) {
+	var may_override = frappe.user.has_role(["Sales Manager", "System Manager"]);
+	frm.fields_dict.items.grid.update_docfield_property("rate", "read_only", may_override ? 0 : 1);
+}
 
 // Show the rep's discount limit under Discount %.
 function _show_discount_limit(frm) {

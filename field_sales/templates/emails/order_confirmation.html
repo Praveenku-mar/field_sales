@@ -47,6 +47,17 @@
 	</tfoot>
 </table>
 
+{% if payment_url %}
+<div style="margin: 20px 0; padding: 16px; border: 1px solid #d1d5db; border-radius: 8px; text-align: center;">
+	<p style="margin: 0 0 12px;">{{ _("Pay {0} online by UPI, card or net banking.").format(grand_total) }}</p>
+	<a href="{{ payment_url }}" style="display: inline-block; padding: 10px 24px; background: #171717; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold;">{{ _("Pay Now") }}</a>
+	{% if payment_expires %}
+	<p style="margin: 12px 0 0; color: #6b7280; font-size: 13px;">{{ _("This link expires on {0}.").format(payment_expires) }}</p>
+	{% endif %}
+	<p style="margin: 8px 0 0; color: #6b7280; font-size: 12px; word-break: break-all;">{{ payment_url }}</p>
+</div>
+{% endif %}
+
 <p>{{ _("Your sales representative is {0}. Please reach out to them for anything about this order.").format(sales_rep) }}</p>
 
 <p>

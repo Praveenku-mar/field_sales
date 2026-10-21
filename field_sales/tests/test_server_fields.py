@@ -13,6 +13,17 @@ from field_sales.sync.orders import push_order
 SHOP = "test-shop.myshopify.com"
 
 
+# What a payment webhook would record; clients must never be able to set it.
+PAID = {
+	"payment_status": "Paid",
+	"amount_paid": 100,
+	"razorpay_payment_link_id": "plink_X",
+	"razorpay_payment_link_url": "https://rzp.io/i/x",
+	"razorpay_payment_id": "pay_X",
+	"paid_on": "2026-10-21 10:00:00",
+}
+
+
 class TestServerFields(IntegrationTestCase):
 	"""Store ids and sync state are written by the sync only, never through a client save."""
 
@@ -138,6 +149,47 @@ class TestServerFields(IntegrationTestCase):
 			"Field Order", amended.name, ["external_draft_id", "external_order_id", "sync_status", "platform"], as_dict=True
 		)
 		self.assertEqual(tuple(values.values()), (None, None, "Draft", None))
+
+	# -- Field Order payment ------------------------------------------------
+
+	def payment_values(self, name=None):
+		return frappe.db.get_value("Field Order", name or self.order.name, list(PAID), as_dict=True)
+
+	def assert_unpaid(self, name=None):
+		values = self.payment_values(name)
+		self.assertEqual(values.payment_status, "Unpaid")
+		self.assertFalse(values.amount_paid)
+		ids = ("razorpay_payment_link_id", "razorpay_payment_link_url", "razorpay_payment_id", "paid_on")
+		self.assertFalse(any(values[f] for f in ids))
+
+	def test_new_order_starts_unpaid(self):
+		order = self.as_user(self.rep_user, self.new_order(**PAID).insert)
+		self.assert_unpaid(order.name)
+
+	def test_rep_cannot_set_payment_on_draft(self):
+		doc = frappe.get_doc("Field Order", self.order.name).as_dict()
+		doc.update(PAID)
+		self.as_user(self.rep_user, frappe.client.save, doc)
+		self.assert_unpaid()
+
+	def test_nobody_can_mark_submitted_order_paid(self):
+		# allow_on_submit fields can be changed by "Update"; validate() does not run there.
+		frappe.db.set_value("Field Order", self.order.name, {"docstatus": 1, "sync_status": "Synced"})
+		for user in (self.rep_user, self.sysman):
+			self.as_user(user, frappe.client.set_value, "Field Order", self.order.name, dict(PAID))
+			self.assert_unpaid()
+
+	def test_server_db_set_records_payment(self):
+		frappe.db.set_value("Field Order", self.order.name, "docstatus", 1)
+		frappe.get_doc("Field Order", self.order.name).db_set(PAID)
+		self.assertEqual(self.payment_values().payment_status, "Paid")
+
+	def test_copy_of_paid_order_starts_unpaid(self):
+		frappe.db.set_value("Field Order", self.order.name, {"docstatus": 2, **PAID})
+		copy = frappe.copy_doc(frappe.get_doc("Field Order", self.order.name))
+		copy.docstatus = 0
+		self.as_user(self.rep_user, copy.insert)
+		self.assert_unpaid(copy.name)
 
 	def test_system_manager_may_correct_saved_order(self):
 		self.as_user(self.sysman, frappe.client.set_value, "Field Order", self.order.name, "external_order_id", "777")

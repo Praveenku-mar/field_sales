@@ -31,6 +31,10 @@
             <StatusPill :status="orderStatus(row)" />
           </Tooltip>
         </template>
+        <template #cell-payment_status="{ row }">
+          <StatusPill v-if="row.docstatus === 1 && row.payment_status" :status="row.payment_status" />
+          <span v-else class="text-ink-gray-4">—</span>
+        </template>
       </DataTable>
     </div>
     <NewOrderDialog v-model="newOrderOpen" />
@@ -68,6 +72,7 @@ const columns = [
   { key: 'total_qty', label: 'Units', align: 'right', format: (v) => formatNumber(v) },
   { key: 'grand_total', label: 'Total', align: 'right', format: (v) => formatCurrency(v) },
   { key: 'sync_status', label: 'Status' },
+  { key: 'payment_status', label: 'Payment' },
 ]
 
 function buildFilters(m) {
@@ -94,7 +99,7 @@ const filterFields = computed(() =>
 const route = useRoute()
 const { model, list, count, presetLabel, pageSize } = useDocList({
   doctype: 'Field Order',
-  fields: ['name', 'retailer_name', 'sales_rep', 'sales_rep.full_name as sales_rep_name', 'order_date', 'location_id', 'location_name', 'total_qty', 'grand_total', 'docstatus', 'sync_status', 'sync_error'],
+  fields: ['name', 'retailer_name', 'sales_rep', 'sales_rep.full_name as sales_rep_name', 'order_date', 'location_id', 'location_name', 'total_qty', 'grand_total', 'docstatus', 'sync_status', 'sync_error', 'payment_status'],
   orderBy: 'order_date desc, creation desc',
   buildFilters,
   searchFields: ['retailer_name', 'name'],

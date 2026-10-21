@@ -15,7 +15,7 @@ const props = defineProps({
   icon: { type: String, default: null },
 })
 
-// Sync and document states used across Field Order, Retailer, Visit, Sales Rep and Sync Log.
+// Sync, payment and document states used across Field Order, Retailer, Visit, Sales Rep and Sync Log.
 const THEMES = {
   Synced: 'green',
   Success: 'green',
@@ -33,6 +33,11 @@ const THEMES = {
   Paid: 'green',
   Reversed: 'red',
   Draft: 'gray',
+  Unpaid: 'gray',
+  'Link Sent': 'blue',
+  'Partially Paid': 'amber',
+  'Link Expired': 'amber',
+  'Link Cancelled': 'red',
   Inactive: 'gray',
 }
 const theme = computed(() => THEMES[props.status] || 'gray')

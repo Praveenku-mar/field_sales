@@ -26,6 +26,7 @@ frappe.ui.form.on("Field Order", {
 		_show_order_summary(frm);
 		_add_stock_button(frm);
 		_show_sync_status(frm);
+		_add_payment_link_button(frm);
 		_show_discount_limit(frm);
 		_lock_rate(frm);
 	},
@@ -199,6 +200,56 @@ function _stock_shortage_html(rows) {
 		]);
 	});
 	return lines.join("<br>");
+}
+
+// Razorpay payment link: create, re-create after expiry/cancel, or copy a usable one.
+// Partially Paid gets no button: a new link would ask for the full total again.
+function _add_payment_link_button(frm) {
+	var d = frm.doc;
+	var status = d.payment_status || "Unpaid";
+	if (d.docstatus !== 1 || !(d.grand_total > 0) || status === "Paid" || status === "Partially Paid") return;
+
+	frappe
+		.call({ method: "field_sales.payments.razorpay.get_payment_config", type: "GET" })
+		.then(function (r) {
+			if (!r.message || !r.message.enabled || frm.doc.name !== d.name) return;
+
+			var expired =
+				d.payment_link_expires_on && frappe.datetime.str_to_obj(d.payment_link_expires_on) <= new Date();
+			var usable = d.razorpay_payment_link_url && status === "Link Sent" && !expired;
+
+			if (usable) {
+				frm.add_custom_button(
+					__("Copy Payment Link"),
+					function () {
+						frappe.utils.copy_to_clipboard(d.razorpay_payment_link_url);
+					},
+					__("Payment")
+				);
+				return;
+			}
+			var label = d.razorpay_payment_link_id ? __("Create New Link") : __("Create Payment Link");
+			frm.add_custom_button(
+				label,
+				function () {
+					frappe
+						.call({
+							method: "field_sales.payments.razorpay.create_link_for_order",
+							args: { field_order: d.name },
+							freeze: true,
+							freeze_message: __("Creating payment link…"),
+						})
+						.then(function () {
+							frappe.show_alert({ message: __("Payment link created"), indicator: "green" });
+						})
+						.always(function () {
+							// Reload either way: a failed retry can still mark the old link cancelled.
+							frm.reload_doc();
+						});
+				},
+				__("Payment")
+			);
+		});
 }
 
 function _show_sync_status(frm) {

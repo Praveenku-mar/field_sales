@@ -55,6 +55,10 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.pdf = patch("frappe.utils.pdf.get_pdf", return_value=b"%PDF-1.4 test invoice")
 		self.pdf.start()
 		self.addCleanup(self.pdf.stop)
+		# No Razorpay calls here; the link itself is tested in test_razorpay_links.
+		self.pay_link = patch.object(confirmation, "link_for_confirmation", return_value=None)
+		self.pay_link.start()
+		self.addCleanup(self.pay_link.stop)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -155,6 +159,18 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIn(f"{values.invoice_no}.pdf", message)
 		self.assertIn("Order confirmed: #1006", message)
 		self.assertIn("Confirmation Stores", message)
+
+	def test_payment_link_is_in_the_email(self):
+		link = {"url": "https://rzp.io/i/plink_test", "id": "plink_test", "expires_on": None}
+		with patch.object(confirmation, "link_for_confirmation", return_value=link):
+			send_order_confirmation(self.order.name)
+		message = self.queued()[0].message
+		self.assertIn("https://rzp.io/i/plink_test", message)
+		self.assertIn("Pay Now", message)
+
+	def test_no_payment_block_without_a_link(self):
+		send_order_confirmation(self.order.name)
+		self.assertNotIn("Pay Now", self.queued()[0].message)
 
 	def test_second_call_does_not_send_again(self):
 		send_order_confirmation(self.order.name)

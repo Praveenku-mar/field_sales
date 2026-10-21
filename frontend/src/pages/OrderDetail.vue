@@ -297,83 +297,118 @@
         </div>
       </div>
 
-      <!-- Store sync -->
-      <div class="fs-card">
-        <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-          <span class="lucide-shopping-bag size-4 text-ink-gray-7" />
-          <h2 class="flex-1 text-base font-semibold text-ink-gray-9">{{ platform }} Sync</h2>
-          <StatusPill :status="orderStatus(d)" />
-        </div>
-        <dl class="divide-y divide-outline-gray-1 px-4">
-          <div v-for="item in syncRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-            <dt class="text-ink-gray-6">{{ item.label }}</dt>
-            <dd class="truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
-              <a v-if="item.href" :href="item.href" target="_blank" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
-                {{ item.value }}<span class="lucide-external-link size-3.5" />
-              </a>
-              <template v-else>{{ item.value }}</template>
-            </dd>
+      <!-- Side column: store sync, payment, invoice -->
+      <div class="space-y-4">
+        <!-- Store sync -->
+        <div class="fs-card">
+          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+            <span class="lucide-shopping-bag size-4 text-ink-gray-7" />
+            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">{{ platform }} Sync</h2>
+            <StatusPill :status="orderStatus(d)" />
           </div>
-        </dl>
-        <div class="space-y-2 p-4 pt-1">
-          <p v-if="d.docstatus === 0" class="text-ink-gray-5">The order is sent to the store when it is submitted.</p>
-          <div v-if="d.docstatus === 1 && d.sync_status === 'Failed'" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
-            <span class="lucide-circle-alert mt-px size-4 shrink-0" />
-            <div class="min-w-0 break-words">
-              <div class="font-semibold">Sync failed</div>
-              <div v-if="d.sync_error">{{ d.sync_error }}</div>
+          <dl class="divide-y divide-outline-gray-1 px-4">
+            <div v-for="item in syncRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+              <dt class="text-ink-gray-6">{{ item.label }}</dt>
+              <dd class="truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
+                <a v-if="item.href" :href="item.href" target="_blank" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
+                  {{ item.value }}<span class="lucide-external-link size-3.5" />
+                </a>
+                <template v-else>{{ item.value }}</template>
+              </dd>
             </div>
+          </dl>
+          <div class="space-y-2 p-4 pt-1">
+            <p v-if="d.docstatus === 0" class="text-ink-gray-5">The order is sent to the store when it is submitted.</p>
+            <div v-if="d.docstatus === 1 && d.sync_status === 'Failed'" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+              <span class="lucide-circle-alert mt-px size-4 shrink-0" />
+              <div class="min-w-0 break-words">
+                <div class="font-semibold">Sync failed</div>
+                <div v-if="d.sync_error">{{ d.sync_error }}</div>
+              </div>
+            </div>
+            <Button
+              v-if="d.docstatus === 1 && d.sync_status === 'Failed'"
+              class="w-full"
+              variant="solid"
+              label="Retry Sync"
+              icon-left="lucide-refresh-cw"
+              :loading="retrying"
+              @click="retrySync"
+            />
+            <Button
+              v-if="session.isManager && d.docstatus !== 0"
+              class="w-full"
+              label="View Sync Log"
+              :route="{ name: 'SyncLogs', query: { reference: name } }"
+            />
           </div>
-          <Button
-            v-if="d.docstatus === 1 && d.sync_status === 'Failed'"
-            class="w-full"
-            variant="solid"
-            label="Retry Sync"
-            icon-left="lucide-refresh-cw"
-            :loading="retrying"
-            @click="retrySync"
-          />
-          <Button
-            v-if="session.isManager && d.docstatus !== 0"
-            class="w-full"
-            label="View Sync Log"
-            :route="{ name: 'SyncLogs', query: { reference: name } }"
-          />
         </div>
-      </div>
 
-      <!-- Invoice and confirmation email -->
-      <div v-if="d.docstatus === 1" class="fs-card">
-        <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-          <span class="lucide-file-text size-4 text-ink-gray-7" />
-          <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Invoice</h2>
+        <!-- Payment (Razorpay payment link); read-only, written by the server -->
+        <div v-if="d.docstatus === 1" class="fs-card">
+          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+            <span class="lucide-credit-card size-4 text-ink-gray-7" />
+            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Payment</h2>
+            <StatusPill :status="d.payment_status || 'Unpaid'" />
+          </div>
+          <dl class="divide-y divide-outline-gray-1 px-4">
+            <div v-for="item in paymentRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
+              <dd class="min-w-0 truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
+                <a v-if="item.href" :href="item.href" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
+                  {{ item.value }}<span class="lucide-external-link size-3.5" />
+                </a>
+                <template v-else>{{ item.value }}</template>
+              </dd>
+            </div>
+          </dl>
+          <div v-if="linkUsable || linkAction" class="space-y-2 p-4 pt-1">
+            <Button v-if="linkUsable" class="w-full" label="Copy Payment Link" icon-left="lucide-copy" @click="copyPaymentLink" />
+            <Button
+              v-if="linkAction"
+              class="w-full"
+              :variant="linkUsable ? 'subtle' : 'solid'"
+              :label="linkAction"
+              icon-left="lucide-link"
+              :loading="creatingLink"
+              @click="createPaymentLink"
+            />
+          </div>
         </div>
-        <dl class="divide-y divide-outline-gray-1 px-4">
-          <div v-for="item in invoiceRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-            <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
-            <dd class="min-w-0 break-words text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">{{ item.value }}</dd>
+
+        <!-- Invoice and confirmation email -->
+        <div v-if="d.docstatus === 1" class="fs-card">
+          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+            <span class="lucide-file-text size-4 text-ink-gray-7" />
+            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Invoice</h2>
           </div>
-        </dl>
-        <div class="space-y-2 p-4 pt-1">
-          <div v-if="confirmationError" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
-            <span class="lucide-circle-alert mt-px size-4 shrink-0" />
-            <div class="min-w-0 break-words">{{ d.confirmation_status }}</div>
+          <dl class="divide-y divide-outline-gray-1 px-4">
+            <div v-for="item in invoiceRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
+              <dd class="min-w-0 break-words text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">{{ item.value }}</dd>
+            </div>
+          </dl>
+          <div class="space-y-2 p-4 pt-1">
+            <div v-if="confirmationError" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+              <span class="lucide-circle-alert mt-px size-4 shrink-0" />
+              <div class="min-w-0 break-words">{{ d.confirmation_status }}</div>
+            </div>
+            <Button
+              class="w-full"
+              label="Download Invoice"
+              icon-left="lucide-download"
+              :href="invoiceUrl"
+              target="_blank"
+            />
+            <Button
+              v-if="d.external_order_id"
+              class="w-full"
+              label="Resend Email"
+              icon-left="lucide-mail"
+              :loading="sending"
+              @click="resendConfirmation"
+            />
           </div>
-          <Button
-            class="w-full"
-            label="Download Invoice"
-            icon-left="lucide-download"
-            :href="invoiceUrl"
-            target="_blank"
-          />
-          <Button
-            v-if="d.external_order_id"
-            class="w-full"
-            label="Resend Email"
-            icon-left="lucide-mail"
-            :loading="sending"
-            @click="resendConfirmation"
-          />
         </div>
       </div>
     </div>
@@ -1068,6 +1103,64 @@ const invoiceUrl = computed(
   () => `/api/method/frappe.utils.print_format.download_pdf?doctype=Field%20Order&name=${encodeURIComponent(props.name)}&format=Field%20Sales%20Invoice`,
 )
 const confirmationError = computed(() => (d.value.confirmation_status || '').startsWith('Error'))
+
+// ---------------------------------------------------------------- payment
+
+const paymentRows = computed(() => {
+  const o = d.value
+  const when = (v) => (v ? `${relativeDay(v)}, ${formatTime(v)}` : null)
+  const rows = [
+    { label: 'Amount Paid', value: `${formatCurrency(o.amount_paid || 0)} of ${formatCurrency(o.grand_total || 0)}`, muted: !o.amount_paid },
+  ]
+  if (o.razorpay_payment_link_url) rows.push({ label: 'Payment Link', value: o.razorpay_payment_link_id || 'Open', href: o.razorpay_payment_link_url })
+  else rows.push({ label: 'Payment Link', value: 'Not created', muted: true })
+  if (o.payment_link_expires_on) rows.push({ label: 'Link Expires', value: when(o.payment_link_expires_on) })
+  if (o.paid_on) rows.push({ label: 'Paid On', value: when(o.paid_on) })
+  if (o.razorpay_payment_id) rows.push({ label: 'Payment ID', value: o.razorpay_payment_id })
+  return rows
+})
+
+const paymentConfig = createResource({ url: 'field_sales.payments.razorpay.get_payment_config', method: 'GET', auto: true })
+const creatingLink = ref(false)
+
+const linkExpired = computed(() => {
+  const exp = d.value.payment_link_expires_on
+  return !!exp && new Date(exp.replace(' ', 'T')) <= new Date()
+})
+// A link the retailer can still pay.
+const linkUsable = computed(
+  () => !!d.value.razorpay_payment_link_url && d.value.payment_status === 'Link Sent' && !linkExpired.value,
+)
+// Button label, or null when no link should be created. Partially Paid is left out:
+// a new link would ask for the full total again.
+const linkAction = computed(() => {
+  const o = d.value
+  if (o.docstatus !== 1 || !paymentConfig.data?.enabled || !(o.grand_total > 0)) return null
+  const status = o.payment_status || 'Unpaid'
+  if (status === 'Paid' || status === 'Partially Paid' || linkUsable.value) return null
+  return o.razorpay_payment_link_id ? 'Create New Link' : 'Create Payment Link'
+})
+
+async function createPaymentLink() {
+  creatingLink.value = true
+  try {
+    await callMethod('field_sales.payments.razorpay.create_link_for_order', { field_order: props.name })
+    toast.success('Payment link created')
+  } finally {
+    // Reload either way: a failed retry can still mark the old link cancelled.
+    await doc.reload()
+    creatingLink.value = false
+  }
+}
+
+async function copyPaymentLink() {
+  try {
+    await navigator.clipboard.writeText(d.value.razorpay_payment_link_url || '')
+    toast.success('Payment link copied')
+  } catch {
+    toast.error('Could not copy to clipboard')
+  }
+}
 
 const invoiceRows = computed(() => {
   const o = d.value

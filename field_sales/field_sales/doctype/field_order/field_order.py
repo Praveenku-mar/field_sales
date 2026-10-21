@@ -24,6 +24,17 @@ SYNC_FIELDS = (
 	"last_sync_attempt",
 	"sync_error",
 )
+# Payment state is written only by server code (db_set), even on submitted orders where
+# allow_on_submit would otherwise let any writer set it; no exception for System Managers.
+PAYMENT_FIELDS = (
+	"payment_status",
+	"amount_paid",
+	"razorpay_payment_link_id",
+	"razorpay_payment_link_url",
+	"razorpay_payment_id",
+	"payment_link_expires_on",
+	"paid_on",
+)
 
 
 class FieldOrder(Document):
@@ -33,6 +44,7 @@ class FieldOrder(Document):
 
 	def validate(self):
 		self._keep_sync_fields()
+		keep_server_fields(self, PAYMENT_FIELDS)
 		self._validate_visit()
 		self._validate_location()
 		self._set_row_stock()
@@ -53,6 +65,10 @@ class FieldOrder(Document):
 		before = self.get_doc_before_save()
 		if before and before.visit and before.visit != self.visit:
 			update_order_taken(before.visit)
+
+	def before_update_after_submit(self):
+		# validate() does not run for "Update" on a submitted order.
+		keep_server_fields(self, PAYMENT_FIELDS)
 
 	def on_submit(self):
 		self.db_set("sync_status", "Pending")

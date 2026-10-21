@@ -227,6 +227,14 @@ scheduler_events = {
 	# Purge Success Sync Logs older than 30 days; Failed logs are kept forever.
 	"daily": [
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
+		# Keep the site's currency and time zone the same as the store's.
+		"field_sales.sync.shop_settings.scheduled_sync",
+	],
+	# Razorpay payment links whose webhook never arrived (Link Sent, last 7 days, 50 a run).
+	"hourly": [
+		"field_sales.payments.razorpay.reconcile_open_links",
+		# Confirmed store orders paid on Razorpay that the store does not show as paid yet.
+		"field_sales.sync.orders.retry_store_payments",
 	],
 	# Ticks every 30 minutes; scheduled_sync itself honours Store Connection's sync frequency.
 	"cron": {

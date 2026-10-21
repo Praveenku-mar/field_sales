@@ -36,3 +36,22 @@ export function onDoctypeEvent(doctype, event, handler) {
   s.on(event, handler)
   onBeforeUnmount(() => s.off(event, handler))
 }
+
+/**
+ * Listen for `event` about one document (server: publish_realtime(event, ..., doctype=, docname=))
+ * while the calling component is mounted. Joins the document's room; the server checks read access.
+ * The handler only gets messages whose `name` is `docname`.
+ */
+export function onDocEvent(doctype, docname, event, handler) {
+  const s = getSocket()
+  const join = () => s.emit('doc_subscribe', doctype, docname)
+  if (s.connected) join()
+  s.on('connect', join)
+  const listener = (data) => data?.name === docname && handler(data)
+  s.on(event, listener)
+  onBeforeUnmount(() => {
+    s.off(event, listener)
+    s.off('connect', join)
+    s.emit('doc_unsubscribe', doctype, docname)
+  })
+}

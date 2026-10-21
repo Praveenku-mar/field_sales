@@ -13,6 +13,40 @@ class StoreConnection(Document):
 		self._normalize_shopify_store_url()
 		self._clear_token_on_credential_change()
 		self._validate_locations()
+		# Read here: after the save the field only holds the masked value.
+		self.flags.secret_entered = bool(self.shopify_client_secret) and not self.is_dummy_password(
+			self.shopify_client_secret
+		)
+
+	def on_update(self):
+		self._queue_shop_settings_sync()
+
+	def _queue_shop_settings_sync(self):
+		"""
+		Fetch the store's currency and time zone in the background after the connection changes.
+
+		Never runs inline, so wrong credentials can't block or fail the save.
+		"""
+		if not (self.enabled and self.platform == "Shopify" and self.match_shop_settings):
+			return
+		changed = (
+			any(
+				self.has_value_changed(f)
+				for f in ("enabled", "store_url", "shopify_client_id", "match_shop_settings")
+			)
+			or self.flags.secret_entered
+			or not self.shop_currency
+		)
+		if not changed:
+			return
+		frappe.enqueue(
+			"field_sales.sync.shop_settings.scheduled_sync",
+			queue="short",
+			enqueue_after_commit=True,
+			job_id="field_sales_shop_settings_sync",
+			deduplicate=True,
+			notify_user=frappe.session.user,
+		)
 
 	def _validate_locations(self):
 		"""
@@ -33,7 +67,9 @@ class StoreConnection(Document):
 
 		default_row = next((r for r in self.locations if r.location_id == default_id), None)
 		if not default_row:
-			default_row = self.append("locations", {"location_id": default_id, "location_name": self.default_location_name})
+			default_row = self.append(
+				"locations", {"location_id": default_id, "location_name": self.default_location_name}
+			)
 		default_row.sell_from = 1
 		if default_row.location_name and not self.default_location_name:
 			self.default_location_name = default_row.location_name

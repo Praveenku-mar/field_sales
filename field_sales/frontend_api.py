@@ -9,6 +9,7 @@ from frappe import _
 from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
 from field_sales.connectors import ConnectorError, get_connector
+from field_sales.payments.razorpay import PAYMENT_FIELDS, indian_phone
 from field_sales.permissions import hierarchy_filters
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
@@ -300,27 +301,35 @@ def get_order_sync_info(field_order: str) -> dict:
 	"""
 	What the order page's sync panel shows beyond the order's own fields.
 
-	:return: ``{"location_name", "max_attempts", "store_url"}``; ``store_url`` is the
-		order (or its draft) in the store admin, or None when it cannot be built.
+	:return: ``{"location_name", "max_attempts", "order_mode", "store_url", "order_url", "draft_url"}``;
+		the URLs are store admin pages (``store_url``: the order, else its draft), None when
+		they cannot be built.
 	"""
 	_check_access()
 	doc = frappe.get_doc("Field Order", field_order)
 	doc.check_permission("read")
 
-	location_id, location_name = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["default_location_id", "default_location_name"]
-	) or (None, None)
-	store_url = None
+	location_id, location_name, order_mode = frappe.db.get_value(
+		"Store Connection", "Store Connection", ["default_location_id", "default_location_name", "order_mode"]
+	) or (None, None, None)
+	order_url = draft_url = None
 	if doc.external_order_id or doc.external_draft_id:
 		try:
-			store_url = get_connector().get_order_url(doc.external_order_id, doc.external_draft_id)
+			conn = get_connector()
+			if doc.external_order_id:
+				order_url = conn.get_order_url(doc.external_order_id)
+			if doc.external_draft_id:
+				draft_url = conn.get_order_url(None, doc.external_draft_id)
 		except ConnectorError:
 			pass  # store disconnected: the panel shows the IDs without a link
 	return {
 		"location_name": doc.location_name
 		or (location_name if doc.location_id in (None, "", location_id) else doc.location_id),
 		"max_attempts": MAX_AUTO_ATTEMPTS,
-		"store_url": store_url,
+		"order_mode": order_mode,
+		"store_url": order_url or draft_url,
+		"order_url": order_url,
+		"draft_url": draft_url,
 	}
 
 
@@ -451,6 +460,29 @@ def _team_this_month(today: str) -> list[dict]:
 	rows = get_rep_stats(get_first_day(today), today, get_reps_in_scope({}))
 	keys = ("sales_rep", "sales_rep_name", "territory", "completed_visits", "orders", "order_value", "achievement_pct", "conversion_pct")
 	return [{k: row.get(k) for k in keys} for row in rows[:10]]
+
+
+@frappe.whitelist(methods=["GET"])
+def get_order_payment_info(field_order: str) -> dict:
+	"""
+	Order Detail's Payment card: the order's payment fields, whether Razorpay is enabled,
+	whether the user may create links, and the retailer's WhatsApp number (``91XXXXXXXXXX``).
+	"""
+	_check_access()
+	doc = frappe.get_doc("Field Order", field_order)
+	doc.check_permission("read")
+	phone = indian_phone(frappe.db.get_value("Retailer", doc.retailer, "phone"))
+	return {
+		"name": doc.name,
+		**{f: doc.get(f) for f in PAYMENT_FIELDS},
+		"docstatus": doc.docstatus,
+		"grand_total": doc.grand_total,
+		"order_label": doc.store_order_name or doc.name,
+		"retailer_name": doc.retailer_name,
+		"razorpay_enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
+		"can_create_link": bool(doc.has_permission("write")),
+		"whatsapp_number": phone[1:] if phone else None,
+	}
 
 
 def _check_access():

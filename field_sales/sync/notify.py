@@ -25,21 +25,28 @@ def notify_sync_result(event: str, doctype: str, name: str, sync_status: str | N
 
 
 def _monitor_users() -> list[str]:
-	"""Enabled users with a monitoring role; cached for the rest of the request / job."""
-	users = getattr(frappe.local, "field_sales_monitor_users", None)
-	if users is None:
+	"""Enabled users who can open the Sync Failures page."""
+	return users_with_roles(MONITOR_ROLES)
+
+
+def users_with_roles(roles: tuple[str, ...]) -> list[str]:
+	"""Enabled users with any of ``roles``; cached for the rest of the request / job."""
+	cache = getattr(frappe.local, "field_sales_role_users", None)
+	if cache is None:
+		cache = frappe.local.field_sales_role_users = {}
+	key = tuple(sorted(roles))
+	if key not in cache:
 		has_role = frappe.qb.DocType("Has Role")
 		user = frappe.qb.DocType("User")
-		users = (
+		cache[key] = (
 			frappe.qb.from_(has_role)
 			.join(user)
 			.on(user.name == has_role.parent)
 			.select(has_role.parent)
 			.distinct()
 			.where(has_role.parenttype == "User")
-			.where(has_role.role.isin(MONITOR_ROLES))
+			.where(has_role.role.isin(key))
 			.where(user.enabled == 1)
 			.where(user.name != "Guest")
 		).run(pluck=True)
-		frappe.local.field_sales_monitor_users = users
-	return users
+	return cache[key]

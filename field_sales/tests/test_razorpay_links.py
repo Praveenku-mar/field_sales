@@ -254,6 +254,13 @@ class TestRazorpayLinks(IntegrationTestCase):
 		self.assertEqual(first["id"], second["id"])
 		self.assertEqual(len(self.fake.created()), 1)
 
+	def test_replace_cancels_a_valid_link(self):
+		create_link_for_order(self.order.name)
+		result = create_link_for_order(self.order.name, replace=True)
+		self.assertEqual(result["id"], "plink_2")
+		self.assertIn(("POST", "/payment_links/plink_1/cancel"), self.fake.paths())
+		self.assertEqual(self.fake.created()[1]["reference_id"], f"{self.order.name}-2")
+
 	def test_expired_link_gets_new_reference(self):
 		create_link_for_order(self.order.name)
 		self.fake.links["plink_1"]["status"] = "expired"
@@ -384,6 +391,33 @@ class TestRazorpayLinks(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 		self.assertEqual(self.fake.created(), [])
+
+	def test_order_payment_info_for_the_card(self):
+		from field_sales.frontend_api import get_order_payment_info
+
+		create_link_for_order(self.order.name)
+		frappe.set_user(self.rep_user)
+		try:
+			info = get_order_payment_info(self.order.name)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertEqual(info["payment_status"], "Link Sent")
+		self.assertEqual(info["razorpay_payment_link_id"], "plink_1")
+		self.assertIs(info["razorpay_enabled"], True)
+		self.assertIs(info["can_create_link"], True)
+		self.assertEqual(info["whatsapp_number"], "919876543210")
+		self.assertNotIn("key_secret", info)
+
+	def test_order_payment_info_checks_permission(self):
+		from field_sales.frontend_api import get_order_payment_info
+
+		other = self._user("rzp.info.other@example.com", "Field Sales Rep")
+		frappe.get_doc({"doctype": "Sales Rep", "user": other}).insert(ignore_permissions=True)
+		frappe.set_user(other)
+		try:
+			self.assertRaises(frappe.PermissionError, get_order_payment_info, self.order.name)
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_payment_config_has_only_enabled(self):
 		frappe.set_user(self.rep_user)

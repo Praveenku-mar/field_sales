@@ -349,7 +349,7 @@
           <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
             <span class="lucide-credit-card size-4 text-ink-gray-7" />
             <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Payment</h2>
-            <StatusPill :status="d.payment_status || 'Unpaid'" />
+            <StatusPill :status="pay.payment_status || 'Unpaid'" />
           </div>
           <dl class="divide-y divide-outline-gray-1 px-4">
             <div v-for="item in paymentRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
@@ -362,17 +362,30 @@
               </dd>
             </div>
           </dl>
-          <div v-if="linkUsable || linkAction" class="space-y-2 p-4 pt-1">
-            <Button v-if="linkUsable" class="w-full" label="Copy Payment Link" icon-left="lucide-copy" @click="copyPaymentLink" />
-            <Button
-              v-if="linkAction"
-              class="w-full"
-              :variant="linkUsable ? 'subtle' : 'solid'"
-              :label="linkAction"
-              icon-left="lucide-link"
-              :loading="creatingLink"
-              @click="createPaymentLink"
-            />
+          <div v-if="pay.razorpay_enabled && (pay.razorpay_payment_link_url || linkAction)" class="space-y-2 p-4 pt-1">
+            <div v-if="pay.razorpay_payment_link_url" class="flex gap-2">
+              <Button class="flex-1" label="Copy" icon-left="lucide-copy" @click="copyPaymentLink" />
+              <Button v-if="linkActive" class="flex-1" label="WhatsApp" icon-left="lucide-message-circle" @click="shareOnWhatsApp" />
+            </div>
+            <div class="flex gap-2">
+              <Button
+                v-if="linkAction"
+                class="flex-1"
+                :variant="linkActive ? 'subtle' : 'solid'"
+                :label="linkAction"
+                icon-left="lucide-link"
+                :loading="creatingLink"
+                @click="onLinkAction"
+              />
+              <Button
+                v-if="pay.razorpay_payment_link_id"
+                class="flex-1"
+                label="Refresh"
+                icon-left="lucide-refresh-cw"
+                :loading="refreshingPayment"
+                @click="refreshPayment"
+              />
+            </div>
           </div>
         </div>
 
@@ -487,7 +500,7 @@ import LinkField from '@/components/LinkField.vue'
 import BarcodeScanner from '@/components/BarcodeScanner.vue'
 import { useSessionStore } from '@/stores/session'
 import { useSellLocations } from '@/composables/useSellLocations'
-import { onDoctypeEvent } from '@/composables/useRealtime'
+import { onDocEvent, onDoctypeEvent } from '@/composables/useRealtime'
 import { callMethod, findProductByBarcode } from '@/utils/api'
 import { formatCurrency, formatDate, formatNumber, formatTime, orderStatus, relativeDay } from '@/utils/format'
 
@@ -858,6 +871,9 @@ function patchListed(products, values) {
   }
 }
 
+// Razorpay webhook / refresh changed the payment fields.
+onDocEvent('Field Order', props.name, 'field_order_payment_updated', () => reloadPayment())
+
 onDoctypeEvent('Platform Product', 'product_price_updated', ({ product, price, compare_at_price }) => {
   patchListed([product], { price, compare_at_price })
   if (editable.value && productNames.value.includes(product)) newPrices.value = { ...newPrices.value, [product]: price }
@@ -1063,18 +1079,34 @@ const syncRows = computed(() => {
   const o = d.value
   const attempts = o.sync_attempts || 0
   const max = syncInfo.data?.max_attempts
+  // Order: the store's order number with its id, e.g. "#1013 (6186254401676)".
+  const orderValue = !o.external_order_id
+    ? 'Not created'
+    : o.store_order_name
+      ? `${o.store_order_name} (${o.external_order_id})`
+      : `#${o.external_order_id}`
+  // The draft row only matters in Draft mode or when a draft exists.
+  const showDraft = !!o.external_draft_id || syncInfo.data?.order_mode === 'Draft'
   return [
+    ...(showDraft
+      ? [
+          {
+            label: 'Draft Order',
+            value: !o.external_draft_id
+              ? 'Not created'
+              : o.store_draft_name
+                ? `${o.store_draft_name} (${o.external_draft_id})`
+                : `#${o.external_draft_id}`,
+            muted: !o.external_draft_id,
+            href: syncInfo.data?.draft_url || null,
+          },
+        ]
+      : []),
     {
-      label: 'Draft Order ID',
-      value: o.external_draft_id ? `#${o.external_draft_id}` : 'Not created',
-      muted: !o.external_draft_id,
-      href: !o.external_order_id && o.external_draft_id ? storeUrl.value : null,
-    },
-    {
-      label: 'Order ID',
-      value: o.external_order_id ? `#${o.external_order_id}` : 'Not created',
+      label: 'Order',
+      value: orderValue,
       muted: !o.external_order_id,
-      href: o.external_order_id ? storeUrl.value : null,
+      href: syncInfo.data?.order_url || null,
     },
     { label: 'Location', value: syncInfo.data?.location_name || '—', muted: !syncInfo.data?.location_name },
     {
@@ -1106,60 +1138,105 @@ const confirmationError = computed(() => (d.value.confirmation_status || '').sta
 
 // ---------------------------------------------------------------- payment
 
+// Payment fields come from their own call, so the card follows the server (webhook, refresh)
+// without reloading the whole order.
+const paymentInfo = createResource({
+  url: 'field_sales.frontend_api.get_order_payment_info',
+  method: 'GET',
+  makeParams: () => ({ field_order: props.name }),
+})
+watch(
+  () => d.value.docstatus === 1 && props.name,
+  (name) => name && paymentInfo.fetch(),
+  { immediate: true },
+)
+const pay = computed(() => paymentInfo.data || {})
+const creatingLink = ref(false)
+const refreshingPayment = ref(false)
+
 const paymentRows = computed(() => {
-  const o = d.value
+  const o = pay.value
   const when = (v) => (v ? `${relativeDay(v)}, ${formatTime(v)}` : null)
   const rows = [
-    { label: 'Amount Paid', value: `${formatCurrency(o.amount_paid || 0)} of ${formatCurrency(o.grand_total || 0)}`, muted: !o.amount_paid },
+    { label: 'Amount Paid', value: `${formatCurrency(o.amount_paid || 0)} of ${formatCurrency(o.grand_total ?? d.value.grand_total ?? 0)}`, muted: !o.amount_paid },
   ]
   if (o.razorpay_payment_link_url) rows.push({ label: 'Payment Link', value: o.razorpay_payment_link_id || 'Open', href: o.razorpay_payment_link_url })
   else rows.push({ label: 'Payment Link', value: 'Not created', muted: true })
-  if (o.payment_link_expires_on) rows.push({ label: 'Link Expires', value: when(o.payment_link_expires_on) })
+  if (o.payment_link_expires_on && !o.paid_on) rows.push({ label: 'Link Expires', value: when(o.payment_link_expires_on) })
   if (o.paid_on) rows.push({ label: 'Paid On', value: when(o.paid_on) })
   if (o.razorpay_payment_id) rows.push({ label: 'Payment ID', value: o.razorpay_payment_id })
+  if (o.store_marked_paid_on) rows.push({ label: 'Store', value: `Marked paid ${when(o.store_marked_paid_on)}` })
   return rows
 })
 
-const paymentConfig = createResource({ url: 'field_sales.payments.razorpay.get_payment_config', method: 'GET', auto: true })
-const creatingLink = ref(false)
-
 const linkExpired = computed(() => {
-  const exp = d.value.payment_link_expires_on
+  const exp = pay.value.payment_link_expires_on
   return !!exp && new Date(exp.replace(' ', 'T')) <= new Date()
 })
 // A link the retailer can still pay.
-const linkUsable = computed(
-  () => !!d.value.razorpay_payment_link_url && d.value.payment_status === 'Link Sent' && !linkExpired.value,
+const linkActive = computed(
+  () => !!pay.value.razorpay_payment_link_url && pay.value.payment_status === 'Link Sent' && !linkExpired.value,
 )
-// Button label, or null when no link should be created. Partially Paid is left out:
+// Button label, or null when no link should be made. Partially Paid is left out:
 // a new link would ask for the full total again.
 const linkAction = computed(() => {
-  const o = d.value
-  if (o.docstatus !== 1 || !paymentConfig.data?.enabled || !(o.grand_total > 0)) return null
-  const status = o.payment_status || 'Unpaid'
-  if (status === 'Paid' || status === 'Partially Paid' || linkUsable.value) return null
-  return o.razorpay_payment_link_id ? 'Create New Link' : 'Create Payment Link'
+  const o = pay.value
+  if (!o.razorpay_enabled || !o.can_create_link || !(o.grand_total > 0)) return null
+  if (o.payment_status === 'Paid' || o.payment_status === 'Partially Paid') return null
+  return linkActive.value ? 'New Link' : 'Create Link'
 })
 
-async function createPaymentLink() {
+async function reloadPayment() {
+  await Promise.all([paymentInfo.reload(), doc.reload()])
+}
+
+function onLinkAction() {
+  if (!linkActive.value) return createPaymentLink(false)
+  ask({
+    title: 'Replace payment link?',
+    message: 'The current link will be cancelled on Razorpay and stop working. A new link is created for the same amount.',
+    label: 'New Link',
+    action: () => createPaymentLink(true),
+  })
+}
+
+async function createPaymentLink(replace) {
   creatingLink.value = true
   try {
-    await callMethod('field_sales.payments.razorpay.create_link_for_order', { field_order: props.name })
+    await callMethod('field_sales.payments.razorpay.create_link_for_order', { field_order: props.name, replace: replace ? 1 : 0 })
     toast.success('Payment link created')
   } finally {
     // Reload either way: a failed retry can still mark the old link cancelled.
-    await doc.reload()
+    await reloadPayment()
     creatingLink.value = false
+  }
+}
+
+async function refreshPayment() {
+  refreshingPayment.value = true
+  try {
+    const r = await callMethod('field_sales.payments.razorpay.refresh_payment_status', { field_order: props.name })
+    toast.info(`Payment status: ${r.payment_status}`)
+    await reloadPayment()
+  } finally {
+    refreshingPayment.value = false
   }
 }
 
 async function copyPaymentLink() {
   try {
-    await navigator.clipboard.writeText(d.value.razorpay_payment_link_url || '')
+    await navigator.clipboard.writeText(pay.value.razorpay_payment_link_url || '')
     toast.success('Payment link copied')
   } catch {
     toast.error('Could not copy to clipboard')
   }
+}
+
+function shareOnWhatsApp() {
+  const o = pay.value
+  const text = `Hello ${o.retailer_name || d.value.retailer_name || ''}, please pay ${formatCurrency(o.grand_total)} for order ${o.order_label} using this link: ${o.razorpay_payment_link_url}`
+  if (!o.whatsapp_number) toast.warning('The retailer has no valid mobile number; pick the contact in WhatsApp.')
+  window.open(`https://wa.me/${o.whatsapp_number || ''}?text=${encodeURIComponent(text)}`, '_blank', 'noopener')
 }
 
 const invoiceRows = computed(() => {

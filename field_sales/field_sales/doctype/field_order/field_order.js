@@ -26,7 +26,7 @@ frappe.ui.form.on("Field Order", {
 		_show_order_summary(frm);
 		_add_stock_button(frm);
 		_show_sync_status(frm);
-		_add_payment_link_button(frm);
+		_add_payment_buttons(frm);
 		_show_discount_limit(frm);
 		_lock_rate(frm);
 	},
@@ -202,54 +202,144 @@ function _stock_shortage_html(rows) {
 	return lines.join("<br>");
 }
 
-// Razorpay payment link: create, re-create after expiry/cancel, or copy a usable one.
-// Partially Paid gets no button: a new link would ask for the full total again.
-function _add_payment_link_button(frm) {
+// Razorpay "Payment" button group on submitted orders. get_payment_config is called once
+// per form; the buttons are rebuilt from it on every refresh.
+function _add_payment_buttons(frm) {
+	if (frm.doc.docstatus !== 1) return;
+	if (!frm._payment_config) {
+		frm._payment_config = frappe
+			.call({ method: "field_sales.payments.razorpay.get_payment_config", type: "GET" })
+			.then(function (r) {
+				return r.message || {};
+			});
+	}
+	var name = frm.doc.name;
+	frm._payment_config.then(function (config) {
+		// The form may have moved on (another order, or cancelled) while this was loading.
+		if (!config.enabled || frm.doc.name !== name || frm.doc.docstatus !== 1) return;
+		_payment_buttons(frm);
+	});
+}
+
+function _payment_buttons(frm) {
 	var d = frm.doc;
 	var status = d.payment_status || "Unpaid";
-	if (d.docstatus !== 1 || !(d.grand_total > 0) || status === "Paid" || status === "Partially Paid") return;
+	var group = __("Payment");
+	var expired = d.payment_link_expires_on && frappe.datetime.str_to_obj(d.payment_link_expires_on) <= new Date();
+	var active = !!d.razorpay_payment_link_url && status === "Link Sent" && !expired;
 
-	frappe
-		.call({ method: "field_sales.payments.razorpay.get_payment_config", type: "GET" })
-		.then(function (r) {
-			if (!r.message || !r.message.enabled || frm.doc.name !== d.name) return;
-
-			var expired =
-				d.payment_link_expires_on && frappe.datetime.str_to_obj(d.payment_link_expires_on) <= new Date();
-			var usable = d.razorpay_payment_link_url && status === "Link Sent" && !expired;
-
-			if (usable) {
-				frm.add_custom_button(
-					__("Copy Payment Link"),
-					function () {
-						frappe.utils.copy_to_clipboard(d.razorpay_payment_link_url);
-					},
-					__("Payment")
-				);
-				return;
-			}
-			var label = d.razorpay_payment_link_id ? __("Create New Link") : __("Create Payment Link");
+	// Partially Paid gets no new link either: it would ask for the full total again.
+	if (status !== "Paid" && status !== "Partially Paid" && d.grand_total > 0) {
+		if (active) {
 			frm.add_custom_button(
-				label,
+				__("New Link"),
 				function () {
-					frappe
-						.call({
-							method: "field_sales.payments.razorpay.create_link_for_order",
-							args: { field_order: d.name },
-							freeze: true,
-							freeze_message: __("Creating payment link…"),
-						})
-						.then(function () {
-							frappe.show_alert({ message: __("Payment link created"), indicator: "green" });
-						})
-						.always(function () {
-							// Reload either way: a failed retry can still mark the old link cancelled.
-							frm.reload_doc();
-						});
+					frappe.confirm(
+						__("Cancel the current payment link and create a new one? The old link will stop working."),
+						function () {
+							_create_payment_link(frm, true);
+						}
+					);
 				},
-				__("Payment")
+				group
 			);
+		} else {
+			frm.add_custom_button(
+				__("Create Payment Link"),
+				function () {
+					_create_payment_link(frm, false);
+				},
+				group
+			);
+		}
+	}
+
+	if (d.razorpay_payment_link_url) {
+		frm.add_custom_button(
+			__("Copy Link"),
+			function () {
+				frappe.utils.copy_to_clipboard(d.razorpay_payment_link_url);
+			},
+			group
+		);
+	}
+
+	if (active) {
+		frm.add_custom_button(
+			__("Share on WhatsApp"),
+			function () {
+				_share_on_whatsapp(frm);
+			},
+			group
+		);
+	}
+
+	if (d.razorpay_payment_link_id) {
+		frm.add_custom_button(
+			__("Refresh Payment Status"),
+			function () {
+				frappe
+					.call({
+						method: "field_sales.payments.razorpay.refresh_payment_status",
+						args: { field_order: d.name },
+						freeze: true,
+						freeze_message: __("Checking Razorpay…"),
+					})
+					.then(function (r) {
+						var paid = r.message && r.message.payment_status;
+						frappe.show_alert({ message: __("Payment status: {0}", [__(paid)]), indicator: "blue" });
+						frm.reload_doc();
+					});
+			},
+			group
+		);
+	}
+}
+
+function _create_payment_link(frm, replace) {
+	frappe
+		.call({
+			method: "field_sales.payments.razorpay.create_link_for_order",
+			args: { field_order: frm.doc.name, replace: replace ? 1 : 0 },
+			freeze: true,
+			freeze_message: __("Creating payment link…"),
+		})
+		.then(function () {
+			frappe.show_alert({ message: __("Payment link created"), indicator: "green" });
+		})
+		.always(function () {
+			// Reload either way: a failed retry can still mark the old link cancelled.
+			frm.reload_doc();
 		});
+}
+
+function _share_on_whatsapp(frm) {
+	var d = frm.doc;
+	frappe.db.get_value("Retailer", d.retailer, ["retailer_name", "phone"]).then(function (r) {
+		var retailer = r.message || {};
+		var text = __("Hello {0}, please pay {1} for order {2} using this link: {3}", [
+			retailer.retailer_name || d.retailer_name || d.retailer,
+			format_currency(d.grand_total, "INR"),
+			d.store_order_name || d.name,
+			d.razorpay_payment_link_url,
+		]);
+		var phone = _whatsapp_number(retailer.phone);
+		if (!phone) {
+			frappe.show_alert({
+				message: __("The retailer has no valid mobile number; pick the contact in WhatsApp."),
+				indicator: "orange",
+			});
+		}
+		window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent(text), "_blank", "noopener");
+	});
+}
+
+// Indian mobile for wa.me: digits only with the 91 prefix (same rule as razorpay.indian_phone).
+function _whatsapp_number(phone) {
+	var digits = String(phone || "").replace(/\D/g, "");
+	if (digits.length === 12 && digits.indexOf("91") === 0) digits = digits.slice(2);
+	else if (digits.length === 11 && digits[0] === "0") digits = digits.slice(1);
+	return digits.length === 10 && "6789".indexOf(digits[0]) !== -1 ? "91" + digits : "";
 }
 
 function _show_sync_status(frm) {
@@ -305,12 +395,15 @@ function _listen_for_sync(frm) {
 	if (frappe._field_order_sync_listener) return;
 	frappe._field_order_sync_listener = true;
 
-	frappe.realtime.on("field_order_synced", function (data) {
+	function reload_if_open(data) {
 		var open = window.cur_frm;
 		if (open && open.doctype === "Field Order" && open.doc.name === data.name && !open.is_dirty()) {
 			open.reload_doc();
 		}
-	});
+	}
+	frappe.realtime.on("field_order_synced", reload_if_open);
+	// Razorpay webhook / refresh changed the payment fields.
+	frappe.realtime.on("field_order_payment_updated", reload_if_open);
 }
 
 // Offer the Store Connection's "Sell from here" locations in the Location select.

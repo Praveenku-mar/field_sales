@@ -10,7 +10,7 @@
           :disabled="!d.name"
           @click="editOpen = true"
         />
-        <Button v-if="d.status === 'Planned' && isOwnVisit" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
+        <Button v-if="d.status === 'Planned' && isOwnVisit && isVisitDay" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
         <template v-if="d.status === 'In Progress'">
           <Button label="New Order" icon-left="lucide-shopping-cart" @click="newOrderOpen = true" />
           <Button label="Check Out" icon-left="lucide-log-out" variant="solid" :loading="busy" @click="startCheckOut" />
@@ -113,6 +113,8 @@ const session = useSessionStore()
 // Only the assigned rep checks in (the server enforces it too). A Sales Rep is named
 // after its user, so the rep's name is the user's email.
 const isOwnVisit = computed(() => !!d.value.sales_rep && d.value.sales_rep === session.user)
+// Check-in is only open on the visit's own date (the server checks too).
+const isVisitDay = computed(() => d.value.visit_date === today())
 const editOpen = ref(false)
 const newOrderOpen = ref(false)
 
@@ -163,7 +165,13 @@ const onSite = computed(() => {
 
 const banner = computed(() => {
   if (d.value.status === 'Planned' && d.value.visit_date < today()) {
-    return { text: `Planned for ${formatDate(d.value.visit_date)} and not checked in.`, class: 'bg-surface-amber-1 text-ink-amber-7' }
+    return {
+      text: `Planned for ${formatDate(d.value.visit_date)} and not checked in. Check-in is closed; a manager can move the visit to today.`,
+      class: 'bg-surface-amber-1 text-ink-amber-7',
+    }
+  }
+  if (d.value.status === 'Planned' && isOwnVisit.value && d.value.visit_date > today()) {
+    return { text: `Check-in opens on ${formatDate(d.value.visit_date)}.`, class: 'bg-surface-gray-2 text-ink-gray-7' }
   }
   if (d.value.check_in_time && !d.value.within_geofence) {
     return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the customer.`, class: 'bg-surface-amber-1 text-ink-amber-7' }

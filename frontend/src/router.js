@@ -138,6 +138,12 @@ const routes = [
     meta: { title: 'Rep Performance', parent: 'Reports', roles: MANAGERS },
   },
   {
+    path: '/reports/rep-commission',
+    name: 'RepCommission',
+    component: () => import('@/pages/RepCommission.vue'),
+    meta: { title: 'Rep Commission', parent: 'Reports', roles: MANAGERS },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/pages/NotFound.vue'),

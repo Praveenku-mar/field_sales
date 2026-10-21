@@ -12,7 +12,7 @@ This module talks to the store only through ``get_connector()``.
 import time
 
 import frappe
-from frappe.utils import convert_utc_to_system_timezone, get_datetime, now_datetime
+from frappe.utils import convert_utc_to_system_timezone, flt, get_datetime, now_datetime
 
 from field_sales.connectors import get_connector
 from field_sales.commission.engine import reconcile_order
@@ -27,6 +27,7 @@ from field_sales.sync.products import _archive, sync_one_product
 from field_sales.sync.stock import get_sell_locations, set_location_stock
 
 REALTIME_EVENT = "stock_updated"
+PRICE_REALTIME_EVENT = "product_price_updated"
 
 
 def process_event(platform: str, webhook: dict) -> dict:
@@ -132,12 +133,73 @@ def _process_stock(conn, platform: str, event: dict) -> dict:
 
 
 def _process_product_update(conn, platform: str, event: dict) -> dict:
-	"""Re-fetch the product's variants and upsert them."""
-	external_product_id = _plain_id((event.get("payload") or {}).get("id"))
+	"""
+	Apply the payload's variant prices, re-fetch the product's variants and upsert them,
+	then announce price changes to open order screens.
+
+	The re-fetch is the store's current state, so a stale (out-of-order) delivery is
+	corrected in the same job, and the announced price is the one finally stored.
+	"""
+	payload = event.get("payload") or {}
+	external_product_id = _plain_id(payload.get("id"))
 	if not external_product_id:
 		return {"note": "Ignored: no product id"}
 
-	return sync_one_product(conn, external_product_id)
+	before = _apply_prices(platform, conn.handle_product_event(payload) or [])
+	result = sync_one_product(conn, external_product_id)
+	result["price_changed"] = _publish_price_changes(before)
+	return result
+
+
+def _apply_prices(platform: str, prices: list[dict]) -> dict[str, tuple[float, float]]:
+	"""
+	Write changed ``price`` / ``compare_at_price`` (and ``last_synced``) to the matching
+	Platform Products; unchanged ones are not written.
+
+	:return: ``{Platform Product name: (price, compare_at_price)}`` as stored before, for every match.
+	"""
+	by_variant = {p["external_variant_id"]: p for p in prices}
+	if not by_variant:
+		return {}
+
+	products = frappe.get_all(
+		"Platform Product",
+		filters={"platform": platform, "external_variant_id": ("in", list(by_variant))},
+		fields=["name", "external_variant_id", "price", "compare_at_price"],
+	)
+	before = {}
+	for product in products:
+		before[product.name] = (flt(product.price), flt(product.compare_at_price))
+		new = by_variant[product.external_variant_id]
+		if (flt(new["price"]), flt(new["compare_at_price"])) == before[product.name]:
+			continue
+		frappe.db.set_value(
+			"Platform Product",
+			product.name,
+			{"price": flt(new["price"]), "compare_at_price": flt(new["compare_at_price"]), "last_synced": now_datetime()},
+			update_modified=False,
+		)
+	return before
+
+
+def _publish_price_changes(before: dict[str, tuple[float, float]]) -> int:
+	"""Publish ``PRICE_REALTIME_EVENT`` (after commit) for each product whose stored price now differs from ``before``."""
+	if not before:
+		return 0
+	changed = 0
+	for product in frappe.get_all(
+		"Platform Product", filters={"name": ("in", list(before))}, fields=["name", "price", "compare_at_price"]
+	):
+		if (flt(product.price), flt(product.compare_at_price)) == before[product.name]:
+			continue
+		frappe.publish_realtime(
+			PRICE_REALTIME_EVENT,
+			{"product": product.name, "price": flt(product.price), "compare_at_price": flt(product.compare_at_price)},
+			doctype="Platform Product",
+			after_commit=True,
+		)
+		changed += 1
+	return changed
 
 
 def _process_product_delete(platform: str, event: dict) -> dict:

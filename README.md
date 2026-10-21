@@ -12,6 +12,10 @@ bench get-app $URL_OF_THIS_REPO --branch develop
 bench install-app field_sales
 ```
 
+### Order fields on Shopify
+
+Orders (and draft orders) pushed from Field Sales carry two app-owned fields, **Field Order No** and **Sales Rep** (name and email), plus a single `field-sales` tag. Staff can see the fields on the order page but not edit them. The app creates the field definitions on the store itself, on **Test Connection** or before the first order; Shopify does not copy a draft's fields to its order, so they are written onto the order when the completed draft is recorded.
+
 ### Commission webhooks (Shopify)
 
 Sales rep commission follows the order's state on the store. Subscribe these topics through the app itself (GraphQL `webhookSubscriptionCreate` with the app's token, or the app configuration), all pointing at the same URL the stock and product webhooks use, `https://<your-site>/api/method/field_sales.api.webhooks.receive`. Don't add them under Shopify admin > Settings > Notifications > Webhooks: Field Sales verifies the signature with the app's client secret, and admin-created webhooks may be signed with a different key.

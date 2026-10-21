@@ -5,14 +5,16 @@ import math
 
 import frappe
 from frappe import _
+from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
 from frappe.model.document import Document
-from frappe.utils import flt, get_datetime
+from frappe.utils import flt, formatdate, get_datetime, get_fullname
 
 from field_sales.utils.geo import DEFAULT_GEOFENCE_RADIUS_M, has_coords, haversine_m
 
 # Written only by field_sales.api.check_in / check_out, never taken from the client.
 CHECK_IN_FIELDS = ("check_in_time", "check_out_time", "latitude", "longitude", "location_accuracy_m")
 CHECK_IN_STATUSES = ("In Progress", "Completed")
+RETAILER_POSITION_FIELDS = ("retailer_latitude", "retailer_longitude")
 
 
 class Visit(Document):
@@ -24,8 +26,44 @@ class Visit(Document):
 		self._compute_distance_and_geofence()
 		self._set_order_outcome()
 
+	def after_insert(self):
+		self._notify_rep()
+
 	def on_update(self):
 		self._update_retailer_last_visit()
+		before = self.get_doc_before_save()
+		if before and before.sales_rep != self.sales_rep:
+			self._notify_rep()
+
+	def _notify_rep(self):
+		"""
+		Send the assigned rep a system notification for this visit. Nothing goes
+		out when the rep has no user or is the one making the change; dedupe
+		keeps re-saves quiet. Checked here because Frappe delivers "Alert"
+		logs even to the sender.
+		"""
+		user = frappe.db.get_value("Sales Rep", self.sales_rep, "user") if self.sales_rep else None
+		if not user or user == frappe.session.user:
+			return
+
+		subject = _("New visit: {0}, {1} on {2} — assigned by {3}").format(
+			f"<b>{frappe.utils.escape_html(self.retailer_name or self.retailer)}</b>",
+			frappe.utils.escape_html(self.city or ""),
+			formatdate(self.visit_date),
+			frappe.utils.escape_html(get_fullname(frappe.session.user)),
+		)
+		enqueue_create_notification(
+			[user],
+			{
+				"type": "Alert",
+				"document_type": "Visit",
+				"document_name": self.name,
+				"from_user": frappe.session.user,
+				"subject": subject,
+				"email_content": subject,
+			},
+			dedupe_on=["document_type", "document_name"],
+		)
 
 	def _guard_check_in_fields(self):
 		"""
@@ -37,6 +75,11 @@ class Visit(Document):
 			return
 
 		before = self.get_doc_before_save()
+		# The retailer's position at check-in is what the geofence was measured against: keep it
+		# (also stops fetch_from moving it later when the Retailer's location changes).
+		if before and before.check_in_time:
+			for fieldname in RETAILER_POSITION_FIELDS:
+				self.set(fieldname, before.get(fieldname))
 		for fieldname in CHECK_IN_FIELDS:
 			if self._normalized(fieldname, self) != self._normalized(fieldname, before):
 				frappe.throw(

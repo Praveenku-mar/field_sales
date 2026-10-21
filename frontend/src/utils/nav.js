@@ -43,6 +43,13 @@ export const REPORT_LINKS = [
     icon: 'lucide-chart-column',
     roles: MANAGERS,
   },
+  {
+    label: 'Rep Commission',
+    description: 'Sales, earned, pending, reversed, override, paid and unpaid commission per rep.',
+    route: { name: 'RepCommission' },
+    icon: 'lucide-wallet',
+    roles: MANAGERS,
+  },
 ]
 
 // Records with a page in this app (route :name is the docname). Anything else opens in the desk.

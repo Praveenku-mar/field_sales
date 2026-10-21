@@ -285,6 +285,118 @@ class TestWebhooks(IntegrationTestCase):
 		self.assertEqual(log.error_code, "HTTP_500")
 		self.assertEqual(log.endpoint, "products/update")
 
+	# -- product price -----------------------------------------------------
+
+	def store_variant(self, variant_id="1", inventory_id=INVENTORY, price=5.0, compare_at_price=None):
+		"""Normalized variant as ``get_product`` returns it (the store's current state)."""
+		return {
+			"external_product_id": "900",
+			"external_variant_id": variant_id,
+			"external_inventory_id": inventory_id,
+			"product_title": f"Test product {variant_id}",
+			"variant_title": "",
+			"sku": "",
+			"barcode": "",
+			"price": price,
+			"compare_at_price": compare_at_price,
+			"collection": "",
+			"image_url": "",
+			"status": "Active",
+			"track_inventory": True,
+		}
+
+	def price_event(self, variants, event_id="price-1"):
+		return {
+			"topic": PRODUCT_UPDATE_TOPIC,
+			"platform_topic": "products/update",
+			"event_id": event_id,
+			"updated_at": "2026-10-16T10:00:00Z",
+			"payload": {"id": 900, "variants": variants},
+		}
+
+	def run_price_event(self, event, store_variants):
+		with (
+			patch("field_sales.connectors.shopify.ShopifyConnector.get_product", return_value=store_variants),
+			patch("field_sales.connectors.shopify.ShopifyConnector.get_stock", return_value={INVENTORY: 3.0, "5002": 7.0}),
+			patch("field_sales.sync.webhooks.frappe.publish_realtime") as publish,
+		):
+			result = process_event("Shopify", event)
+		return result, [c for c in publish.call_args_list if c.args[0] == "product_price_updated"]
+
+	def test_handle_product_event_normalizes(self):
+		prices = self.conn.handle_product_event(
+			{
+				"variants": [
+					{"id": "gid://shopify/ProductVariant/1", "price": "12.50", "compare_at_price": "15.00"},
+					{"id": 2, "price": "9", "compare_at_price": None},
+				]
+			}
+		)
+		self.assertEqual(
+			prices,
+			[
+				{"external_variant_id": "1", "price": 12.5, "compare_at_price": 15.0},
+				{"external_variant_id": "2", "price": 9.0, "compare_at_price": None},
+			],
+		)
+		self.assertIsNone(self.conn.handle_product_event({"id": 900}))
+
+	def test_handle_product_event_rejects_variant_without_price(self):
+		with self.assertRaises(ConnectorError) as raised:
+			self.conn.handle_product_event({"variants": [{"id": 1}]})
+		self.assertEqual(raised.exception.code, "BAD_PAYLOAD")
+
+	def test_price_change_is_written_and_published(self):
+		event = self.price_event([{"id": 1, "price": "12.50", "compare_at_price": "15.00"}, {"id": 2, "price": "5.00"}])
+		result, published = self.run_price_event(
+			event, [self.store_variant("1", price=12.5, compare_at_price=15.0), self.store_variant("2", "5002")]
+		)
+
+		self.product.reload()
+		self.assertEqual((self.product.price, self.product.compare_at_price), (12.5, 15.0))
+		self.assertIsNotNone(self.product.last_synced)
+		self.assertEqual(result["price_changed"], 2)
+		messages = {c.args[1]["product"]: c.args[1] for c in published}
+		self.assertEqual(messages[self.product.name], {"product": self.product.name, "price": 12.5, "compare_at_price": 15.0})
+		self.assertEqual(published[0].kwargs, {"doctype": "Platform Product", "after_commit": True})
+
+	def test_unchanged_price_is_not_written_or_published(self):
+		frappe.db.set_value("Platform Product", self.product.name, {"price": 5, "compare_at_price": 0, "last_synced": None})
+		with patch("field_sales.sync.webhooks.frappe.db.set_value") as set_value:
+			from field_sales.sync.webhooks import _apply_prices
+
+			_apply_prices("Shopify", [{"external_variant_id": "1", "price": 5.0, "compare_at_price": None}])
+		set_value.assert_not_called()
+
+	def test_stale_payload_price_is_corrected_by_refetch(self):
+		# The payload says 7, but the store now says 5 (a newer change already happened).
+		frappe.db.set_value("Platform Product", self.product.name, "price", 5)
+		result, published = self.run_price_event(
+			self.price_event([{"id": 1, "price": "7.00"}]), [self.store_variant("1", price=5.0)]
+		)
+		self.assertEqual(frappe.db.get_value("Platform Product", self.product.name, "price"), 5)
+		self.assertEqual(published, [])
+		self.assertEqual(result["price_changed"], 0)
+
+	def test_price_for_unknown_variant_is_ignored(self):
+		result, published = self.run_price_event(
+			self.price_event([{"id": 999, "price": "1.00"}]),
+			[self.store_variant("1", price=0), self.store_variant("2", "5002", price=0)],
+		)
+		self.assertFalse(frappe.db.exists("Platform Product", {"external_variant_id": "999"}))
+		self.assertEqual(frappe.db.get_value("Platform Product", self.product.name, "price"), 0)
+		self.assertEqual(published, [])
+		self.assertEqual(result["price_changed"], 0)
+
+	def test_bad_product_payload_writes_failed_log(self):
+		with self.assertRaises(ConnectorError):
+			process_event("Shopify", self.price_event([{"id": 1}], event_id="bad-price"))
+
+		log = self.logs(external_id="bad-price")[0]
+		self.assertEqual(log.status, "Failed")
+		self.assertEqual(log.error_code, "BAD_PAYLOAD")
+		self.assertEqual(log.endpoint, "products/update")
+
 	# -- receive -----------------------------------------------------------
 
 	def test_receive_rejects_bad_signature(self):

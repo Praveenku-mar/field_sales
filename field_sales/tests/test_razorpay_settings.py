@@ -1,0 +1,99 @@
+# Copyright (c) 2026, Your Company and contributors
+# For license information, please see license.txt
+
+from unittest.mock import MagicMock, patch
+
+import frappe
+import requests
+from frappe.tests import IntegrationTestCase
+from frappe.utils.password import set_encrypted_password
+
+from field_sales.payments import razorpay
+from field_sales.payments.razorpay import (
+	API_BASE,
+	REQUEST_TIMEOUT,
+	WEBHOOK_PATH,
+	get_webhook_url,
+	test_connection,
+)
+
+
+def _response(status: int, body: dict):
+	response = MagicMock(status_code=status)
+	response.json.return_value = body
+	return response
+
+
+class TestRazorpaySettings(IntegrationTestCase):
+	def setUp(self):
+		frappe.db.set_single_value("Razorpay Settings", {"key_id": "rzp_test_abc", "mode": "Test"})
+		set_encrypted_password("Razorpay Settings", "Razorpay Settings", "s3cret-key", "key_secret")
+		set_encrypted_password("Razorpay Settings", "Razorpay Settings", "hook-secret", "webhook_secret")
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.db.rollback()
+
+	@patch.object(razorpay.requests, "request")
+	def test_success_uses_basic_auth_and_timeout(self, mock_request):
+		mock_request.return_value = _response(200, {"payment_links": [], "count": 0})
+		result = test_connection()
+		self.assertTrue(result["ok"])
+		mock_request.assert_called_once_with(
+			"GET",
+			f"{API_BASE}/payment_links",
+			params={"count": 1},
+			json=None,
+			auth=("rzp_test_abc", "s3cret-key"),
+			timeout=REQUEST_TIMEOUT,
+		)
+
+	@patch.object(razorpay.requests, "request")
+	def test_failure_shows_razorpay_description(self, mock_request):
+		mock_request.return_value = _response(
+			401, {"error": {"code": "BAD_REQUEST_ERROR", "description": "Authentication failed"}}
+		)
+		self.assertEqual(test_connection(), {"ok": False, "message": "Authentication failed"})
+
+	@patch.object(razorpay.requests, "request", side_effect=requests.ConnectTimeout("boom"))
+	def test_network_error(self, _mock):
+		result = test_connection()
+		self.assertFalse(result["ok"])
+		self.assertIn("ConnectTimeout", result["message"])
+
+	def test_missing_keys(self):
+		frappe.db.set_single_value("Razorpay Settings", "key_id", "")
+		self.assertFalse(test_connection()["ok"])
+
+	def _user(self, email: str, role: str) -> str:
+		user = frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": "Test", "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+		user.add_roles(role)
+		return user.name
+
+	def test_reps_cannot_test(self):
+		frappe.set_user(self._user("rzp-rep@example.com", "Field Sales Rep"))
+		self.assertRaises(frappe.PermissionError, test_connection)
+		self.assertRaises(frappe.PermissionError, get_webhook_url)
+		self.assertFalse(frappe.has_permission("Razorpay Settings", "read"))
+
+	def test_secrets_not_sent_and_webhook_url_filled(self):
+		doc = frappe.get_doc("Razorpay Settings")
+		doc.run_method("onload")
+		data = doc.as_dict()
+		self.assertNotEqual(data.get("key_secret"), "s3cret-key")
+		self.assertNotEqual(data.get("webhook_secret"), "hook-secret")
+		self.assertEqual(doc.webhook_url, frappe.utils.get_url(WEBHOOK_PATH))
+
+	def test_sales_manager_reads_masked_settings(self):
+		# What the SPA's Settings tab loads (frappe.client.get), after a save through the form.
+		doc = frappe.get_doc("Razorpay Settings")
+		doc.key_secret = "s3cret-key"
+		doc.save()
+		frappe.set_user(self._user("rzp-manager@example.com", "Sales Manager"))
+		from frappe.client import get
+
+		data = get("Razorpay Settings", "Razorpay Settings")
+		self.assertNotIn("s3cret", str(data.get("key_secret")))
+		self.assertEqual(get_webhook_url(), frappe.utils.get_url(WEBHOOK_PATH))

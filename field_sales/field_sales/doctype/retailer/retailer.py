@@ -10,6 +10,22 @@ from frappe.utils import flt, validate_email_address
 
 from field_sales.permissions import get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
+from field_sales.utils.geo import has_coords
+from field_sales.utils.guards import is_system_manager, keep_server_fields
+
+# Written only by the server: the customer sync (_record_result) and Visit (last_visit).
+SERVER_FIELDS = (
+	"platform",
+	"external_customer_id",
+	"sync_status",
+	"last_synced",
+	"last_sync_attempt",
+	"sync_attempts",
+	"sync_error",
+	"last_visit",
+)
+# May move a located retailer or change its geofence radius (both decide check-in distance).
+LOCATION_EDIT_ROLES = {"Sales Manager", "System Manager"}
 
 
 class Retailer(Document):
@@ -20,9 +36,41 @@ class Retailer(Document):
 			self.sales_rep = get_own_rep()
 
 	def validate(self):
+		self._keep_server_fields()
+		self._guard_location()
 		self._validate_phone()
 		self._validate_email()
 		self._validate_coordinates()
+
+	def _keep_server_fields(self):
+		"""
+		A planted external_customer_id would link this retailer and its orders to another
+		store customer, and the next push would overwrite that customer.
+		"""
+		if self.flags.ignore_sync:  # the customer sync's own save (sync/customers.py _record_result)
+			return
+		if self.is_new() or not is_system_manager():
+			keep_server_fields(self, SERVER_FIELDS)
+
+	def _guard_location(self):
+		"""
+		A rep could pass any check-in by moving the retailer to where they stand or widening
+		its geofence. Reps may set a retailer's first location; after that only managers
+		move it, and only managers change the radius (new retailers get the default).
+		"""
+		if LOCATION_EDIT_ROLES & set(frappe.get_roles()):
+			return
+		keep_server_fields(self, ("geofence_radius_m",))
+		if self.is_new():
+			return
+		before = self.get_doc_before_save()
+		if not before or not has_coords(before.latitude, before.longitude):
+			return  # the first location can still be set
+		if flt(self.latitude) != flt(before.latitude) or flt(self.longitude) != flt(before.longitude):
+			frappe.throw(
+				_("This retailer's location is already set. Ask a Sales Manager to change it."),
+				frappe.PermissionError,
+			)
 
 	def on_update(self):
 		self._push_to_store_if_changed()

@@ -43,6 +43,16 @@
   "sync_attempts",
   "last_sync_attempt",
   "sync_error",
+  "payment_tab",
+  "payment_section",
+  "payment_status",
+  "amount_paid",
+  "paid_on",
+  "col_break_payment",
+  "razorpay_payment_link_id",
+  "razorpay_payment_link_url",
+  "payment_link_expires_on",
+  "razorpay_payment_id",
   "invoice_tab",
   "invoice_section",
   "invoice_no",
@@ -281,6 +291,82 @@
    "read_only": 1
   },
   {
+   "fieldname": "payment_tab",
+   "fieldtype": "Tab Break",
+   "label": "Payment"
+  },
+  {
+   "fieldname": "payment_section",
+   "fieldtype": "Section Break",
+   "label": "Payment"
+  },
+  {
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "label": "Payment Status",
+   "options": "Unpaid\nLink Sent\nPartially Paid\nPaid\nLink Expired\nLink Cancelled",
+   "default": "Unpaid",
+   "in_standard_filter": 1,
+   "in_list_view": 1,
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "amount_paid",
+   "fieldtype": "Currency",
+   "label": "Amount Paid",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "paid_on",
+   "fieldtype": "Datetime",
+   "label": "Paid On",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "col_break_payment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "razorpay_payment_link_id",
+   "fieldtype": "Data",
+   "label": "Razorpay Payment Link ID",
+   "search_index": 1,
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "razorpay_payment_link_url",
+   "fieldtype": "Data",
+   "label": "Payment Link URL",
+   "options": "URL",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "payment_link_expires_on",
+   "fieldtype": "Datetime",
+   "label": "Link Expires On",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "razorpay_payment_id",
+   "fieldtype": "Data",
+   "label": "Razorpay Payment ID",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1
+  },
+  {
    "fieldname": "invoice_tab",
    "fieldtype": "Tab Break",
    "label": "Invoice"
@@ -336,7 +422,7 @@
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-10-15 10:00:00.000000",
+ "modified": "2026-10-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

@@ -8,7 +8,9 @@ import threading
 import frappe
 from frappe import _
 from frappe.model.naming import make_autoname
-from frappe.utils import fmt_money, now_datetime, today
+from frappe.utils import fmt_money, format_datetime, now_datetime, today
+
+from field_sales.payments.razorpay import link_for_confirmation
 
 SENDING_STATUS = "Sending…"
 INVOICE_SERIES = "INV-.YYYY.-.#####"
@@ -52,6 +54,11 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 	if not frappe.db.get_single_value("Store Connection", "send_order_confirmation"):
 		return _set_status(doc, "Skipped: order confirmation emails are turned off")
 
+	# Before the savepoint: a link created on Razorpay must stay stored even if the email fails.
+	pay_link = None
+	if frappe.db.get_value("Retailer", doc.retailer, "email"):
+		pay_link = link_for_confirmation(doc)
+
 	# Undone if sending fails, so a failed attempt does not use up an invoice number.
 	frappe.db.savepoint("order_confirmation")
 	try:
@@ -67,7 +74,7 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 			doc.add_comment("Comment", _("Order confirmation not sent: the customer has no email address."))
 			return _set_status(doc, status)
 
-		_send(doc, retailer)
+		_send(doc, retailer, pay_link)
 		return _set_status(doc, f"Sent to {retailer.email}", sent=True)
 	except PDFTimeout:
 		frappe.db.rollback(save_point="order_confirmation")
@@ -162,8 +169,8 @@ def _kill_wkhtmltopdf(keep: set):
 			pass
 
 
-def _send(doc, retailer):
-	"""Queue the email to the customer with the invoice PDF attached."""
+def _send(doc, retailer, pay_link: dict | None = None):
+	"""Queue the email to the customer with the invoice PDF attached (and a Pay Now button when there is a link)."""
 	settings = frappe.db.get_value(
 		"Store Connection", "Store Connection", ["company_name", "shop_name"], as_dict=True
 	)
@@ -196,6 +203,10 @@ def _send(doc, retailer):
 			"grand_total": fmt_money(doc.grand_total, currency="INR"),
 			"sales_rep": rep_name,
 			"company": settings.company_name or settings.shop_name,
+			"payment_url": pay_link and pay_link.get("url"),
+			"payment_expires": pay_link
+			and pay_link.get("expires_on")
+			and format_datetime(pay_link["expires_on"], "dd MMM yyyy, hh:mm a"),
 		},
 		attachments=[{"fname": f"{doc.invoice_no}.pdf", "fcontent": pdf_bytes}],
 		reference_doctype="Field Order",

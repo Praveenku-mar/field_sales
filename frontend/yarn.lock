@@ -2669,6 +2669,11 @@ highlight.js@~11.11.0:
   resolved "https://registry.npmjs.org/highlight.js/-/highlight.js-11.11.2.tgz"
   integrity sha512-oaXMACAU0kzOMXBjWpNcX+vlwSBCIAiZ9BHa7gA15NOTtT2L/l8OSZDuqS2XppOhZBPJ7hm4o8ep2kyuip2uEQ==
 
+html5-qrcode@2.3.8:
+  version "2.3.8"
+  resolved "https://registry.yarnpkg.com/html5-qrcode/-/html5-qrcode-2.3.8.tgz#0b0cdf7a9926cfd4be530e13a51db47592adfa0d"
+  integrity sha512-jsr4vafJhwoLVEDW3n1KvPnCCXWaQfRng0/EEYk1vNcQGcG/htAdhJX0be8YyqMoSz7+hZvOZSTAepsabiuhiQ==
+
 idb-keyval@^6.2.0:
   version "6.3.0"
   resolved "https://registry.npmjs.org/idb-keyval/-/idb-keyval-6.3.0.tgz"
@@ -3872,7 +3877,7 @@ smob@^1.0.0:
   resolved "https://registry.yarnpkg.com/smob/-/smob-1.6.2.tgz#190b94c25530c631a7ccc63de0d4c0087222d21d"
   integrity sha512-RQsvleCbF8cVHEv+xuDGaA4pOizFqJ0GgjtMSRo6oP8pnN7WsigHgVGey6aILRBKv4W2YOMHLqbKdnB6hpB9fw==
 
-socket.io-client@^4.5.1:
+socket.io-client@4.8.4, socket.io-client@^4.5.1:
   version "4.8.4"
   resolved "https://registry.npmjs.org/socket.io-client/-/socket.io-client-4.8.4.tgz"
   integrity sha512-7wjKAvVXYOJsbmUgkWbnhPD4bFpkqrUR0++XOjpGFmqDqsqV1CI93VTraeExLxpjxEqrWgFoSRZu1ihjLWfkAA==

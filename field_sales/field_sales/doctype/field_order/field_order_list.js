@@ -2,7 +2,7 @@
 // For license information, please see license.txt
 
 frappe.listview_settings["Field Order"] = {
-	add_fields: ["sync_status", "docstatus", "sync_error"],
+	add_fields: ["sync_status", "docstatus", "sync_error", "payment_status"],
 
 	onload(listview) {
 		listview.page.add_actions_menu_item(__("Retry Sync"), () => {
@@ -33,6 +33,25 @@ frappe.listview_settings["Field Order"] = {
 			Failed: [__("Sync Failed"), "red", "sync_status,=,Failed"],
 		};
 		return indicators[doc.sync_status] || [__("Submitted"), "blue", "docstatus,=,1"];
+	},
+
+	// The status indicator shows store sync; payment status gets its own column pill.
+	formatters: {
+		payment_status(value, df, doc) {
+			if (doc.docstatus !== 1 || !value) return "";
+			const colors = {
+				Unpaid: "gray",
+				"Link Sent": "blue",
+				"Partially Paid": "orange",
+				Paid: "green",
+				"Link Expired": "yellow",
+				"Link Cancelled": "red",
+			};
+			const color = colors[value] || "gray";
+			return `<span class="indicator-pill ${color} filterable ellipsis"
+				data-filter="payment_status,=,${frappe.utils.escape_html(value)}">
+				<span class="ellipsis">${__(value)}</span></span>`;
+		},
 	},
 
 	button: {

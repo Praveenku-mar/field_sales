@@ -3,10 +3,12 @@
   <div class="flex h-full flex-col">
     <PageHeader title="Visits">
       <template #actions>
-        <Button label="New Visit" icon-left="lucide-plus" variant="solid" @click="newVisitOpen = true" />
+        <Button v-if="pageTab === 'visits'" label="New Visit" icon-left="lucide-plus" variant="solid" @click="newVisitOpen = true" />
       </template>
     </PageHeader>
-    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div v-if="session.isManager" class="shrink-0 px-5 pb-3"><TabButtons v-model="pageTab" :options="pageTabs" /></div>
+    <VisitImport v-if="pageTab === 'import'" />
+    <div v-show="pageTab === 'visits'" class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
       <ListFilters v-model="model" search-placeholder="Search customer" :tabs="tabs" :fields="fields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
@@ -40,19 +42,36 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { Button } from 'frappe-ui'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
+import { Button, TabButtons } from 'frappe-ui'
+import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import ListFilters from '@/components/ListFilters.vue'
 import PresetChip from '@/components/PresetChip.vue'
 import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import VisitDialog from '@/components/VisitDialog.vue'
+import VisitImport from '@/components/VisitImport.vue'
 import { useDocList } from '@/composables/useDocList'
+import { useSessionStore } from '@/stores/session'
 import { formatDate, formatTime, today } from '@/utils/format'
 
+const session = useSessionStore()
 const newVisitOpen = ref(false)
+
+// Page tab, kept in the URL (?tab=import) so a refresh or a link opens it. The list below
+// stays mounted (hidden) while importing, so its filters are not lost. Importing is for
+// Sales Managers / System Managers only (the server checks too).
+const pageTabs = [
+  { label: 'Visits', value: 'visits' },
+  { label: 'Import from Excel', value: 'import' },
+]
+const route = useRoute()
+const router = useRouter()
+const pageTab = computed({
+  get: () => (session.isManager && route.query.tab === 'import' ? 'import' : 'visits'),
+  set: (value) => router.replace({ query: value === 'import' ? { tab: 'import' } : {} }),
+})
 
 const tabs = [
   { label: 'Today', value: 'today' },
@@ -80,7 +99,6 @@ function buildFilters(m) {
   return filters
 }
 
-const route = useRoute()
 const { model, list, count, presetLabel, pageSize } = useDocList({
   doctype: 'Visit',
   fields: ['name', 'retailer_name', 'city', 'sales_rep_name', 'visit_date', 'status', 'check_in_time', 'time_on_site_min', 'within_geofence', 'distance_from_retailer_m'],
@@ -89,7 +107,7 @@ const { model, list, count, presetLabel, pageSize } = useDocList({
   searchFields: ['retailer_name', 'name', 'city', 'sales_rep_name'],
   // ?preset=… (dashboard cards) shows exactly what the card counted, under the "All" tab;
   // ?tab=… opens a tab directly.
-  initial: { tab: route.query.preset ? 'all' : route.query.tab || 'today' },
+  initial: { tab: route.query.preset ? 'all' : (route.query.tab !== 'import' && route.query.tab) || 'today' },
   preset: route.query.preset || null,
 })
 </script>

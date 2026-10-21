@@ -90,16 +90,20 @@
                The results panel is in flow — it makes room instead of overlapping
                the items table. -->
           <div v-if="editable">
-            <TextInput
-              ref="quickSearchEl"
-              v-model="quickQuery"
-              placeholder="Search a product to add — name, SKU or barcode"
-              @keydown.enter.prevent="quickRows.length && quickAdd(quickRows[0])"
-              @blur="quickOpen = false"
-              @focus="quickSearch.data && (quickOpen = true)"
-            >
-              <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
-            </TextInput>
+            <div class="flex items-center gap-2">
+              <TextInput
+                ref="quickSearchEl"
+                v-model="quickQuery"
+                class="flex-1"
+                placeholder="Search a product to add — name, SKU or barcode"
+                @keydown.enter.prevent="quickRows.length && quickAdd(quickRows[0])"
+                @blur="quickOpen = false"
+                @focus="quickSearch.data && (quickOpen = true)"
+              >
+                <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+              </TextInput>
+              <Button icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
+            </div>
             <ul
               v-if="quickOpen && (quickSearch.loading || quickRows.length)"
               class="mt-1 max-h-72 overflow-y-auto rounded-4 border border-outline-gray-2 bg-surface-base py-1"
@@ -198,6 +202,16 @@
                       <span class="lucide-triangle-alert size-3" />
                       Exceeds stock — only {{ formatNumber(row.available_qty) }} available
                     </div>
+                    <div v-if="editable && priceChange(row) != null" class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-amber-7">
+                      <span class="flex items-center gap-1">
+                        <span class="lucide-tag size-3" />
+                        Price changed: {{ formatCurrency(row.rate) }} → {{ formatCurrency(priceChange(row)) }}
+                      </span>
+                      <!-- For a rep the server sets a changed rate to the product's current price: the same thing. -->
+                      <button type="button" class="font-medium text-ink-gray-9 underline underline-offset-2" @click="applyNewPrice(row)">
+                        Apply new price
+                      </button>
+                    </div>
                   </td>
                   <td class="cell font-mono text-xs text-ink-gray-6">{{ row.sku || '—' }}</td>
                   <td class="cell text-right tabular-nums">
@@ -218,8 +232,9 @@
                     <span v-else class="block px-3 tabular-nums" :class="isShort(row) && 'text-ink-red-6'">{{ formatNumber(row.qty, 3) }}</span>
                   </td>
                   <td class="cell p-0 text-right">
+                    <!-- Only managers may set a rate other than the product's price (the server resets it otherwise). -->
                     <input
-                      v-if="editable"
+                      v-if="editable && session.isManager"
                       v-model.number="row.rate"
                       type="number"
                       min="0"
@@ -282,83 +297,118 @@
         </div>
       </div>
 
-      <!-- Store sync -->
-      <div class="fs-card">
-        <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-          <span class="lucide-shopping-bag size-4 text-ink-gray-7" />
-          <h2 class="flex-1 text-base font-semibold text-ink-gray-9">{{ platform }} Sync</h2>
-          <StatusPill :status="orderStatus(d)" />
-        </div>
-        <dl class="divide-y divide-outline-gray-1 px-4">
-          <div v-for="item in syncRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-            <dt class="text-ink-gray-6">{{ item.label }}</dt>
-            <dd class="truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
-              <a v-if="item.href" :href="item.href" target="_blank" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
-                {{ item.value }}<span class="lucide-external-link size-3.5" />
-              </a>
-              <template v-else>{{ item.value }}</template>
-            </dd>
+      <!-- Side column: store sync, payment, invoice -->
+      <div class="space-y-4">
+        <!-- Store sync -->
+        <div class="fs-card">
+          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+            <span class="lucide-shopping-bag size-4 text-ink-gray-7" />
+            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">{{ platform }} Sync</h2>
+            <StatusPill :status="orderStatus(d)" />
           </div>
-        </dl>
-        <div class="space-y-2 p-4 pt-1">
-          <p v-if="d.docstatus === 0" class="text-ink-gray-5">The order is sent to the store when it is submitted.</p>
-          <div v-if="d.docstatus === 1 && d.sync_status === 'Failed'" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
-            <span class="lucide-circle-alert mt-px size-4 shrink-0" />
-            <div class="min-w-0 break-words">
-              <div class="font-semibold">Sync failed</div>
-              <div v-if="d.sync_error">{{ d.sync_error }}</div>
+          <dl class="divide-y divide-outline-gray-1 px-4">
+            <div v-for="item in syncRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+              <dt class="text-ink-gray-6">{{ item.label }}</dt>
+              <dd class="truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
+                <a v-if="item.href" :href="item.href" target="_blank" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
+                  {{ item.value }}<span class="lucide-external-link size-3.5" />
+                </a>
+                <template v-else>{{ item.value }}</template>
+              </dd>
             </div>
+          </dl>
+          <div class="space-y-2 p-4 pt-1">
+            <p v-if="d.docstatus === 0" class="text-ink-gray-5">The order is sent to the store when it is submitted.</p>
+            <div v-if="d.docstatus === 1 && d.sync_status === 'Failed'" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+              <span class="lucide-circle-alert mt-px size-4 shrink-0" />
+              <div class="min-w-0 break-words">
+                <div class="font-semibold">Sync failed</div>
+                <div v-if="d.sync_error">{{ d.sync_error }}</div>
+              </div>
+            </div>
+            <Button
+              v-if="d.docstatus === 1 && d.sync_status === 'Failed'"
+              class="w-full"
+              variant="solid"
+              label="Retry Sync"
+              icon-left="lucide-refresh-cw"
+              :loading="retrying"
+              @click="retrySync"
+            />
+            <Button
+              v-if="session.isManager && d.docstatus !== 0"
+              class="w-full"
+              label="View Sync Log"
+              :route="{ name: 'SyncLogs', query: { reference: name } }"
+            />
           </div>
-          <Button
-            v-if="d.docstatus === 1 && d.sync_status === 'Failed'"
-            class="w-full"
-            variant="solid"
-            label="Retry Sync"
-            icon-left="lucide-refresh-cw"
-            :loading="retrying"
-            @click="retrySync"
-          />
-          <Button
-            v-if="session.isManager && d.docstatus !== 0"
-            class="w-full"
-            label="View Sync Log"
-            :route="{ name: 'SyncLogs', query: { reference: name } }"
-          />
         </div>
-      </div>
 
-      <!-- Invoice and confirmation email -->
-      <div v-if="d.docstatus === 1" class="fs-card">
-        <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-          <span class="lucide-file-text size-4 text-ink-gray-7" />
-          <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Invoice</h2>
+        <!-- Payment (Razorpay payment link); read-only, written by the server -->
+        <div v-if="d.docstatus === 1" class="fs-card">
+          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+            <span class="lucide-credit-card size-4 text-ink-gray-7" />
+            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Payment</h2>
+            <StatusPill :status="d.payment_status || 'Unpaid'" />
+          </div>
+          <dl class="divide-y divide-outline-gray-1 px-4">
+            <div v-for="item in paymentRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
+              <dd class="min-w-0 truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
+                <a v-if="item.href" :href="item.href" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
+                  {{ item.value }}<span class="lucide-external-link size-3.5" />
+                </a>
+                <template v-else>{{ item.value }}</template>
+              </dd>
+            </div>
+          </dl>
+          <div v-if="linkUsable || linkAction" class="space-y-2 p-4 pt-1">
+            <Button v-if="linkUsable" class="w-full" label="Copy Payment Link" icon-left="lucide-copy" @click="copyPaymentLink" />
+            <Button
+              v-if="linkAction"
+              class="w-full"
+              :variant="linkUsable ? 'subtle' : 'solid'"
+              :label="linkAction"
+              icon-left="lucide-link"
+              :loading="creatingLink"
+              @click="createPaymentLink"
+            />
+          </div>
         </div>
-        <dl class="divide-y divide-outline-gray-1 px-4">
-          <div v-for="item in invoiceRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-            <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
-            <dd class="min-w-0 break-words text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">{{ item.value }}</dd>
+
+        <!-- Invoice and confirmation email -->
+        <div v-if="d.docstatus === 1" class="fs-card">
+          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
+            <span class="lucide-file-text size-4 text-ink-gray-7" />
+            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Invoice</h2>
           </div>
-        </dl>
-        <div class="space-y-2 p-4 pt-1">
-          <div v-if="confirmationError" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
-            <span class="lucide-circle-alert mt-px size-4 shrink-0" />
-            <div class="min-w-0 break-words">{{ d.confirmation_status }}</div>
+          <dl class="divide-y divide-outline-gray-1 px-4">
+            <div v-for="item in invoiceRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
+              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
+              <dd class="min-w-0 break-words text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">{{ item.value }}</dd>
+            </div>
+          </dl>
+          <div class="space-y-2 p-4 pt-1">
+            <div v-if="confirmationError" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+              <span class="lucide-circle-alert mt-px size-4 shrink-0" />
+              <div class="min-w-0 break-words">{{ d.confirmation_status }}</div>
+            </div>
+            <Button
+              class="w-full"
+              label="Download Invoice"
+              icon-left="lucide-download"
+              :href="invoiceUrl"
+              target="_blank"
+            />
+            <Button
+              v-if="d.external_order_id"
+              class="w-full"
+              label="Resend Email"
+              icon-left="lucide-mail"
+              :loading="sending"
+              @click="resendConfirmation"
+            />
           </div>
-          <Button
-            class="w-full"
-            label="Download Invoice"
-            icon-left="lucide-download"
-            :href="invoiceUrl"
-            target="_blank"
-          />
-          <Button
-            v-if="d.external_order_id"
-            class="w-full"
-            label="Resend Email"
-            icon-left="lucide-mail"
-            :loading="sending"
-            @click="resendConfirmation"
-          />
         </div>
       </div>
     </div>
@@ -397,6 +447,8 @@
       </template>
     </Dialog>
 
+    <BarcodeScanner v-model="scanOpen" @scanned="onScanned" />
+
     <!-- Confirmations -->
     <Dialog v-model="confirm.open" :title="confirm.title" :message="confirm.message" :icon="confirm.icon" :theme="confirm.theme">
       <template #actions>
@@ -432,9 +484,11 @@ import PageHeader from '@/components/PageHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import LinkField from '@/components/LinkField.vue'
+import BarcodeScanner from '@/components/BarcodeScanner.vue'
 import { useSessionStore } from '@/stores/session'
 import { useSellLocations } from '@/composables/useSellLocations'
-import { callMethod } from '@/utils/api'
+import { onDoctypeEvent } from '@/composables/useRealtime'
+import { callMethod, findProductByBarcode } from '@/utils/api'
 import { formatCurrency, formatDate, formatNumber, formatTime, orderStatus, relativeDay } from '@/utils/format'
 
 const props = defineProps({ name: { type: String, required: true } })
@@ -691,6 +745,32 @@ function quickAdd(p) {
   nextTick(() => quickSearchEl.value?.$el?.querySelector('input')?.focus())
 }
 
+// Camera scan: the scanned product goes onto the order with qty 1, or +1 if it is already there.
+const scanOpen = ref(false)
+async function onScanned(code) {
+  let product
+  try {
+    product = await findProductByBarcode(code, { fields: ['name', ...PRODUCT_FIELDS], filters: { status: 'Active' } })
+  } catch {
+    toast.error('Could not look up the barcode. Try again.')
+    return
+  }
+  if (!product) {
+    toast.warning(`No product with barcode ${code}`)
+    return
+  }
+  const row = form.value.items.find((r) => r.product === product.name)
+  if (row) {
+    row.qty = (+row.qty || 0) + 1
+    toast.success(`${productLabel(product)} — qty ${row.qty}`)
+  } else {
+    // An empty row left by Add Row is filled first rather than left dangling.
+    form.value.items = form.value.items.filter((r) => r.product)
+    addRow(product)
+    toast.success(`Added ${productLabel(product)}`)
+  }
+}
+
 const selected = ref(new Set())
 const allSelected = computed(() => !!form.value?.items.length && selected.value.size === form.value.items.length)
 function toggleRow(key) {
@@ -754,6 +834,44 @@ watch(
   },
 )
 
+// ---------------------------------------------------------------- live price and stock
+
+// Store webhooks announce price and stock changes (sync/webhooks.py). Products not on the
+// order show the new figures in the search results and Add Multiple; rows already on a
+// draft keep their rate and only offer the new price. Submitted orders are left alone.
+const newPrices = ref({}) // product -> latest store price announced while the page is open
+const priceChange = (row) => {
+  const price = row.product ? newPrices.value[row.product] : null
+  return price != null && +price !== +row.rate ? price : null
+}
+function applyNewPrice(row) {
+  row.rate = newPrices.value[row.product]
+}
+watch(() => props.name, () => (newPrices.value = {}))
+
+// Update listed products (search results, Add Multiple) in place.
+function patchListed(products, values) {
+  for (const resource of [quickSearch, picker]) {
+    if (resource.data?.some((p) => products.includes(p.name))) {
+      resource.setData(resource.data.map((p) => (products.includes(p.name) ? { ...p, ...values } : p)))
+    }
+  }
+}
+
+onDoctypeEvent('Platform Product', 'product_price_updated', ({ product, price, compare_at_price }) => {
+  patchListed([product], { price, compare_at_price })
+  if (editable.value && productNames.value.includes(product)) newPrices.value = { ...newPrices.value, [product]: price }
+})
+
+onDoctypeEvent('Platform Product', 'stock_updated', ({ products, available_qty, location_id }) => {
+  listedStock.value = { ...listedStock.value, ...Object.fromEntries(products.map((n) => [`${location_id}|${n}`, available_qty])) }
+  // Platform Product.available_qty is the default location's figure.
+  if (location_id === defaultLocation.value?.location_id) patchListed(products, { available_qty })
+  const orderLocation = form.value?.location_id || defaultLocation.value?.location_id
+  if (editable.value && location_id === orderLocation) {
+    form.value.items.filter((r) => products.includes(r.product)).forEach((r) => (r.available_qty = available_qty))
+  }
+})
 
 // Switching a draft to another location: save the order there, then re-check its rows live
 // at the new location (the server also swaps the rows' stock for the stored figures on save).
@@ -985,6 +1103,64 @@ const invoiceUrl = computed(
   () => `/api/method/frappe.utils.print_format.download_pdf?doctype=Field%20Order&name=${encodeURIComponent(props.name)}&format=Field%20Sales%20Invoice`,
 )
 const confirmationError = computed(() => (d.value.confirmation_status || '').startsWith('Error'))
+
+// ---------------------------------------------------------------- payment
+
+const paymentRows = computed(() => {
+  const o = d.value
+  const when = (v) => (v ? `${relativeDay(v)}, ${formatTime(v)}` : null)
+  const rows = [
+    { label: 'Amount Paid', value: `${formatCurrency(o.amount_paid || 0)} of ${formatCurrency(o.grand_total || 0)}`, muted: !o.amount_paid },
+  ]
+  if (o.razorpay_payment_link_url) rows.push({ label: 'Payment Link', value: o.razorpay_payment_link_id || 'Open', href: o.razorpay_payment_link_url })
+  else rows.push({ label: 'Payment Link', value: 'Not created', muted: true })
+  if (o.payment_link_expires_on) rows.push({ label: 'Link Expires', value: when(o.payment_link_expires_on) })
+  if (o.paid_on) rows.push({ label: 'Paid On', value: when(o.paid_on) })
+  if (o.razorpay_payment_id) rows.push({ label: 'Payment ID', value: o.razorpay_payment_id })
+  return rows
+})
+
+const paymentConfig = createResource({ url: 'field_sales.payments.razorpay.get_payment_config', method: 'GET', auto: true })
+const creatingLink = ref(false)
+
+const linkExpired = computed(() => {
+  const exp = d.value.payment_link_expires_on
+  return !!exp && new Date(exp.replace(' ', 'T')) <= new Date()
+})
+// A link the retailer can still pay.
+const linkUsable = computed(
+  () => !!d.value.razorpay_payment_link_url && d.value.payment_status === 'Link Sent' && !linkExpired.value,
+)
+// Button label, or null when no link should be created. Partially Paid is left out:
+// a new link would ask for the full total again.
+const linkAction = computed(() => {
+  const o = d.value
+  if (o.docstatus !== 1 || !paymentConfig.data?.enabled || !(o.grand_total > 0)) return null
+  const status = o.payment_status || 'Unpaid'
+  if (status === 'Paid' || status === 'Partially Paid' || linkUsable.value) return null
+  return o.razorpay_payment_link_id ? 'Create New Link' : 'Create Payment Link'
+})
+
+async function createPaymentLink() {
+  creatingLink.value = true
+  try {
+    await callMethod('field_sales.payments.razorpay.create_link_for_order', { field_order: props.name })
+    toast.success('Payment link created')
+  } finally {
+    // Reload either way: a failed retry can still mark the old link cancelled.
+    await doc.reload()
+    creatingLink.value = false
+  }
+}
+
+async function copyPaymentLink() {
+  try {
+    await navigator.clipboard.writeText(d.value.razorpay_payment_link_url || '')
+    toast.success('Payment link copied')
+  } catch {
+    toast.error('Could not copy to clipboard')
+  }
+}
 
 const invoiceRows = computed(() => {
   const o = d.value

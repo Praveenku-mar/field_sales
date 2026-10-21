@@ -33,11 +33,20 @@
           <TextInput v-model="form.city" label="City" required />
           <TextInput v-model="form.state" label="State" />
           <TextInput v-model="form.pincode" label="Pincode" />
-          <TextInput v-model="form.geofence_radius_m" label="Geofence Radius (m)" type="number" placeholder="50 (default)" />
-          <TextInput v-model="form.latitude" label="Latitude" type="number" description="-90 to 90" />
-          <TextInput v-model="form.longitude" label="Longitude" type="number" description="-180 to 180" />
+          <TextInput
+            v-if="session.isManager"
+            v-model="form.geofence_radius_m"
+            label="Geofence Radius (m)"
+            type="number"
+            placeholder="50 (default)"
+          />
+          <TextInput v-model="form.latitude" label="Latitude" type="number" description="-90 to 90" :disabled="locationLocked" />
+          <TextInput v-model="form.longitude" label="Longitude" type="number" description="-180 to 180" :disabled="locationLocked" />
         </div>
-        <div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p v-if="locationLocked" class="mt-2 text-sm text-ink-gray-5">
+          The location is set. Ask a Sales Manager to change it.
+        </p>
+        <div v-else class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button
             variant="outline"
             label="Select Location"
@@ -52,7 +61,7 @@
             @click="useMyLocation"
           />
         </div>
-        <p class="mt-2 text-sm text-ink-gray-5">
+        <p v-if="!locationLocked" class="mt-2 text-sm text-ink-gray-5">
           Pick on a map or capture your GPS position; otherwise coordinates are set automatically at the first visit check-in.
         </p>
       </section>
@@ -184,6 +193,12 @@ watch(open, async (value) => {
     form.sales_rep = session.salesRep?.name || null
   }
 })
+
+// Matches Retailer._guard_location: reps set a retailer's first location; after that only
+// managers move it, and only managers change the geofence radius.
+const locationLocked = computed(
+  () => isEdit.value && !session.isManager && !!(Number(loaded.value?.latitude) || Number(loaded.value?.longitude)),
+)
 
 const valid = computed(() => form.retailer_name.trim() && form.phone.trim() && form.address_line1.trim() && form.city.trim())
 

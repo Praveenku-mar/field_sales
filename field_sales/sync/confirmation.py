@@ -11,6 +11,7 @@ from frappe.model.naming import make_autoname
 from frappe.utils import fmt_money, format_datetime, now_datetime, today
 
 from field_sales.payments.razorpay import link_for_confirmation
+from field_sales.utils.money import site_currency
 
 SENDING_STATUS = "Sending…"
 INVOICE_SERIES = "INV-.YYYY.-.#####"
@@ -75,7 +76,10 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 			return _set_status(doc, status)
 
 		_send(doc, retailer, pay_link)
-		return _set_status(doc, f"Sent to {retailer.email}", sent=True)
+		status = f"Sent to {retailer.email}"
+		if doc.flags.payment_link_error:
+			status += " without payment link"
+		return _set_status(doc, status, sent=True)
 	except PDFTimeout:
 		frappe.db.rollback(save_point="order_confirmation")
 		frappe.log_error(title=f"Order confirmation PDF timed out: {field_order}")
@@ -175,6 +179,7 @@ def _send(doc, retailer, pay_link: dict | None = None):
 		"Store Connection", "Store Connection", ["company_name", "shop_name"], as_dict=True
 	)
 	rep_name = frappe.db.get_value("Sales Rep", doc.sales_rep, "full_name") or doc.sales_rep
+	currency = site_currency()
 	order_no = doc.store_order_name or doc.name
 
 	# Built before anything is queued, so a timeout leaves nothing behind.
@@ -193,14 +198,14 @@ def _send(doc, retailer, pay_link: dict | None = None):
 					"title": row.product_title or row.product,
 					"variant": row.variant_title,
 					"qty": row.qty,
-					"amount": fmt_money(row.amount, currency="INR"),
+					"amount": fmt_money(row.amount, currency=currency),
 				}
 				for row in doc.items
 			],
-			"net_total": fmt_money(doc.net_total, currency="INR"),
-			"discount": fmt_money(doc.discount_amount, currency="INR") if doc.discount_amount else None,
-			"tax": fmt_money(doc.tax_amount, currency="INR") if doc.tax_amount else None,
-			"grand_total": fmt_money(doc.grand_total, currency="INR"),
+			"net_total": fmt_money(doc.net_total, currency=currency),
+			"discount": fmt_money(doc.discount_amount, currency=currency) if doc.discount_amount else None,
+			"tax": fmt_money(doc.tax_amount, currency=currency) if doc.tax_amount else None,
+			"grand_total": fmt_money(doc.grand_total, currency=currency),
 			"sales_rep": rep_name,
 			"company": settings.company_name or settings.shop_name,
 			"payment_url": pay_link and pay_link.get("url"),

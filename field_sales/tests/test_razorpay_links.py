@@ -362,8 +362,17 @@ class TestRazorpayLinks(IntegrationTestCase):
 
 	def test_confirmation_link_failure_does_not_raise(self):
 		self.fake.fail_create.append((400, "The amount is invalid"))
-		self.assertIsNone(link_for_confirmation(self.doc()))
+		doc = self.doc()
+		self.assertIsNone(link_for_confirmation(doc))
 		self.assertEqual(self.order_values().payment_status, "Unpaid")
+		# The rep must be able to see why the email had no link.
+		self.assertEqual(doc.flags.payment_link_error, "The amount is invalid")
+		comments = frappe.get_all(
+			"Comment",
+			filters={"reference_doctype": "Field Order", "reference_name": self.order.name, "comment_type": "Comment"},
+			pluck="content",
+		)
+		self.assertTrue(any("without a payment link" in c and "The amount is invalid" in c for c in comments))
 
 	# -- refusals ----------------------------------------------------------
 

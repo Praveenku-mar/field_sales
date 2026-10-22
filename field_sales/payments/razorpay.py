@@ -35,6 +35,7 @@ from frappe.utils import (
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
 from field_sales.sync.notify import users_with_roles
+from field_sales.utils.money import site_currency
 
 API_BASE = "https://api.razorpay.com/v1"
 REQUEST_TIMEOUT = 20  # seconds
@@ -130,6 +131,27 @@ def request(
 def get_webhook_url() -> str:
 	"""The URL to enter in the Razorpay Dashboard (the SPA loads settings without ``onload``)."""
 	frappe.only_for(SETTINGS_ROLES)
+	return webhook_url()
+
+
+# A bare host with an optional port, as a proxy puts it in X-Forwarded-Host.
+_FORWARDED_HOST = re.compile(r"[A-Za-z0-9.-]+(?::\d{1,5})?")
+
+
+def webhook_url() -> str:
+	"""
+	The webhook URL as the person viewing it reached the site.
+
+	Behind a tunnel (ngrok with ``--host-header``) the Host is the local site name, so the public
+	address only comes in X-Forwarded-Host / X-Forwarded-Proto. Without them: ``host_name``.
+	``host_name`` itself must stay local (PDF generation fetches CSS from it).
+	"""
+	request = getattr(frappe.local, "request", None)
+	headers = request.headers if request else {}
+	host = (headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
+	if host and _FORWARDED_HOST.fullmatch(host):
+		proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+		return f"{proto if proto in ('http', 'https') else 'https'}://{host}{WEBHOOK_PATH}"
 	return frappe.utils.get_url(WEBHOOK_PATH)
 
 
@@ -199,7 +221,7 @@ def _link_payload(doc, reference_id: str, settings, notify: bool = True) -> dict
 
 	payload = {
 		"amount": int(round(flt(doc.grand_total) * 100)),  # paise  # noqa: RUF046
-		"currency": frappe.db.get_default("currency") or "INR",
+		"currency": site_currency(),
 		"accept_partial": False,
 		"description": f"Field Order {doc.name}",
 		"reference_id": reference_id,
@@ -324,7 +346,8 @@ def link_for_confirmation(doc) -> dict | None:
 	Payment link for the order confirmation email: the stored one if it can still be paid, else a new one.
 
 	Razorpay is told not to notify the customer, so the email is the only place the link is sent.
-	Never raises: without a link the email still goes out (the failure is in Sync Log / Error Log).
+	Never raises: without a link the email still goes out. A failure is put on the order's timeline
+	and in ``doc.flags.payment_link_error`` so the rep knows to share a link another way.
 
 	:return: ``{"url", "id", "expires_on"}`` or None
 	"""
@@ -335,8 +358,16 @@ def link_for_confirmation(doc) -> dict | None:
 		return _link_result(doc)
 	try:
 		return _replace_link(doc, settings, notify=False)
-	except Exception:
+	except Exception as e:
 		frappe.log_error(title=f"Payment link for confirmation failed: {doc.name}")
+		reason = getattr(e, "message", None) or str(e) or e.__class__.__name__
+		doc.flags.payment_link_error = reason
+		doc.add_comment(
+			"Comment",
+			_(
+				"The order confirmation email went out without a payment link: Razorpay refused a link for {0} ({1}). Create one from the Payment card and share it."
+			).format(fmt_money(doc.grand_total, currency=site_currency()), escape_html(reason)),
+		)
 		return None
 
 
@@ -642,8 +673,8 @@ def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None
 		doc.add_comment(
 			"Info",
 			_("Razorpay payment received: {0} of {1} ({2}). Payment status: {3}.").format(
-				fmt_money(doc.amount_paid, currency="INR"),
-				fmt_money(doc.grand_total, currency="INR"),
+				fmt_money(doc.amount_paid, currency=site_currency()),
+				fmt_money(doc.grand_total, currency=site_currency()),
 				escape_html(doc.razorpay_payment_id or link_entity.get("id") or ""),
 				_(doc.payment_status),
 			),
@@ -670,7 +701,7 @@ def _notify_payment(doc) -> None:
 		return
 	subject = _("Payment received: {0} — {1} from {2}").format(
 		f"<b>{escape_html(doc.name)}</b>",
-		fmt_money(doc.amount_paid, currency="INR"),
+		fmt_money(doc.amount_paid, currency=site_currency()),
 		escape_html(doc.retailer_name or doc.retailer or ""),
 	)
 	enqueue_create_notification(

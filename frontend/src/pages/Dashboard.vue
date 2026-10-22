@@ -34,7 +34,7 @@
         <NumberCard
           label="Order Value"
           icon="lucide-indian-rupee"
-          :value="inr(cards.order_value, 0)"
+          :value="money(cards.order_value, 0)"
           :caption="periodLabel"
           class="col-span-2 lg:col-span-1"
         />
@@ -83,7 +83,7 @@
           <NumberCard
             label="Order Value Today"
             icon="lucide-indian-rupee"
-            :value="o.today ? inr(t.order_value, 0) : null"
+            :value="o.today ? money(t.order_value, 0) : null"
             :loading="!overview.data"
             :to="{ name: 'Orders', query: { preset: 'orders_today' } }"
           />
@@ -149,7 +149,7 @@
               x="label"
               y="orders"
               :series-config="{ orders: { label: 'Orders', color: COLORS.orders } }"
-              :tooltip-columns="[{ name: 'value', label: 'Order value', format: (v) => inr(v) }]"
+              :tooltip-columns="[{ name: 'value', label: 'Order value', format: (v) => money(v) }]"
             />
             <EmptyState v-else icon="lucide-chart-column" title="No orders" :description="`No orders were submitted ${periodLabel.toLowerCase()}.`" />
           </div>
@@ -163,7 +163,7 @@
               x="rep_name"
               y="value"
               horizontal
-              :series-config="{ value: { label: 'Order value', color: COLORS.value, format: (v) => inr(v, 0) } }"
+              :series-config="{ value: { label: 'Order value', color: COLORS.value, format: (v) => money(v, 0) } }"
               :tooltip-columns="[{ name: 'orders', label: 'Orders' }]"
             />
             <EmptyState v-else icon="lucide-users" title="No orders" description="Reps with submitted orders appear here." />
@@ -203,7 +203,7 @@
               x="date"
               y="value"
               :loading="!overview.data"
-              :series-config="{ value: { label: 'Order value', color: COLORS.value, format: (v) => inr(v, 0) } }"
+              :series-config="{ value: { label: 'Order value', color: COLORS.value, format: (v) => money(v, 0) } }"
             />
           </div>
         </SectionCard>
@@ -227,7 +227,7 @@
           >
             <template #cell="{ column, row, item }">
               <Badge v-if="column.key === 'sync_status'" :theme="STATUS_THEMES[orderStatus(row)] || 'gray'" :label="orderStatus(row)" />
-              <span v-else-if="column.key === 'grand_total'" class="tabular-nums">{{ inr(item) }}</span>
+              <span v-else-if="column.key === 'grand_total'" class="tabular-nums">{{ money(item) }}</span>
               <span v-else-if="column.key === 'modified'" class="text-ink-gray-5" :title="formatDateTime(item)">{{ fromNow(item) }}</span>
               <span v-else class="truncate">{{ item }}</span>
             </template>
@@ -315,7 +315,7 @@
                   <div class="truncate font-medium text-ink-gray-9">{{ d.retailer_name }}</div>
                   <div class="truncate text-xs text-ink-gray-5">{{ d.name }} · {{ formatDate(d.order_date) }}</div>
                 </div>
-                <span class="tabular-nums text-ink-gray-8">{{ inr(d.grand_total) }}</span>
+                <span class="tabular-nums text-ink-gray-8">{{ money(d.grand_total) }}</span>
               </RouterLink>
             </li>
           </ul>
@@ -344,7 +344,7 @@
                 </td>
                 <td class="px-4 py-2.5 text-right tabular-nums">{{ r.completed_visits }}</td>
                 <td class="px-4 py-2.5 text-right tabular-nums">{{ r.orders }}</td>
-                <td class="px-4 py-2.5 text-right tabular-nums">{{ inr(r.order_value, 0) }}</td>
+                <td class="px-4 py-2.5 text-right tabular-nums">{{ money(r.order_value, 0) }}</td>
                 <td class="px-4 py-2.5">
                   <Achievement :pct="r.achievement_pct" />
                 </td>
@@ -369,7 +369,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import Achievement from '@/components/Achievement.vue'
 import { useSessionStore } from '@/stores/session'
-import { formatDate, formatDateTime, formatTime, orderStatus } from '@/utils/format'
+import { formatCurrency, formatDate, formatDateTime, formatTime, orderStatus } from '@/utils/format'
 
 const PERIODS = [
   { label: 'Today', value: 'today' },
@@ -454,16 +454,9 @@ function failureRoute(f) {
   return f.type === 'Order' ? { name: 'Order', params: { name: f.name } } : { name: 'Retailer', params: { name: f.name } }
 }
 
-const inrFormats = {}
-function inr(value, digits = 2) {
-  if (value == null) return '—'
-  inrFormats[digits] ??= new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })
-  return inrFormats[digits].format(value)
+// Money in the site currency, like every other page (utils/format.js).
+function money(value, digits = 2) {
+  return value == null ? '—' : formatCurrency(value, undefined, digits)
 }
 
 function fromNow(value) {

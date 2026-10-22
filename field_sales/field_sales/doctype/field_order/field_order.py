@@ -12,6 +12,7 @@ from field_sales.payments.razorpay import cancel_link_for_cancelled_order
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import fetch_live_stock, get_location_stock, get_sell_locations, live_stock_enabled
 from field_sales.utils.guards import is_system_manager, keep_server_fields
+from field_sales.utils.money import site_currency
 
 # May set a line's rate other than the product's price.
 PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
@@ -83,7 +84,7 @@ class FieldOrder(Document):
 			frappe.throw(
 				_(
 					"This order has a Razorpay payment of {0}. Refund it in the Razorpay Dashboard first, then cancel the order."
-				).format(frappe.utils.fmt_money(self.amount_paid, currency="INR")),
+				).format(frappe.utils.fmt_money(self.amount_paid, currency=site_currency())),
 				title=_("Order is paid"),
 			)
 

@@ -1283,7 +1283,8 @@ function pollConfirmation() {
     const status = d.value.confirmation_status || ''
     if (!status.startsWith('Sending')) {
       resending.value = false
-      if (status.startsWith('Sent to')) toast.success(status)
+      if (status.endsWith('without payment link')) toast.warning(`${status}. Create a link from the Payment card and share it.`)
+      else if (status.startsWith('Sent to')) toast.success(status)
       else if (status.startsWith('Skipped')) toast.info(status)
       else toast.error(status || 'Email was not sent')
       return stopPolling()

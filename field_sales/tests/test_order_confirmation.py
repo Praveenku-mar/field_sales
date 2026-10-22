@@ -168,6 +168,20 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIn("https://rzp.io/i/plink_test", message)
 		self.assertIn("Pay Now", message)
 
+	def test_amounts_use_the_site_currency(self):
+		with patch.object(confirmation, "site_currency", return_value="USD"):
+			send_order_confirmation(self.order.name)
+		self.assertIn("$", self.queued()[0].message)
+
+	def test_status_says_when_the_payment_link_failed(self):
+		def refuse(doc):
+			doc.flags.payment_link_error = "amount exceeds maximum amount allowed."
+
+		with patch.object(confirmation, "link_for_confirmation", side_effect=refuse):
+			status = send_order_confirmation(self.order.name)
+		self.assertEqual(status, "Sent to buyer@example.com without payment link")
+		self.assertNotIn("Pay Now", self.queued()[0].message)
+
 	def test_no_payment_block_without_a_link(self):
 		send_order_confirmation(self.order.name)
 		self.assertNotIn("Pay Now", self.queued()[0].message)

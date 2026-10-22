@@ -319,7 +319,7 @@ function _share_on_whatsapp(frm) {
 		var retailer = r.message || {};
 		var text = __("Hello {0}, please pay {1} for order {2} using this link: {3}", [
 			retailer.retailer_name || d.retailer_name || d.retailer,
-			format_currency(d.grand_total, "INR"),
+			format_currency(d.grand_total, frappe.defaults.get_default("currency")),
 			d.store_order_name || d.name,
 			d.razorpay_payment_link_url,
 		]);

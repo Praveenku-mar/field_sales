@@ -1,6 +1,7 @@
 // Sidebar navigation. An item has `route` (an SPA page) or `href` (a desk page).
 // `count` names a key returned by frontend_api.get_sidebar_counts; `roles` hides the item
-// from everyone else (the router and the server check again).
+// from everyone else, `feature: 'commission'` hides it when commission is off (session.canSee;
+// the router and the server check again).
 export const MANAGERS = ['System Manager', 'Sales Manager']
 
 export const NAV_ITEMS = [
@@ -19,7 +20,7 @@ export const NAV_ITEMS = [
   // Everyone: a rep sees themselves and their team (Sales Rep permission_query_conditions).
   { label: 'Sales Reps', route: 'SalesReps', icon: 'lucide-user-round' },
   // Everyone: a rep sees their own commission; managers also see the team and statements.
-  { label: 'Commission', route: 'Commission', icon: 'lucide-wallet' },
+  { label: 'Commission', route: 'Commission', icon: 'lucide-wallet', feature: 'commission' },
   { label: 'Reports', route: 'Reports', icon: 'lucide-chart-column', roles: MANAGERS },
   { label: 'Sync Log', route: 'SyncLogs', icon: 'lucide-scroll-text', roles: MANAGERS },
   { label: 'Sync Failures', route: 'SyncFailures', icon: 'lucide-triangle-alert', roles: MANAGERS },
@@ -49,6 +50,7 @@ export const REPORT_LINKS = [
     route: { name: 'RepCommission' },
     icon: 'lucide-wallet',
     roles: MANAGERS,
+    feature: 'commission',
   },
 ]
 

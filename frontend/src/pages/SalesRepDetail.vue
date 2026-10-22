@@ -116,7 +116,7 @@
             placeholder="No manager"
           />
         </div>
-        <div class="space-y-1.5 sm:col-span-2">
+        <div v-if="session.commissionEnabled" class="space-y-1.5 sm:col-span-2">
           <div class="text-sm text-ink-gray-6">Commission Plan</div>
           <LinkField
             v-model="edit.commission_plan"
@@ -279,10 +279,14 @@ const details = computed(() => [
   },
   { label: 'Monthly Target', value: d.value.monthly_target ? formatCurrency(d.value.monthly_target, undefined, 0) : null },
   { label: 'Max Discount', value: d.value.max_discount_pct > 0 ? `${d.value.max_discount_pct}%` : 'No discount' },
-  {
-    label: 'Commission Plan',
-    value: d.value.commission_plan ? `${d.value.commission_plan}${d.value.commission_active ? '' : ' (commission off)'}` : 'No plan',
-  },
+  ...(session.commissionEnabled
+    ? [
+        {
+          label: 'Commission Plan',
+          value: d.value.commission_plan ? `${d.value.commission_plan}${d.value.commission_active ? '' : ' (commission off)'}` : 'No plan',
+        },
+      ]
+    : []),
 ])
 
 // ---------------------------------------------------------------- related lists

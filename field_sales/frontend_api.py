@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
+from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.payments.razorpay import PAYMENT_FIELDS, indian_phone
 from field_sales.permissions import hierarchy_filters
@@ -113,7 +114,7 @@ def get_session() -> dict:
 	"""
 	The signed-in user, their app roles, their Sales Rep and the connected store.
 
-	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "sales_rep", "store"}``
+	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "sales_rep", "store", "commission_enabled"}``
 	"""
 	_check_access()
 	user = frappe.session.user
@@ -133,6 +134,7 @@ def get_session() -> dict:
 			"Sales Rep", {"user": user}, ["name", "full_name", "territory", "reports_to"], as_dict=True
 		),
 		"store": _store_info(),
+		"commission_enabled": commission_enabled(),
 	}
 
 

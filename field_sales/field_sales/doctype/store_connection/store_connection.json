@@ -56,7 +56,9 @@
   "company_state",
   "company_gstin",
   "company_phone",
-  "company_email"
+  "company_email",
+  "commission_section",
+  "enable_commission"
  ],
  "fields": [
   {
@@ -354,12 +356,24 @@
    "fieldtype": "Data",
    "label": "Store Time Zone",
    "read_only": 1
+  },
+  {
+   "fieldname": "commission_section",
+   "fieldtype": "Section Break",
+   "label": "Commission"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_commission",
+   "fieldtype": "Check",
+   "label": "Pay Commission to Sales Reps",
+   "description": "Turn off if this company does not pay commission. New orders then create no commission entries, no monthly statements are made, and the Commission screens are hidden. Existing records are kept."
   }
  ],
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-21 12:00:00.000000",
+ "modified": "2026-10-22 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

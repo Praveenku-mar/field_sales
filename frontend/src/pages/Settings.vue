@@ -44,6 +44,7 @@
         <!-- v-show keeps unsaved Store Connection edits while another tab is open -->
         <StoreConnectionForm v-show="tab === 'store'" ref="storeForm" />
         <InvoiceSettings v-if="tab === 'invoice'" ref="invoiceForm" @saved="refreshStoreForm" />
+        <CommissionSettings v-if="tab === 'commission'" ref="commissionForm" @saved="refreshStoreForm" />
         <EmailAccountSettings v-if="tab === 'email'" />
       </template>
       <div v-else class="fs-card">
@@ -67,6 +68,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import StoreConnectionForm from '@/components/StoreConnectionForm.vue'
 import InvoiceSettings from '@/components/InvoiceSettings.vue'
+import CommissionSettings from '@/components/CommissionSettings.vue'
 import EmailAccountSettings from '@/components/EmailAccountSettings.vue'
 import RazorpaySettings from '@/components/RazorpaySettings.vue'
 import { useSessionStore } from '@/stores/session'
@@ -74,26 +76,29 @@ import { useSessionStore } from '@/stores/session'
 const session = useSessionStore()
 const storeForm = ref(null)
 const invoiceForm = ref(null)
+const commissionForm = ref(null)
 const razorpayForm = ref(null)
 
 const TABS = [
   { label: 'Store Connection', value: 'store' },
   { label: 'Invoice', value: 'invoice' },
+  { label: 'Commission', value: 'commission' },
   { label: 'Email Account', value: 'email' },
   { label: 'Razorpay', value: 'razorpay' },
 ]
 const NOT_ADMIN = {
   store: { icon: 'lucide-store', title: 'Store Connection', what: 'the store connection' },
   invoice: { icon: 'lucide-file-text', title: 'Invoice', what: 'the invoice settings' },
+  commission: { icon: 'lucide-wallet', title: 'Commission', what: 'the commission settings' },
   email: { icon: 'lucide-mail', title: 'Email Account', what: 'the email account' },
   razorpay: { icon: 'lucide-credit-card', title: 'Razorpay', what: 'the Razorpay settings', who: 'Sales Manager or System Manager' },
 }
 // The form whose Save / Discard the header shows (the Email tab saves in its own dialog).
-const FORMS = { store: storeForm, invoice: invoiceForm, razorpay: razorpayForm }
+const FORMS = { store: storeForm, invoice: invoiceForm, commission: commissionForm, razorpay: razorpayForm }
 const activeForm = computed(() => FORMS[tab.value]?.value || null)
 const canEdit = computed(() => (tab.value === 'razorpay' ? session.isManager : session.isAdmin))
 
-// Both forms edit the Store Connection document: after an Invoice save, the Store form
+// These forms all edit the Store Connection document: after an Invoice or Commission save, the Store form
 // reloads so its next save is not refused as out of date (unless it holds unsaved edits).
 function refreshStoreForm() {
   if (storeForm.value && !storeForm.value.isDirty) storeForm.value.discard()

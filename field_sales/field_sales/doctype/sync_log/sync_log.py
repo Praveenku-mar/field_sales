@@ -24,6 +24,7 @@ _SENSITIVE_KEYS: frozenset[str] = frozenset(
 		"consumer_secret",
 		"api_key",
 		"password",
+		"refresh_token",
 	}
 )
 
@@ -47,8 +48,9 @@ class SyncLog(Document):
 
 	def before_insert(self):
 		self._drop_single_reference()
-		self._truncate_payloads()
+		# Mask first: truncation can cut a secret's closing quote, and the mask then misses it.
 		self._mask_sensitive_keys()
+		self._truncate_payloads()
 
 	# ------------------------------------------------------------------
 	# Internal helpers

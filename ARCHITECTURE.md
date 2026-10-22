@@ -100,6 +100,7 @@ Store access goes through a platform-neutral connector layer; only `connectors/s
 - Deploy: TODO: verify (no deploy scripts in the repo).
 
 ## Gotchas
+- Notification templates (`notification/*/`: the `.html` and the JSON `message`, kept identical) escape user and store text with `| e` (retailer name, rep, sync error). `bench migrate` reloads a standard Notification only when its JSON `modified` is newer than the database copy: bump it after editing.
 - Store Connection is a Single; `frappe.db.get_single_value` returns `0001-01-01` for an unset Datetime — read via `frappe.get_single(...)` instead.
 - Commission is state-based: replayed or out-of-order webhooks are safe; entries on Approved/Paid statements are never edited — corrections become negative Adjustments (so Unpaid can go below zero).
 - Commission entries keep the rate they were created with; editing a plan doesn't change existing entries. Tiered Slab rates are provisional until the statement is built.

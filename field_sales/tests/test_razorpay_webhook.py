@@ -134,6 +134,28 @@ class TestRazorpayWebhook(IntegrationTestCase):
 				self.assertEqual(self.order_values().payment_status, expected)
 		self.notify.assert_not_called()
 
+	def test_cancel_of_a_replaced_link_does_not_touch_the_new_one(self):
+		# New Link: the old link's cancel webhook finds the order by the old id,
+		# then waits for the row lock while the new link is saved.
+		get_doc = frappe.get_doc
+
+		def replaced_while_waiting(*args, **kwargs):
+			frappe.db.set_value("Field Order", self.order.name, "razorpay_payment_link_id", "plink_2")
+			return get_doc(*args, **kwargs)
+
+		with patch.object(frappe, "get_doc", side_effect=replaced_while_waiting):
+			code, _result = self.post(self.body(event="payment_link.cancelled", status="cancelled"))
+		self.assertEqual(code, 200)
+		self.assertEqual(self.event().status, "Ignored")
+		self.assertEqual(self.order_values().payment_status, "Link Sent")
+
+	def test_payment_on_a_replaced_link_is_still_recorded(self):
+		frappe.db.set_value("Field Order", self.order.name, "razorpay_payment_link_id", "plink_2")
+		doc = frappe.get_doc("Field Order", self.order.name)
+		entity = self.body()["payload"]["payment_link"]["entity"]  # plink_1, paid
+		self.assertTrue(razorpay._apply_link_state(doc, entity))
+		self.assertEqual(self.paid_fields().payment_status, "Paid")
+
 	def test_unknown_link_is_ignored(self):
 		code, _result = self.post(self.body(link_id="plink_other"))
 		self.assertEqual(code, 200)
@@ -215,6 +237,11 @@ class TestRazorpayWebhook(IntegrationTestCase):
 		self.assertEqual(result["payment_status"], "Paid")
 		self.assertEqual(result["razorpay_payment_id"], "pay_new")
 		self.assertEqual(self.paid_fields().payment_status, "Paid")
+
+	def test_refresh_restores_a_live_link(self):
+		frappe.db.set_value("Field Order", self.order.name, "payment_status", "Link Cancelled")
+		self.fake.links["plink_1"]["status"] = "created"
+		self.assertEqual(refresh_payment_status(self.order.name)["payment_status"], "Link Sent")
 
 	def test_refresh_without_link_is_refused(self):
 		frappe.db.set_value("Field Order", self.order.name, "razorpay_payment_link_id", None)

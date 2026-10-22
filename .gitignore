@@ -57,3 +57,7 @@ jspm_packages/
 # Desktop app build output (yarn build / bench build)
 field_sales/public/frontend
 field_sales/www/fieldsales.html
+
+# Created by bench build: symlink to node_modules, and an empty root lockfile
+field_sales/public/node_modules
+/yarn.lock

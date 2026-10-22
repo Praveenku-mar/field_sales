@@ -84,17 +84,27 @@ function buildFilters(m) {
     failed: [['docstatus', '=', 1], ['sync_status', '=', 'Failed']],
   }
   if (m.location_id) filters.push(['location_id', '=', m.location_id])
+  // Payment state only exists on submitted orders.
+  if (m.payment_status) filters.push(['docstatus', '=', 1], ['payment_status', '=', m.payment_status])
   filters.push(...(byTab[m.tab] || [['docstatus', '!=', 2]]))
   return filters
 }
 
+const PAYMENT_STATUSES = ['Unpaid', 'Link Sent', 'Partially Paid', 'Paid', 'Link Expired', 'Link Cancelled']
+const paymentFilter = {
+  fieldname: 'payment_status',
+  label: 'Payment',
+  options: [{ label: 'All payments', value: '' }, ...PAYMENT_STATUSES.map((v) => ({ label: v, value: v }))],
+}
+
 // A location filter only helps when the shop sells from more than one.
 const sellLocations = useSellLocations()
-const filterFields = computed(() =>
-  sellLocations.multiple.value
+const filterFields = computed(() => [
+  ...(sellLocations.multiple.value
     ? [{ fieldname: 'location_id', label: 'Location', options: [{ label: 'All locations', value: '' }, ...sellLocations.options.value] }]
-    : [],
-)
+    : []),
+  paymentFilter,
+])
 
 const route = useRoute()
 const { model, list, count, presetLabel, pageSize } = useDocList({

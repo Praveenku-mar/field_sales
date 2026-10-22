@@ -114,6 +114,7 @@ def push_order(field_order: str):
 	doc.db_set(
 		{
 			"external_draft_id": result.get("draft_id"),
+			"store_draft_name": result.get("draft_name"),
 			"external_order_id": result.get("order_id"),
 			"store_order_name": result.get("order_name"),
 			"platform": platform,
@@ -138,8 +139,89 @@ def push_order(field_order: str):
 	if result.get("order_id"):
 		enqueue_create_entries(field_order)
 		enqueue_order_confirmation(field_order)
+		if doc.payment_status == "Paid":  # paid on Razorpay before the push finished
+			enqueue_mark_store_paid(field_order)
 	frappe.db.commit()
 	_notify(doc)
+
+
+def enqueue_mark_store_paid(field_order: str):
+	"""Queue ``mark_store_order_paid`` once the current transaction commits."""
+	frappe.enqueue(
+		"field_sales.sync.orders.mark_store_order_paid",
+		queue="short",
+		field_order=field_order,
+		job_id=f"field_sales:mark_store_paid:{field_order}",
+		deduplicate=True,
+		enqueue_after_commit=True,
+	)
+
+
+def mark_store_order_paid(field_order: str):
+	"""
+	Mark a confirmed store order paid after the Field Order was paid on Razorpay.
+
+	Only orders pushed as confirmed orders (no draft); done once (``store_marked_paid_on``).
+	A store error is in Sync Log (written by the connector) and retried by ``retry_store_payments()``.
+	"""
+	doc = frappe.get_doc("Field Order", field_order, for_update=True)
+	if (
+		doc.docstatus != 1
+		or doc.payment_status != "Paid"
+		or not doc.external_order_id
+		or doc.external_draft_id
+		or doc.store_marked_paid_on
+	):
+		return
+	try:
+		conn = get_connector()
+		result = conn.mark_order_paid(doc)
+	except frappe.ValidationError:
+		return  # Store Connection disabled; the hourly retry picks it up once it is back
+	except ConnectorError as e:
+		if e.code in ("NOT_FOUND", "CANNOT_MARK_PAID"):  # API errors are already logged by the connector
+			log_sync(
+				platform=conn.settings.platform,
+				operation="Mark Order Paid",
+				reference_doctype="Field Order",
+				reference_name=field_order,
+				status="Failed",
+				error_code=e.code,
+				error_message=e.message,
+				external_id=doc.external_order_id,
+			)
+		return
+
+	doc.db_set("store_marked_paid_on", now_datetime(), update_modified=False)
+	doc.add_comment(
+		"Info",
+		_("Store order {0} marked as paid.").format(doc.store_order_name or doc.external_order_id)
+		if not result.get("already_paid")
+		else _("Store order {0} was already paid.").format(doc.store_order_name or doc.external_order_id),
+	)
+
+
+def retry_store_payments():
+	"""
+	Hourly: queue ``mark_store_order_paid`` again for confirmed orders paid on Razorpay in the
+	last 7 days that the store does not show as paid yet (50 a run).
+	"""
+	names = frappe.get_all(
+		"Field Order",
+		filters={
+			"docstatus": 1,
+			"payment_status": "Paid",
+			"external_order_id": ("is", "set"),
+			"external_draft_id": ("is", "not set"),
+			"store_marked_paid_on": ("is", "not set"),
+			"paid_on": (">=", add_to_date(now_datetime(), days=-7)),
+		},
+		order_by="paid_on asc",
+		limit=50,
+		pluck="name",
+	)
+	for name in names:
+		enqueue_mark_store_paid(name)
 
 
 def retry_failed_orders():

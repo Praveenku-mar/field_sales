@@ -97,3 +97,22 @@ class TestRazorpaySettings(IntegrationTestCase):
 		data = get("Razorpay Settings", "Razorpay Settings")
 		self.assertNotIn("s3cret", str(data.get("key_secret")))
 		self.assertEqual(get_webhook_url(), frappe.utils.get_url(WEBHOOK_PATH))
+
+	def test_webhook_url_follows_a_tunnel(self):
+		# ngrok --host-header keeps Host local; the public address comes in X-Forwarded-*.
+		tunnel = MagicMock(
+			headers={"X-Forwarded-Host": "abc.ngrok-free.dev", "X-Forwarded-Proto": "https"}
+		)
+		with patch.object(frappe.local, "request", tunnel, create=True):
+			self.assertEqual(razorpay.webhook_url(), f"https://abc.ngrok-free.dev{WEBHOOK_PATH}")
+
+	def test_webhook_url_ignores_a_malformed_forwarded_host(self):
+		bad = MagicMock(headers={"X-Forwarded-Host": "evil.com/path?x=<script>"}, host="site.local")
+		with patch.object(frappe.local, "request", bad, create=True):
+			url = razorpay.webhook_url()
+			self.assertEqual(url, frappe.utils.get_url(WEBHOOK_PATH))
+		self.assertNotIn("evil.com", url)
+
+	def test_webhook_url_without_a_request_uses_host_name(self):
+		with patch.object(frappe.local, "request", None, create=True):
+			self.assertEqual(razorpay.webhook_url(), frappe.utils.get_url(WEBHOOK_PATH))

@@ -8,9 +8,9 @@ import frappe
 from frappe import _
 from frappe.auth import MAX_PASSWORD_SIZE
 from frappe.email.doctype.email_account.email_account import EmailAccount
+from frappe.query_builder.functions import Count, Sum
 from frappe.rate_limiter import rate_limit
 from frappe.sessions import clear_sessions
-from frappe.query_builder.functions import Count, Sum
 from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
 from frappe.utils.password import check_password
 
@@ -41,6 +41,7 @@ def test_connection() -> dict:
 		# Set up the order fields (Field Order No, Sales Rep) now; a failure is in Sync Log and
 		# is retried before the next order.
 		result["order_fields_ready"] = conn.ensure_order_metafields()
+		result.update(_sync_shop_settings(result))
 	status = "Success" if result.get("ok") else f"Failed: {result.get('message')}"
 	values = {"last_test_status": status[:140], "last_tested_on": now_datetime()}
 	if result.get("ok") and result.get("shop_name"):
@@ -48,6 +49,17 @@ def test_connection() -> dict:
 		values["shop_name"] = result["shop_name"][:140]
 	frappe.db.set_single_value("Store Connection", values)
 	return result
+
+
+def _sync_shop_settings(result: dict) -> dict:
+	"""Match the site to the store's currency and time zone; a failure never fails the test."""
+	from field_sales.sync.shop_settings import sync_shop_settings
+
+	try:
+		return sync_shop_settings({"currency": result.get("currency"), "timezone": result.get("timezone")})
+	except Exception:
+		frappe.log_error(title=_("Store currency and time zone sync failed"))
+		return {"changes": [], "mismatch": []}
 
 
 @frappe.whitelist()
@@ -337,7 +349,7 @@ def _check_visit_date(doc) -> None:
 
 @frappe.whitelist(methods=["POST"])
 def check_in(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
-	
+
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)
@@ -523,7 +535,7 @@ def refresh_stock(field_order: str) -> list[dict]:
 
 @frappe.whitelist(methods=["POST"])
 def retry_sync(field_order: str) -> dict:
-	
+
 	doc = frappe.get_doc("Field Order", field_order)
 	doc.check_permission("read")
 	if not _is_rep_or_their_manager(doc.sales_rep):

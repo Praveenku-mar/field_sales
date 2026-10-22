@@ -37,6 +37,7 @@
   "default_location_name",
   "order_mode",
   "product_sync_frequency",
+  "match_shop_settings",
   "locations_section",
   "locations",
   "status_section",
@@ -44,6 +45,8 @@
   "col_break_status",
   "last_tested_on",
   "shop_name",
+  "shop_currency",
+  "shop_timezone",
   "metafields_ready_on",
   "invoice_section",
   "send_order_confirmation",
@@ -53,7 +56,9 @@
   "company_state",
   "company_gstin",
   "company_phone",
-  "company_email"
+  "company_email",
+  "commission_section",
+  "enable_commission"
  ],
  "fields": [
   {
@@ -330,12 +335,45 @@
    "fieldtype": "Data",
    "label": "Email",
    "options": "Email"
+  },
+  {
+   "default": "1",
+   "description": "Use the store's currency and time zone for this site (System Settings), checked on save and daily. Shopify prices are used as they are, so the site must use the store's currency.",
+   "fieldname": "match_shop_settings",
+   "fieldtype": "Check",
+   "label": "Match Store Currency and Timezone"
+  },
+  {
+   "description": "The store's currency, from the last check.",
+   "fieldname": "shop_currency",
+   "fieldtype": "Data",
+   "label": "Store Currency",
+   "read_only": 1
+  },
+  {
+   "description": "The store's time zone, from the last check.",
+   "fieldname": "shop_timezone",
+   "fieldtype": "Data",
+   "label": "Store Time Zone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "commission_section",
+   "fieldtype": "Section Break",
+   "label": "Commission"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_commission",
+   "fieldtype": "Check",
+   "label": "Pay Commission to Sales Reps",
+   "description": "Turn off if this company does not pay commission. New orders then create no commission entries, no monthly statements are made, and the Commission screens are hidden. Existing records are kept."
   }
  ],
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-15 17:51:12.246533",
+ "modified": "2026-10-22 13:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

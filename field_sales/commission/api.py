@@ -15,6 +15,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_months, cint, flt, get_first_day, get_last_day, getdate, nowdate
 
+from field_sales.commission import require_commission_enabled
 from field_sales.commission.statements import (
 	MANAGER_ROLES,
 	_open_entries,
@@ -278,6 +279,7 @@ def save_commission_plan(doc: dict | str) -> dict:
 	:param doc: Plan fields (``plan_name``, ``rule_type``, ...) with ``rates`` and ``slabs`` as lists of rows.
 	:return: The saved plan, as ``get_commission_plans`` returns it.
 	"""
+	require_commission_enabled()
 	_require_manager()
 	if isinstance(doc, str):
 		doc = json.loads(doc or "{}")
@@ -322,6 +324,7 @@ def assign_commission_plan(sales_rep: str, commission_plan: str | None = None, c
 	:param commission_active: 1 to earn commission (needs a plan).
 	:return: ``{"sales_rep", "commission_plan", "commission_active"}``
 	"""
+	require_commission_enabled()
 	_require_manager()
 	rep = frappe.get_doc("Sales Rep", sales_rep)
 	rep.check_permission("write")
@@ -355,6 +358,7 @@ def create_adjustment(
 	:param beneficiary_type: "Rep" or "Manager Override".
 	:return: ``{"name", "sales_rep", "amount", "posting_date"}``
 	"""
+	require_commission_enabled()
 	_require_manager()
 	if beneficiary_type not in ("Rep", "Manager Override"):
 		frappe.throw(_("Beneficiary Type must be Rep or Manager Override."))
@@ -398,6 +402,7 @@ def generate_statements(month: str, sales_rep: str | None = None) -> dict:
 	:param sales_rep: One rep; empty for every commission-active rep the user may see.
 	:return: ``{"created": [statement names], "skipped": [{"rep", "reason"}, ...]}``
 	"""
+	require_commission_enabled()
 	_require_manager()
 	if not MONTH_PATTERN.match(month or ""):
 		frappe.throw(_("Month must look like YYYY-MM."))

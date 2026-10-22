@@ -163,8 +163,19 @@ class BaseConnector:
 		"""
 		Verify credentials and reachability.
 
-		:return: ``{"ok": bool, "shop_name": str, "shop_domain": str, "scopes": [str, ...], "message": str}``;
-			``scopes`` are the permissions granted to the app (empty if the platform has none or on failure).
+		:return: ``{"ok": bool, "shop_name": str, "shop_domain": str, "scopes": [str, ...], "currency": str,
+			"timezone": str, "message": str}``; ``scopes`` are the permissions granted to the app (empty if
+			the platform has none or on failure); ``currency`` (ISO code) and ``timezone`` (IANA name) are
+			the store's, empty strings on failure.
+		"""
+		raise NotImplementedError
+
+	def get_shop_settings(self) -> dict:
+		"""
+		The store's own settings the site should follow.
+
+		:return: ``{"currency": str, "timezone": str}`` (ISO currency code, IANA time zone name).
+		:raises ConnectorError: on a platform error.
 		"""
 		raise NotImplementedError
 
@@ -225,6 +236,24 @@ class BaseConnector:
 		:return: ``{"draft_id": str | None, "order_id": str | None, "order_name": str | None}``
 		"""
 		raise NotImplementedError
+
+	def mark_order_paid(self, field_order: Document) -> dict:
+		"""
+		Mark the store order (``field_order.external_order_id``) paid in full, for a payment
+		taken outside the store (Razorpay). An order the store already shows as paid is left alone.
+
+		:return: ``{"financial_status": str, "already_paid": bool}``
+		:raises ConnectorError: the store cannot mark it paid (e.g. cancelled there).
+		"""
+		raise NotImplementedError
+
+	def get_draft_names(self, draft_ids: list) -> dict:
+		"""
+		The store's own numbers for drafts (e.g. ``#D5``).
+
+		:return: ``{draft_id: name}`` for drafts that still exist.
+		"""
+		return {}
 
 	def get_completed_drafts(self, draft_ids: list) -> dict:
 		"""

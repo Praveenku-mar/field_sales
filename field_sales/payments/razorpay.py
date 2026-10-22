@@ -10,6 +10,9 @@ with ``get_password()`` on the server and never returned to the client.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import re
 import time
 from datetime import datetime
@@ -18,9 +21,21 @@ from zoneinfo import ZoneInfo
 import frappe
 import requests
 from frappe import _
-from frappe.utils import cint, escape_html, flt, get_datetime, get_system_timezone, now_datetime
+from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
+from frappe.query_builder.functions import Coalesce
+from frappe.utils import (
+	cint,
+	escape_html,
+	flt,
+	fmt_money,
+	get_datetime,
+	get_system_timezone,
+	now_datetime,
+)
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
+from field_sales.sync.notify import users_with_roles
+from field_sales.utils.money import site_currency
 
 API_BASE = "https://api.razorpay.com/v1"
 REQUEST_TIMEOUT = 20  # seconds
@@ -31,6 +46,28 @@ MIN_EXPIRY_SECONDS = 16 * 60  # Razorpay wants expire_by at least 15 minutes ahe
 MAX_REFERENCE_TRIES = 10
 # Razorpay link states that can still be paid, so must be cancelled before a new link.
 OPEN_LINK_STATES = ("created", "partially_paid")
+WEBHOOK_EVENTS = (
+	"payment_link.paid",
+	"payment_link.partially_paid",
+	"payment_link.expired",
+	"payment_link.cancelled",
+)
+INVALID_LOG_INTERVAL_SECONDS = 60
+PAYMENT_NOTIFY_ROLES = ("Sales Manager",)
+PAYMENT_EVENT = "field_order_payment_updated"  # realtime; open forms reload on it
+PAYMENT_FIELDS = (
+	"payment_status",
+	"amount_paid",
+	"razorpay_payment_id",
+	"paid_on",
+	"razorpay_payment_link_id",
+	"razorpay_payment_link_url",
+	"payment_link_created_on",
+	"payment_link_expires_on",
+	"store_marked_paid_on",
+)
+RECONCILE_DAYS = 7
+RECONCILE_BATCH = 50
 
 
 class RazorpayError(Exception):
@@ -94,6 +131,27 @@ def request(
 def get_webhook_url() -> str:
 	"""The URL to enter in the Razorpay Dashboard (the SPA loads settings without ``onload``)."""
 	frappe.only_for(SETTINGS_ROLES)
+	return webhook_url()
+
+
+# A bare host with an optional port, as a proxy puts it in X-Forwarded-Host.
+_FORWARDED_HOST = re.compile(r"[A-Za-z0-9.-]+(?::\d{1,5})?")
+
+
+def webhook_url() -> str:
+	"""
+	The webhook URL as the person viewing it reached the site.
+
+	Behind a tunnel (ngrok with ``--host-header``) the Host is the local site name, so the public
+	address only comes in X-Forwarded-Host / X-Forwarded-Proto. Without them: ``host_name``.
+	``host_name`` itself must stay local (PDF generation fetches CSS from it).
+	"""
+	request = getattr(frappe.local, "request", None)
+	headers = request.headers if request else {}
+	host = (headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
+	if host and _FORWARDED_HOST.fullmatch(host):
+		proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+		return f"{proto if proto in ('http', 'https') else 'https'}://{host}{WEBHOOK_PATH}"
 	return frappe.utils.get_url(WEBHOOK_PATH)
 
 
@@ -163,7 +221,7 @@ def _link_payload(doc, reference_id: str, settings, notify: bool = True) -> dict
 
 	payload = {
 		"amount": int(round(flt(doc.grand_total) * 100)),  # paise  # noqa: RUF046
-		"currency": frappe.db.get_default("currency") or "INR",
+		"currency": site_currency(),
 		"accept_partial": False,
 		"description": f"Field Order {doc.name}",
 		"reference_id": reference_id,
@@ -245,12 +303,14 @@ def _from_unix(ts) -> datetime | None:
 
 
 @frappe.whitelist(methods=["POST"])
-def create_link_for_order(field_order: str) -> dict:
+def create_link_for_order(field_order: str, replace: bool = False) -> dict:
 	"""
 	Create (or return the still-valid) Razorpay payment link for a submitted Field Order.
 
 	The order row is locked for the whole call, so a double click cannot create two links.
 	An older link that can still be paid is cancelled first.
+
+	:param replace: Make a new link even when the current one can still be paid (it is cancelled).
 
 	:return: ``{"url", "id", "expires_on"}``
 	"""
@@ -267,7 +327,12 @@ def create_link_for_order(field_order: str) -> dict:
 	if doc.payment_status == "Paid":
 		frappe.throw(_("This order is already paid"))
 
-	if doc.payment_status == "Link Sent" and doc.razorpay_payment_link_url and not _expired(doc):
+	if (
+		not replace
+		and doc.payment_status == "Link Sent"
+		and doc.razorpay_payment_link_url
+		and not _expired(doc)
+	):
 		return _link_result(doc)
 
 	try:
@@ -281,7 +346,8 @@ def link_for_confirmation(doc) -> dict | None:
 	Payment link for the order confirmation email: the stored one if it can still be paid, else a new one.
 
 	Razorpay is told not to notify the customer, so the email is the only place the link is sent.
-	Never raises: without a link the email still goes out (the failure is in Sync Log / Error Log).
+	Never raises: without a link the email still goes out. A failure is put on the order's timeline
+	and in ``doc.flags.payment_link_error`` so the rep knows to share a link another way.
 
 	:return: ``{"url", "id", "expires_on"}`` or None
 	"""
@@ -292,8 +358,16 @@ def link_for_confirmation(doc) -> dict | None:
 		return _link_result(doc)
 	try:
 		return _replace_link(doc, settings, notify=False)
-	except Exception:
+	except Exception as e:
 		frappe.log_error(title=f"Payment link for confirmation failed: {doc.name}")
+		reason = getattr(e, "message", None) or str(e) or e.__class__.__name__
+		doc.flags.payment_link_error = reason
+		doc.add_comment(
+			"Comment",
+			_(
+				"The order confirmation email went out without a payment link: Razorpay refused a link for {0} ({1}). Create one from the Payment card and share it."
+			).format(fmt_money(doc.grand_total, currency=site_currency()), escape_html(reason)),
+		)
 		return None
 
 
@@ -322,6 +396,7 @@ def _replace_link(doc, settings, notify: bool = True) -> dict:
 			"razorpay_payment_link_id": link.get("id"),
 			"razorpay_payment_link_url": link.get("short_url"),
 			"payment_link_expires_on": _from_unix(link.get("expire_by")),
+			"payment_link_created_on": now_datetime(),
 			"payment_status": "Link Sent",
 		},
 		update_modified=False,
@@ -395,3 +470,312 @@ def _reference_number(name: str, reference_id: str) -> int:
 	"""``NAME`` -> 1, ``NAME-3`` -> 3; anything else -> 1."""
 	suffix = reference_id[len(name) + 1 :] if reference_id.startswith(f"{name}-") else ""
 	return cint(suffix) if suffix.isdigit() else 1
+
+
+# ----------------------------------------------------------------------
+# Payment state: webhook and refresh
+# ----------------------------------------------------------------------
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def webhook():
+	"""
+	Razorpay payment link events -> the Field Order's payment fields.
+
+	400 when payments are off, 401 when the signature is missing or wrong (both change nothing);
+	200 for duplicates, other events and links no order has; 500 on an unexpected error so
+	Razorpay retries. Every delivery past the signature check gets a Razorpay Webhook Event row.
+	"""
+	# Read before anything touches the form data; the signature covers these exact bytes.
+	raw_body = frappe.request.get_data()
+	headers = frappe.request.headers
+
+	settings = get_settings()
+	if not settings.enabled:
+		_log_rejected(400, "DISABLED", "Payment webhook received while Razorpay is disabled")
+		return _respond(400, "payments are not enabled")
+	if not _valid_signature(raw_body, headers.get("X-Razorpay-Signature"), settings):
+		_log_rejected(401, "INVALID_SIGNATURE", "Payment webhook signature is missing or wrong")
+		return _respond(401, "invalid signature")
+
+	event_id = (headers.get("X-Razorpay-Event-Id") or "").strip() or None
+	if _already_handled(event_id):
+		return _respond(200, "duplicate")
+
+	try:
+		body = json.loads(raw_body)
+	except ValueError:
+		body = None
+	body = body if isinstance(body, dict) else {}
+	payload = body.get("payload") or {}
+	link = (payload.get("payment_link") or {}).get("entity") or {}
+	payment = (payload.get("payment") or {}).get("entity")
+	record = {
+		"event_id": event_id,
+		"event": body.get("event"),
+		"payment_link_id": link.get("id"),
+		"payload": raw_body.decode("utf-8", "replace"),
+	}
+
+	field_order = None
+	if record["event"] in WEBHOOK_EVENTS and link.get("id"):
+		field_order = frappe.db.get_value(
+			"Field Order", {"razorpay_payment_link_id": link["id"], "docstatus": ("!=", 0)}, "name"
+		)
+	if not field_order:
+		_record_event(record, "Ignored")
+		return _respond(200, "ignored")
+	record["reference_order"] = field_order
+
+	user = frappe.session.user
+	try:
+		frappe.set_user("Administrator")
+		doc = frappe.get_doc("Field Order", field_order, for_update=True)
+		# Another delivery of this event may have finished while this one waited for the lock.
+		if _already_handled(event_id):
+			return _respond(200, "duplicate")
+		_apply_link_state(doc, link, payment)
+		_record_event(record, "Processed")
+		log_sync(
+			platform=PLATFORM,
+			operation="Payment Webhook",
+			reference_doctype="Field Order",
+			reference_name=field_order,
+			external_id=link["id"],
+		)
+	except Exception as e:
+		frappe.db.rollback()
+		frappe.log_error(title=f"Razorpay webhook failed: {event_id or link['id']}")
+		_record_event(record, "Error", error=str(e)[:1000])
+		frappe.db.commit()  # keep the Error row; the 500 asks Razorpay to retry
+		return _respond(500, "error")
+	finally:
+		frappe.set_user(user)
+	return {"status": "ok"}
+
+
+@frappe.whitelist(methods=["POST"])
+def refresh_payment_status(field_order: str) -> dict:
+	"""
+	Read the order's payment link from Razorpay and apply its state: the fallback for a missed webhook.
+
+	:return: the order's payment fields
+	"""
+	doc = frappe.get_doc("Field Order", field_order, for_update=True)
+	doc.check_permission("read")
+	if not doc.razorpay_payment_link_id:
+		frappe.throw(_("This order has no payment link"))
+	settings = get_settings()
+	if not settings.enabled:
+		frappe.throw(_("Razorpay payment links are not enabled"))
+	try:
+		link = fetch_payment_link(doc.razorpay_payment_link_id, settings=settings)
+	except RazorpayError as e:
+		frappe.throw(_("Razorpay: {0}").format(e.message), title=_("Payment status not refreshed"))
+	_apply_link_state(doc, link, _latest_payment(link))
+	return _payment_fields(doc)
+
+
+def cancel_link_for_cancelled_order(doc) -> None:
+	"""
+	Field Order on_cancel: cancel its open link on Razorpay and mark it Link Cancelled.
+
+	A failed call never blocks the cancel; it is in Sync Log and on the timeline, the order
+	stays Link Sent so a payment on it is still picked up (webhook / reconcile_open_links()).
+	"""
+	try:
+		cancel_payment_link(doc.razorpay_payment_link_id, field_order=doc.name)
+	except RazorpayError as e:
+		doc.add_comment(
+			"Info",
+			_("Payment link {0} could not be cancelled on Razorpay: {1}. Cancel it in the Razorpay Dashboard.").format(
+				escape_html(doc.razorpay_payment_link_id or ""), escape_html(e.message or "")
+			),
+		)
+		return
+	doc.db_set("payment_status", "Link Cancelled", update_modified=False)
+	doc.add_comment("Info", _("Payment link cancelled on Razorpay with the order."))
+
+
+def reconcile_open_links() -> None:
+	"""
+	Hourly: re-read Link Sent links made in the last 7 days (oldest first, 50 a run) and apply their
+	state, for webhooks that never arrived. One order's failure does not stop the others.
+	"""
+	if not cint(frappe.db.get_single_value("Razorpay Settings", "enabled")):
+		return
+	cutoff = frappe.utils.add_days(now_datetime(), -RECONCILE_DAYS)
+	fo = frappe.qb.DocType("Field Order")
+	link_created = Coalesce(fo.payment_link_created_on, fo.creation)
+	names = (
+		frappe.qb.from_(fo)
+		.select(fo.name)
+		.where(fo.docstatus != 0)
+		.where(fo.payment_status == "Link Sent")
+		.where(fo.razorpay_payment_link_id.isnotnull())
+		.where(link_created >= cutoff)
+		.orderby(link_created)
+		.limit(RECONCILE_BATCH)
+	).run(pluck=True)
+
+	settings = get_settings()
+	for name in names:
+		try:
+			doc = frappe.get_doc("Field Order", name, for_update=True)
+			if doc.payment_status == "Link Sent" and doc.razorpay_payment_link_id:
+				link = fetch_payment_link(doc.razorpay_payment_link_id, settings=settings)
+				_apply_link_state(doc, link, _latest_payment(link))
+			frappe.db.commit()
+		except Exception:
+			frappe.db.rollback()
+			frappe.log_error(title=f"Razorpay reconcile failed: {name}")
+
+
+def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None) -> bool:
+	"""
+	Copy a payment link's state onto its Field Order (webhook and refresh_payment_status()).
+
+	Safe to repeat; an order that is already Paid is never changed.
+
+	:return: whether anything changed
+	"""
+	if doc.payment_status == "Paid":
+		return False
+
+	link_status = link_entity.get("status")
+	if link_status in ("paid", "partially_paid"):
+		paid_paise = cint(link_entity.get("amount_paid"))
+		if paid_paise <= 0:
+			return False
+		payment_entity = payment_entity or {}
+		full = paid_paise >= round(flt(doc.grand_total) * 100)
+		values = {
+			"payment_status": "Paid" if full else "Partially Paid",
+			"amount_paid": paid_paise / 100,
+			"paid_on": _from_unix(payment_entity.get("created_at")) or doc.paid_on or now_datetime(),
+		}
+		if payment_entity.get("id"):
+			values["razorpay_payment_id"] = payment_entity["id"]
+	elif link_status == "expired":
+		values = {"payment_status": "Link Expired"}
+	elif link_status == "cancelled":
+		values = {"payment_status": "Link Cancelled"}
+	else:
+		return False
+
+	changed = {k: v for k, v in values.items() if doc.get(k) != v}
+	if not changed:
+		return False
+	money_in = "amount_paid" in changed
+	doc.db_set(changed, update_modified=False)
+
+	if money_in:
+		doc.add_comment(
+			"Info",
+			_("Razorpay payment received: {0} of {1} ({2}). Payment status: {3}.").format(
+				fmt_money(doc.amount_paid, currency=site_currency()),
+				fmt_money(doc.grand_total, currency=site_currency()),
+				escape_html(doc.razorpay_payment_id or link_entity.get("id") or ""),
+				_(doc.payment_status),
+			),
+		)
+		_notify_payment(doc)
+		if doc.payment_status == "Paid":
+			# Imported here: sync.orders imports sync.confirmation, which imports this module.
+			from field_sales.sync.orders import enqueue_mark_store_paid
+
+			enqueue_mark_store_paid(doc.name)
+	elif "payment_status" in changed:
+		doc.add_comment("Info", _("Razorpay payment link status: {0}.").format(_(doc.payment_status)))
+	frappe.publish_realtime(
+		PAYMENT_EVENT, _payment_fields(doc), doctype="Field Order", docname=doc.name, after_commit=True
+	)
+	return True
+
+
+def _notify_payment(doc) -> None:
+	"""Bell notification and a realtime event for the order's rep and every Sales Manager."""
+	users = {doc.sales_rep, *users_with_roles(PAYMENT_NOTIFY_ROLES)} - {None, "", "Guest", "Administrator"}
+	users = [u for u in sorted(users) if frappe.db.get_value("User", u, "enabled")]
+	if not users:
+		return
+	subject = _("Payment received: {0} — {1} from {2}").format(
+		f"<b>{escape_html(doc.name)}</b>",
+		fmt_money(doc.amount_paid, currency=site_currency()),
+		escape_html(doc.retailer_name or doc.retailer or ""),
+	)
+	enqueue_create_notification(
+		users,
+		{
+			"type": "Alert",
+			"document_type": "Field Order",
+			"document_name": doc.name,
+			"from_user": "Administrator",
+			"subject": subject,
+			"email_content": subject,
+		},
+	)
+	message = _payment_fields(doc)
+	for user in users:
+		frappe.publish_realtime(PAYMENT_EVENT, message, user=user, after_commit=True)
+
+
+def _payment_fields(doc) -> dict:
+	return {"name": doc.name, **{f: doc.get(f) for f in PAYMENT_FIELDS}}
+
+
+def _latest_payment(link: dict) -> dict | None:
+	"""The newest captured payment of a fetched link, shaped like a webhook payment entity."""
+	captured = [p for p in link.get("payments") or [] if p.get("status") == "captured"]
+	if not captured:
+		return None
+	latest = max(captured, key=lambda p: cint(p.get("created_at")))
+	return {"id": latest.get("payment_id"), "created_at": latest.get("created_at")}
+
+
+def _valid_signature(raw_body: bytes, signature: str | None, settings) -> bool:
+	"""``X-Razorpay-Signature`` is the hex HMAC-SHA256 of the raw body with the webhook secret."""
+	secret = settings.get_password("webhook_secret", raise_exception=False)
+	if not secret or not signature:
+		return False
+	expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+	return hmac.compare_digest(expected.encode(), signature.strip().encode())
+
+
+def _already_handled(event_id: str | None) -> bool:
+	if not event_id:
+		return False
+	status = frappe.db.get_value("Razorpay Webhook Event", {"event_id": event_id}, "status")
+	return status in ("Processed", "Ignored")
+
+
+def _record_event(values: dict, status: str, error: str | None = None) -> None:
+	"""Insert the event row, or update it when Razorpay retries an event that failed."""
+	values = {**values, "status": status, "error": error}
+	name = values.get("event_id") and frappe.db.get_value(
+		"Razorpay Webhook Event", {"event_id": values["event_id"]}
+	)
+	if name:
+		frappe.db.set_value("Razorpay Webhook Event", name, values)
+	else:
+		frappe.get_doc({"doctype": "Razorpay Webhook Event", **values}).insert(ignore_permissions=True)
+
+
+def _respond(status: int, message: str) -> dict:
+	"""Set the HTTP status and return the JSON body."""
+	frappe.local.response.http_status_code = status
+	return {"status": message}
+
+
+def _log_rejected(http_status: int, code: str, message: str) -> None:
+	"""Log a rejected delivery, at most once a minute so a flood cannot fill the log."""
+	key = frappe.cache.make_key("field_sales:razorpay_webhook_rejected_logged")
+	if frappe.cache.set(key, 1, nx=True, ex=INVALID_LOG_INTERVAL_SECONDS):
+		log_sync_durable(
+			platform=PLATFORM,
+			operation="Payment Webhook",
+			status="Failed",
+			http_status=http_status,
+			error_code=code,
+			error_message=message,
+		)

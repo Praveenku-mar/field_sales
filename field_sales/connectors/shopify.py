@@ -138,6 +138,19 @@ mutation($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
 }
 """
 
+ORDER_PAYMENT_STATE = """
+query($id: ID!) { order(id: $id) { id name displayFinancialStatus canMarkAsPaid } }
+"""
+
+ORDER_MARK_AS_PAID = """
+mutation($input: OrderMarkAsPaidInput!) {
+  orderMarkAsPaid(input: $input) { order { id displayFinancialStatus } userErrors { field message } }
+}
+"""
+
+# Financial statuses that already include the payment; marking again would fail.
+PAID_FINANCIAL_STATUSES = ("PAID", "PARTIALLY_REFUNDED", "REFUNDED")
+
 ORDER_SEARCH = """
 query($q: String!) { orders(first: 1, query: $q) { nodes { id name } } }
 """
@@ -201,7 +214,12 @@ query($id: ID!) {
 }
 """ % (ORDER_LINE_LIMIT, ORDER_REFUND_LIMIT, ORDER_LINE_LIMIT)
 
-SHOP_CURRENCY_QUERY = "{ shop { currencyCode } }"
+SHOP_INFO_QUERY = "{ shop { name myshopifyDomain currencyCode ianaTimezone } }"
+# Test Connection also reads the app's granted scopes.
+TEST_CONNECTION_QUERY = (
+	"{ shop { name myshopifyDomain currencyCode ianaTimezone } "
+	"currentAppInstallation { accessScopes { handle } } }"
+)
 
 # Shopify needs a code for an order-level fixed discount; this one is shown on the order.
 ORDER_DISCOUNT_CODE = "FIELD-ORDER"
@@ -246,20 +264,29 @@ class ShopifyConnector(BaseConnector):
 	def test_connection(self) -> dict:
 		"""Query the shop and the app's granted scopes; never raises for platform errors, returns ``ok=False`` instead."""
 		try:
-			data = self._graphql(
-				"{ shop { name myshopifyDomain } currentAppInstallation { accessScopes { handle } } }",
-				operation="Test Connection",
-			)
+			data = self._graphql(TEST_CONNECTION_QUERY, operation="Test Connection")
 		except ConnectorError as e:
-			return {"ok": False, "shop_name": "", "shop_domain": self.shop_domain, "scopes": [], "message": e.message}
+			return {
+				"ok": False,
+				"shop_name": "",
+				"shop_domain": self.shop_domain,
+				"scopes": [],
+				"currency": "",
+				"timezone": "",
+				"message": e.message,
+			}
 
 		shop = data.get("shop") or {}
 		scopes = ((data.get("currentAppInstallation") or {}).get("accessScopes")) or []
+		if shop.get("currencyCode"):
+			self._currency = shop["currencyCode"]
 		return {
 			"ok": True,
 			"shop_name": shop.get("name") or "",
 			"shop_domain": shop.get("myshopifyDomain") or self.shop_domain,
 			"scopes": [s["handle"] for s in scopes if s.get("handle")],
+			"currency": shop.get("currencyCode") or "",
+			"timezone": shop.get("ianaTimezone") or "",
 			"message": _("Connected to {0} ({1})").format(shop.get("name"), shop.get("myshopifyDomain")),
 		}
 
@@ -576,6 +603,17 @@ class ShopifyConnector(BaseConnector):
 					completed[from_gid(node["id"])] = from_gid(node["order"]["id"])
 		return completed
 
+	def get_draft_names(self, draft_ids: list) -> dict:
+		"""``{draft_id: name}`` (e.g. ``#D5``) for drafts that still exist, in batches of ``PAGE_SIZE``."""
+		names = {}
+		for start in range(0, len(draft_ids), PAGE_SIZE):
+			batch = draft_ids[start : start + PAGE_SIZE]
+			data = self._graphql(DRAFT_ORDERS_QUERY, {"ids": [to_gid("DraftOrder", i) for i in batch]}, operation="Other")
+			for node in data.get("nodes") or []:
+				if node and node.get("name"):
+					names[from_gid(node["id"])] = node["name"]
+		return names
+
 	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
 		if order_id:
 			return f"https://{self.shop_domain}/admin/orders/{from_gid(order_id)}"
@@ -645,6 +683,29 @@ class ShopifyConnector(BaseConnector):
 				return nodes[0]
 		return None
 
+	def mark_order_paid(self, field_order) -> dict:
+		"""``orderMarkAsPaid`` for a confirmed order; checks ``canMarkAsPaid`` first so a repeat is a no-op."""
+		gid = to_gid("Order", field_order.external_order_id)
+		data = self._graphql(ORDER_PAYMENT_STATE, {"id": gid}, operation="Mark Order Paid", ref=field_order)
+		order = data.get("order")
+		if not order:
+			raise ConnectorError(
+				_("Shopify order {0} was not found").format(field_order.external_order_id), code="NOT_FOUND"
+			)
+		status = order.get("displayFinancialStatus") or ""
+		if status in PAID_FINANCIAL_STATUSES:
+			return {"financial_status": status.lower(), "already_paid": True}
+		if not order.get("canMarkAsPaid"):
+			raise ConnectorError(
+				_("Shopify cannot mark order {0} as paid (payment status {1})").format(
+					order.get("name") or field_order.external_order_id, status.lower() or "unknown"
+				),
+				code="CANNOT_MARK_PAID",
+			)
+		data = self._graphql(ORDER_MARK_AS_PAID, {"input": {"id": gid}}, operation="Mark Order Paid", ref=field_order)
+		paid = (data.get("orderMarkAsPaid") or {}).get("order") or {}
+		return {"financial_status": (paid.get("displayFinancialStatus") or "").lower(), "already_paid": False}
+
 	def _get_draft(self, draft_id: str, field_order) -> dict | None:
 		"""The linked draft order, or ``None`` if it no longer exists on Shopify."""
 		data = self._graphql(
@@ -694,11 +755,34 @@ class ShopifyConnector(BaseConnector):
 		)
 		return data["draftOrderCreate"]["draftOrder"]
 
+	def get_shop_settings(self) -> dict:
+		"""The shop's currency and IANA time zone (raises ``ConnectorError``)."""
+		data = self._graphql(SHOP_INFO_QUERY, operation="Test Connection")
+		shop = data.get("shop") or {}
+		if shop.get("currencyCode"):
+			self._currency = shop["currencyCode"]
+		return {"currency": shop.get("currencyCode") or "", "timezone": shop.get("ianaTimezone") or ""}
+
 	def _get_currency(self, field_order) -> str:
-		"""The shop's currency; order prices are sent in it."""
+		"""
+		The shop's currency; order prices are sent in it without conversion.
+
+		Raises ``ConnectorError(code="CURRENCY_MISMATCH")`` when the site's default currency is
+		different, so an order is never sent with prices in the wrong currency.
+		"""
 		if self._currency is None:
-			data = self._graphql(SHOP_CURRENCY_QUERY, operation="Create Order", ref=field_order)
+			data = self._graphql(SHOP_INFO_QUERY, operation="Create Order", ref=field_order)
 			self._currency = (data.get("shop") or {}).get("currencyCode")
+		site_currency = frappe.db.get_default("currency")
+		if self._currency and site_currency and self._currency != site_currency:
+			raise ConnectorError(
+				_(
+					"The store's currency is {0} but this site uses {1}. Order prices would be sent in the "
+					"wrong currency. Turn on Match Store Currency and Timezone on Store Connection (or set "
+					"the site currency to {0}), then retry."
+				).format(self._currency, site_currency),
+				code="CURRENCY_MISMATCH",
+			)
 		return self._currency
 
 	# ------------------------------------------------------------------
@@ -1049,6 +1133,7 @@ def _order_result(draft: dict) -> dict:
 	order = draft.get("order") or {}
 	return {
 		"draft_id": from_gid(draft.get("id")),
+		"draft_name": draft.get("name"),
 		"order_id": from_gid(order.get("id")),
 		"order_name": order.get("name"),
 	}

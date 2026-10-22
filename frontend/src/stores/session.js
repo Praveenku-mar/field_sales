@@ -40,9 +40,23 @@ export const useSessionStore = defineStore('session', () => {
   const store = computed(() => data.value.store || {})
   const isAdmin = computed(() => !!data.value.is_admin)
   const isManager = computed(() => !!data.value.is_manager)
+  // Settings → Commission; off for companies that pay no commission (missing = on).
+  const commissionEnabled = computed(() => data.value.commission_enabled !== false)
 
   function hasRole(...wanted) {
     return wanted.some((role) => roles.value.includes(role))
+  }
+
+  /** Nav items, report links and routes: `roles` limits who sees them, `feature: 'commission'` hides them when it is off. */
+  function canSee(item) {
+    if (item.roles && !hasRole(...item.roles)) return false
+    if (item.feature === 'commission' && !commissionEnabled.value) return false
+    return true
+  }
+
+  /** Re-read the session after a setting it carries changes (e.g. commission turned on or off). */
+  function reload() {
+    return resource.reload()
   }
 
   /**
@@ -103,7 +117,10 @@ export const useSessionStore = defineStore('session', () => {
     store,
     isAdmin,
     isManager,
+    commissionEnabled,
     hasRole,
+    canSee,
+    reload,
     load,
     retry,
     logout,

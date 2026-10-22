@@ -85,14 +85,14 @@ const routes = [
     path: '/commission',
     name: 'Commission',
     component: () => import('@/pages/Commission.vue'),
-    meta: { title: 'Commission' },
+    meta: { title: 'Commission', feature: 'commission' },
   },
   {
     path: '/commission/statements/:name',
     name: 'CommissionStatement',
     component: () => import('@/pages/CommissionStatement.vue'),
     props: true,
-    meta: { parent: 'Commission' },
+    meta: { parent: 'Commission', feature: 'commission' },
   },
   {
     path: '/sync-log',
@@ -141,7 +141,7 @@ const routes = [
     path: '/reports/rep-commission',
     name: 'RepCommission',
     component: () => import('@/pages/RepCommission.vue'),
-    meta: { title: 'Rep Commission', parent: 'Reports', roles: MANAGERS },
+    meta: { title: 'Rep Commission', parent: 'Reports', roles: MANAGERS, feature: 'commission' },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -165,6 +165,10 @@ router.beforeEach(async (to) => {
 
   if (to.meta.roles && !session.hasRole(...to.meta.roles)) {
     toast.error('You do not have access to ' + (to.meta.title || 'this page'))
+    return { name: 'Dashboard' }
+  }
+  if (!session.canSee(to.meta)) {
+    toast.info('Commission is turned off for this company')
     return { name: 'Dashboard' }
   }
 })

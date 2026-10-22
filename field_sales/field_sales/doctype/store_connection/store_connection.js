@@ -25,9 +25,11 @@ function test_connection(frm) {
 			freeze_message: __("Testing connection..."),
 		})
 		.then(({ message: result }) => {
-			frappe.msgprint({
+			const changes = result.changes || [];
+			const mismatch = result.mismatch || [];
+			const dialog = frappe.msgprint({
 				title: result.ok ? __("Connection Successful") : __("Connection Failed"),
-				indicator: result.ok ? "green" : "red",
+				indicator: !result.ok ? "red" : mismatch.length ? "orange" : "green",
 				message: result.ok
 					? __("Shop: {0} ({1})", [
 							frappe.utils.escape_html(result.shop_name),
@@ -36,11 +38,24 @@ function test_connection(frm) {
 					  "<br>" +
 					  __("Scopes: {0}", [
 							frappe.utils.escape_html((result.scopes || []).join(", ") || __("none reported")),
-					  ])
+					  ]) +
+					  list_html(__("Matched to the store"), changes) +
+					  list_html(__("Different from the store"), mismatch)
 					: frappe.utils.escape_html(result.message),
 			});
-			frm.reload_doc();
+			if (changes.length) {
+				// Currency and time zone are in the boot data, so the page needs fresh boot.
+				dialog.custom_onhide = () => frappe.ui.toolbar.clear_cache();
+			} else {
+				frm.reload_doc();
+			}
 		});
+}
+
+function list_html(title, items) {
+	if (!items.length) return "";
+	const rows = items.map((item) => `<li>${frappe.utils.escape_html(item)}</li>`).join("");
+	return `<br><br><b>${title}</b><ul>${rows}</ul>`;
 }
 
 function fetch_locations(frm) {

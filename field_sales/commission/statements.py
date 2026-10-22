@@ -18,6 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, get_first_day, getdate, nowdate
 
+from field_sales.commission import commission_enabled, require_commission_enabled
 from field_sales.commission.engine import penalty_multiplier, slab_rate
 
 MANAGER_ROLES = {"Sales Manager", "System Manager"}
@@ -32,6 +33,8 @@ def generate_monthly_statements():
 	earned up to the period end), so none is stranded. A rep who already has a statement for the
 	month is skipped.
 	"""
+	if not commission_enabled():
+		return
 	period_end = add_days(get_first_day(getdate(nowdate())), -1)
 	period_start = get_first_day(period_end)
 
@@ -66,6 +69,7 @@ def regenerate_statement(name: str) -> dict:
 	:param name: Commission Statement name.
 	:return: ``{"name", "net_payable", "entries"}``
 	"""
+	require_commission_enabled()
 	_require_manager()
 	doc = frappe.get_doc("Commission Statement", name, for_update=True)
 	if doc.docstatus != 0 or doc.status != "Draft":

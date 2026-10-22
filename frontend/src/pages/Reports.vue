@@ -34,5 +34,5 @@ import { REPORT_LINKS } from '@/utils/nav'
 
 const session = useSessionStore()
 
-const reports = computed(() => REPORT_LINKS.filter((r) => !r.roles || session.hasRole(...r.roles)))
+const reports = computed(() => REPORT_LINKS.filter((r) => session.canSee(r)))
 </script>

@@ -67,7 +67,7 @@ defineEmits(['open-search'])
 const session = useSessionStore()
 const route = useRoute()
 
-const navItems = computed(() => NAV_ITEMS.filter((item) => !item.roles || session.hasRole(...item.roles)))
+const navItems = computed(() => NAV_ITEMS.filter((item) => session.canSee(item)))
 
 const counts = createResource({
   url: 'field_sales.frontend_api.get_sidebar_counts',

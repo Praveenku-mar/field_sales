@@ -8,9 +8,11 @@ from frappe.utils import flt
 
 from field_sales.connectors import ConnectorError
 from field_sales.field_sales.doctype.visit.visit import update_order_taken
+from field_sales.payments.razorpay import cancel_link_for_cancelled_order
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import fetch_live_stock, get_location_stock, get_sell_locations, live_stock_enabled
 from field_sales.utils.guards import is_system_manager, keep_server_fields
+from field_sales.utils.money import site_currency
 
 # May set a line's rate other than the product's price.
 PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
@@ -18,6 +20,7 @@ PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
 SYNC_FIELDS = (
 	"platform",
 	"external_draft_id",
+	"store_draft_name",
 	"external_order_id",
 	"sync_status",
 	"sync_attempts",
@@ -32,8 +35,10 @@ PAYMENT_FIELDS = (
 	"razorpay_payment_link_id",
 	"razorpay_payment_link_url",
 	"razorpay_payment_id",
+	"payment_link_created_on",
 	"payment_link_expires_on",
 	"paid_on",
+	"store_marked_paid_on",
 )
 
 
@@ -74,9 +79,20 @@ class FieldOrder(Document):
 		self.db_set("sync_status", "Pending")
 		enqueue_push_order(self.name)
 
+	def before_cancel(self):
+		if self.payment_status in ("Paid", "Partially Paid"):
+			frappe.throw(
+				_(
+					"This order has a Razorpay payment of {0}. Refund it in the Razorpay Dashboard first, then cancel the order."
+				).format(frappe.utils.fmt_money(self.amount_paid, currency=site_currency())),
+				title=_("Order is paid"),
+			)
+
 	def on_cancel(self):
 		self.db_set("sync_status", "Draft")
 		update_order_taken(self.visit)
+		if self.payment_status == "Link Sent":
+			cancel_link_for_cancelled_order(self)
 
 	def on_trash(self):
 		update_order_taken(self.visit, exclude=self.name)

@@ -28,6 +28,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_first_day, get_last_day, nowdate
 
+from field_sales.commission import commission_enabled
 from field_sales.connectors import get_connector
 from field_sales.field_sales.doctype.commission_entry.commission_entry import (
 	LOCKED_STATEMENT_STATUSES,
@@ -63,7 +64,10 @@ def enqueue_create_entries(field_order: str):
 	Queue ``create_entries`` once the current transaction commits.
 
 	Deduplicated per order, so the push and the draft linker cannot queue it twice at once.
+	Nothing is queued while commission is turned off.
 	"""
+	if not commission_enabled():
+		return
 	frappe.enqueue(
 		"field_sales.commission.engine.create_entries",
 		field_order=field_order,
@@ -90,6 +94,8 @@ def reconcile_order(external_order_id: str) -> dict:
 	:param external_order_id: Plain platform order id.
 	:return: ``{"note": ...}`` if ignored, else counts of what changed.
 	"""
+	if not commission_enabled():
+		return {"note": "Ignored: commission is turned off"}
 	external_order_id = str(external_order_id or "")
 	name = frappe.db.get_value("Field Order", {"external_order_id": external_order_id, "docstatus": 1}, "name")
 	if not name:

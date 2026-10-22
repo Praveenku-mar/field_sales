@@ -534,6 +534,11 @@ def webhook():
 		# Another delivery of this event may have finished while this one waited for the lock.
 		if _already_handled(event_id):
 			return _respond(200, "duplicate")
+		if _stale_link(doc, link):
+			# The order moved to a new link while this event waited for the lock
+			# (New Link cancels the old one, and Razorpay reports that cancel).
+			_record_event(record, "Ignored")
+			return _respond(200, "ignored: not the order's current link")
 		_apply_link_state(doc, link, payment)
 		_record_event(record, "Processed")
 		log_sync(
@@ -639,7 +644,7 @@ def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None
 
 	:return: whether anything changed
 	"""
-	if doc.payment_status == "Paid":
+	if doc.payment_status == "Paid" or _stale_link(doc, link_entity):
 		return False
 
 	link_status = link_entity.get("status")
@@ -660,6 +665,9 @@ def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None
 		values = {"payment_status": "Link Expired"}
 	elif link_status == "cancelled":
 		values = {"payment_status": "Link Cancelled"}
+	elif link_status == "created":
+		# Still payable on Razorpay: repairs an order wrongly shown as cancelled or expired.
+		values = {"payment_status": "Link Sent"}
 	else:
 		return False
 
@@ -691,6 +699,21 @@ def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None
 		PAYMENT_EVENT, _payment_fields(doc), doctype="Field Order", docname=doc.name, after_commit=True
 	)
 	return True
+
+
+def _stale_link(doc, link_entity: dict) -> bool:
+	"""
+	Whether this is news about an old link that no longer matters: its expiry or
+	cancel must not mark the order's current link. Money paid on an old link is
+	still recorded, so paid states are never stale.
+	"""
+	link_id = link_entity.get("id")
+	return bool(
+		link_id
+		and doc.razorpay_payment_link_id
+		and link_id != doc.razorpay_payment_link_id
+		and link_entity.get("status") not in ("paid", "partially_paid")
+	)
 
 
 def _notify_payment(doc) -> None:

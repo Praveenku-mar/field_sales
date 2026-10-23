@@ -206,6 +206,9 @@ def retry_store_payments():
 	Hourly: queue ``mark_store_order_paid`` again for confirmed orders paid on Razorpay in the
 	last 7 days that the store does not show as paid yet (50 a run).
 	"""
+	if not frappe.db.get_single_value("Store Connection", "enabled"):
+		return  # e.g. uninstalled; each job would only find the connection disabled
+
 	names = frappe.get_all(
 		"Field Order",
 		filters={

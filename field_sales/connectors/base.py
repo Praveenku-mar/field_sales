@@ -159,6 +159,16 @@ class BaseConnector:
 	def __init__(self, settings: Document):
 		self.settings = settings
 
+	@staticmethod
+	def normalize_store_url(url: str | None) -> str:
+		"""
+		Turn what was entered as Store URL into the form this platform stores.
+
+		Called by Store Connection's ``validate()`` through the ``CONNECTORS`` registry.
+		Raises ``frappe.ValidationError`` for a URL the platform cannot use.
+		"""
+		return (url or "").strip()
+
 	def test_connection(self) -> dict:
 		"""
 		Verify credentials and reachability.

@@ -39,6 +39,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { Button, Checkbox, Dialog, LoadingIndicator, createDocumentResource, toast } from 'frappe-ui'
+import { isEmbedded } from '@/shopify/embedded'
+import { createMerchantStoreDoc } from '@/shopify/merchantSettings'
 import EmptyState from '@/components/EmptyState.vue'
 import { useSessionStore } from '@/stores/session'
 
@@ -46,7 +48,8 @@ const emit = defineEmits(['saved'])
 const session = useSessionStore()
 
 // Store Connection is a Single; its name is the doctype itself.
-const doc = createDocumentResource({ doctype: 'Store Connection', name: 'Store Connection' })
+// Inside the Shopify admin: the merchant endpoints (managers may not edit Store Connection directly).
+const doc = isEmbedded() ? createMerchantStoreDoc() : createDocumentResource({ doctype: 'Store Connection', name: 'Store Connection' })
 const d = computed(() => doc.doc || {})
 const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.error || ''))
 

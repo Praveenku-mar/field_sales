@@ -32,8 +32,22 @@
     </div>
 
     <div class="fs-card">
+      <!-- Inside the Shopify admin the install owns the connection: no platform, URL or credentials -->
+      <section v-if="embedded" class="p-8">
+        <h3 class="text-base font-medium text-ink-gray-9">Connected shop</h3>
+        <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
+          <TextInput :model-value="d.shop_name ? `${d.shop_name} (${d.store_url})` : d.store_url" label="Shop" disabled />
+          <TextInput :model-value="formatDateTime(d.installed_on)" label="Installed On" disabled />
+          <TextInput
+            class="md:col-span-2"
+            :model-value="(d.shopify_scopes || '').split(',').join(', ')"
+            label="Granted Access"
+            disabled
+          />
+        </div>
+      </section>
       <!-- Connection -->
-      <section class="p-8">
+      <section v-if="!embedded" class="p-8">
         <h3 class="text-base font-medium text-ink-gray-9">Connection</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <Select v-model="d.platform" :options="PLATFORMS" label="Platform" required placeholder="Select platform" />
@@ -53,7 +67,7 @@
       </section>
 
       <!-- Credentials -->
-      <section class="border-t border-desk-border p-4">
+      <section v-if="!embedded" class="border-t border-desk-border p-4">
         <div class="flex items-center justify-between gap-2">
           <h3 class="text-base font-medium text-ink-gray-9">Credentials</h3>
           <span class="inline-flex items-center gap-1.5 text-xs text-ink-gray-5">
@@ -211,7 +225,7 @@
       </section>
 
       <!-- Status -->
-      <section class="border-t border-desk-border p-4">
+      <section v-if="!embedded" class="border-t border-desk-border p-4">
         <h3 class="text-base font-medium text-ink-gray-9">Status</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <TextInput :model-value="d.shop_name" label="Shop Name" disabled />
@@ -265,10 +279,16 @@ import {
 } from 'frappe-ui'
 import EmptyState from '@/components/EmptyState.vue'
 import { callMethod } from '@/utils/api'
+import { isEmbedded } from '@/shopify/embedded'
+import { createMerchantStoreDoc, merchantLocationsUrl } from '@/shopify/merchantSettings'
 import { daysAgo, formatDate, formatDateTime, formatTime } from '@/utils/format'
 
-// Store Connection is a Single; its name is the doctype itself.
-const doc = createDocumentResource({ doctype: 'Store Connection', name: 'Store Connection' })
+const embedded = isEmbedded()
+// Store Connection is a Single; its name is the doctype itself. Inside the Shopify admin the
+// merchant endpoints are used instead (only locations, defaults and similar can change there).
+const doc = embedded
+  ? createMerchantStoreDoc()
+  : createDocumentResource({ doctype: 'Store Connection', name: 'Store Connection' })
 const d = computed(() => doc.doc || {})
 const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.error || ''))
 
@@ -313,7 +333,7 @@ const apiVersions = computed(() => {
 // Location dialog. Fetched only by the Fetch Locations button — never on page
 // load (the store call is slow) — so before that the select shows just the
 // stored location. Fetch errors surface as toasts from the button.
-const locations = createResource({ url: 'field_sales.api.get_locations' })
+const locations = createResource({ url: embedded ? merchantLocationsUrl : 'field_sales.api.get_locations', method: embedded ? 'GET' : 'POST' })
 
 const locationOptions = computed(() => {
   const options = (locations.data || []).map((l) => ({ label: l.name, value: l.id }))

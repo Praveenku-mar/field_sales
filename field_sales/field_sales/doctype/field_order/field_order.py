@@ -12,6 +12,7 @@ from field_sales.payments.razorpay import cancel_link_for_cancelled_order
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import fetch_live_stock, get_location_stock, get_sell_locations, live_stock_enabled
 from field_sales.utils.guards import is_system_manager, keep_server_fields
+from field_sales.utils.limits import ORDERS_PER_MONTH, check_limit
 from field_sales.utils.money import site_currency
 
 # May set a line's rate other than the product's price.
@@ -61,6 +62,7 @@ class FieldOrder(Document):
 		self._validate_discount()
 
 	def before_submit(self):
+		check_limit(ORDERS_PER_MONTH)
 		self._apply_live_stock()
 		self._block_on_stock_warning()
 

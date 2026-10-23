@@ -118,6 +118,15 @@ def download_visit_template() -> None:
 	make_xlsx(visits, "Visits", wb=wb, column_widths=[28, 28, 14, 16, 40])
 	make_xlsx(lists, "Lists", wb=wb, column_widths=[28, 24, 16, 32, 18, 16])
 	wb.close()
+	# The template lists customers and reps (personal data): record who downloaded it.
+	from frappe.core.doctype.access_log.access_log import make_access_log
+
+	make_access_log(
+		doctype="Retailer",
+		method="field_sales.visit_import.download_visit_template",
+		file_type="xlsx",
+		columns="Sales Rep email, Sales Rep name, Customer ID, Customer name, City",
+	)
 	provide_binary_file("visit_import_template", "xlsx", output.getvalue())
 
 

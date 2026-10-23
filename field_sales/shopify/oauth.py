@@ -221,6 +221,14 @@ def save_installation(shop: str, body: dict) -> list[str]:
 		job_id="field_sales_shopify_register_webhooks",
 		deduplicate=True,
 	)
+	# A fresh install has no default location: pick one so products start syncing.
+	frappe.enqueue(
+		"field_sales.shopify.merchant_settings.setup_new_store",
+		queue="short",
+		enqueue_after_commit=True,
+		job_id="field_sales_shopify_setup_new_store",
+		deduplicate=True,
+	)
 	return config.missing_scopes(body.get("scope"))
 
 

@@ -333,6 +333,17 @@ class ShopifyConnector(BaseConnector):
 			"message": _("Connected to {0} ({1})").format(shop.get("name"), shop.get("myshopifyDomain")),
 		}
 
+	def get_shop_id(self) -> str:
+		"""The shop's GID (``gid://shopify/Shop/<id>``), e.g. for the Partner API; cached a day in Redis."""
+		key = frappe.cache.make_key(f"field_sales:shopify_shop_id:{self.shop_domain}")
+		cached = frappe.cache.get(key)
+		if cached:
+			return cached.decode() if isinstance(cached, bytes) else cached
+		shop_id = (self._graphql("{ shop { id } }", operation="Other").get("shop") or {}).get("id") or ""
+		if shop_id:
+			frappe.cache.set(key, shop_id, ex=24 * 60 * 60)
+		return shop_id
+
 	def ensure_webhook(self, topic: str, uri: str) -> str:
 		"""
 		Subscribe ``uri`` to ``topic`` (a ``WebhookSubscriptionTopic`` such as ``APP_UNINSTALLED``)

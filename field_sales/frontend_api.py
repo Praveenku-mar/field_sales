@@ -10,9 +10,10 @@ from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
-from field_sales.payments.razorpay import PAYMENT_FIELDS, indian_phone
+from field_sales.payments.razorpay import PAYMENT_FIELDS
 from field_sales.permissions import hierarchy_filters
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS
+from field_sales.utils.phone import whatsapp_digits
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
 
 SEARCH_LIMIT = 6
@@ -344,7 +345,10 @@ def get_rep_month_stats(sales_rep: str | None = None) -> dict:
 	:return: ``{rep: {"completed_visits", "orders", "order_value", "achievement_pct", ...}}``
 	"""
 	_check_access()
-	from field_sales.field_sales.report.rep_performance.rep_performance import get_rep_stats, get_reps_in_scope
+	from field_sales.field_sales.report.rep_performance.rep_performance import (
+		get_rep_stats,
+		get_reps_in_scope,
+	)
 
 	today = nowdate()
 	reps = get_reps_in_scope({"sales_rep": sales_rep} if sales_rep else {})
@@ -457,7 +461,10 @@ def _team_this_month(today: str) -> list[dict]:
 	if not ({"System Manager", "Sales Manager"} & set(frappe.get_roles())):
 		return []
 
-	from field_sales.field_sales.report.rep_performance.rep_performance import get_rep_stats, get_reps_in_scope
+	from field_sales.field_sales.report.rep_performance.rep_performance import (
+		get_rep_stats,
+		get_reps_in_scope,
+	)
 
 	rows = get_rep_stats(get_first_day(today), today, get_reps_in_scope({}))
 	keys = ("sales_rep", "sales_rep_name", "territory", "completed_visits", "orders", "order_value", "achievement_pct", "conversion_pct")
@@ -468,12 +475,17 @@ def _team_this_month(today: str) -> list[dict]:
 def get_order_payment_info(field_order: str) -> dict:
 	"""
 	Order Detail's Payment card: the order's payment fields, whether Razorpay is enabled,
-	whether the user may create links, and the retailer's WhatsApp number (``91XXXXXXXXXX``).
+	whether the user may create links, and the retailer's WhatsApp number (digits with the
+	country prefix, e.g. ``919876543210``, for the retailer's country; ``None`` if not a mobile).
 	"""
+	from field_sales.field_sales.doctype.retailer.retailer import country_code_of
+
 	_check_access()
 	doc = frappe.get_doc("Field Order", field_order)
 	doc.check_permission("read")
-	phone = indian_phone(frappe.db.get_value("Retailer", doc.retailer, "phone"))
+	retailer = frappe.db.get_value("Retailer", doc.retailer, ["phone", "country"], as_dict=True) or {}
+	# Retailers without a country predate the field and are Indian.
+	whatsapp = whatsapp_digits(retailer.get("phone"), country_code_of(retailer.get("country")) or "IN")
 	return {
 		"name": doc.name,
 		**{f: doc.get(f) for f in PAYMENT_FIELDS},
@@ -483,7 +495,7 @@ def get_order_payment_info(field_order: str) -> dict:
 		"retailer_name": doc.retailer_name,
 		"razorpay_enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
 		"can_create_link": bool(doc.has_permission("write")),
-		"whatsapp_number": phone[1:] if phone else None,
+		"whatsapp_number": whatsapp,
 	}
 
 

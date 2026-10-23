@@ -10,10 +10,18 @@
           :disabled="!d.name"
           @click="editOpen = true"
         />
-        <Button v-if="d.status === 'Planned' && isOwnVisit && isVisitDay" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
+        <!-- Inside Shopify admin there is no location: check in / out happens in the standalone app -->
+        <Button
+          v-if="embedded && (d.status === 'In Progress' || (d.status === 'Planned' && isVisitDay))"
+          label="Open in Field Sales"
+          icon-left="lucide-external-link"
+          variant="solid"
+          @click="openStandalone(currentPath())"
+        />
+        <Button v-if="!embedded && d.status === 'Planned' && isOwnVisit && isVisitDay" label="Check In" icon-left="lucide-log-in" variant="solid" :loading="busy" @click="checkInOut('check_in')" />
         <template v-if="d.status === 'In Progress'">
           <Button label="New Order" icon-left="lucide-shopping-cart" @click="newOrderOpen = true" />
-          <Button label="Check Out" icon-left="lucide-log-out" variant="solid" :loading="busy" @click="startCheckOut" />
+          <Button v-if="!embedded" label="Check Out" icon-left="lucide-log-out" variant="solid" :loading="busy" @click="startCheckOut" />
         </template>
       </template>
     </PageHeader>
@@ -108,8 +116,12 @@ import NewOrderDialog from '@/components/NewOrderDialog.vue'
 import { useSessionStore } from '@/stores/session'
 import { callMethod, getPosition } from '@/utils/api'
 import { formatCurrency, formatDate, formatTime, plural, today } from '@/utils/format'
+import { isEmbedded, openStandalone } from '@/shopify/embedded'
 
 const session = useSessionStore()
+const embedded = isEmbedded()
+// This page's path without Shopify's query (shop, host, id_token): opens the standalone app.
+const currentPath = () => window.location.pathname
 // Only the assigned rep checks in (the server enforces it too). A Sales Rep is named
 // after its user, so the rep's name is the user's email.
 const isOwnVisit = computed(() => !!d.value.sales_rep && d.value.sales_rep === session.user)

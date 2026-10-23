@@ -12,6 +12,7 @@ field_sales.patches.v1_0.backfill_store_draft_names
 field_sales.patches.v1_0.enable_match_shop_settings
 field_sales.patches.v1_0.enable_commission_by_default
 field_sales.patches.v1_0.set_shopify_auth_mode
+field_sales.patches.v1_0.retailer_country_india
 
 [post_fixture_sync]
 # Patches added in this section will be executed after fixtures and customizations

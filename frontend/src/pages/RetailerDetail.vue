@@ -135,13 +135,15 @@ const details = computed(() => [
   { label: 'Email', value: d.value.email, href: d.value.email && `mailto:${d.value.email}` },
   { label: 'Type', value: d.value.retailer_type },
   { label: 'Sales Rep', value: repName.value },
-  { label: 'GSTIN', value: d.value.gstin },
+  // Indian GST number; retailers without a country predate the field and are Indian.
+  ...(!d.value.country || d.value.country === 'India' ? [{ label: 'GSTIN', value: d.value.gstin }] : []),
 ])
 const address = computed(() => [
   { label: 'Address', value: [d.value.address_line1, d.value.address_line2].filter(Boolean).join(', ') },
   { label: 'City', value: d.value.city },
   { label: 'State', value: d.value.state },
-  { label: 'Pincode', value: d.value.pincode },
+  { label: 'Postal Code', value: d.value.pincode },
+  { label: 'Country', value: d.value.country },
   { label: 'Geofence', value: d.value.geofence_radius_m ? `${d.value.geofence_radius_m} m` : '50 m (default)' },
 ])
 const syncInfo = computed(() => [

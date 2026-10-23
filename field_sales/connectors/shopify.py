@@ -19,11 +19,12 @@ shortly before it expires (or once on a 401).
 from __future__ import annotations
 
 import json
-import re
 import time
+import unicodedata
 from datetime import timedelta
 
 import frappe
+import pycountry
 import requests
 from frappe import _
 from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime
@@ -41,6 +42,7 @@ from field_sales.connectors.base import (
 	ConnectorError,
 )
 from field_sales.shopify import config as app_config
+from field_sales.utils.phone import to_e164
 
 # (connect, read) seconds. A short connect limit means an unreachable address (e.g. a broken
 # IPv6 route) is given up quickly and the next one (IPv4) is tried; replies still get 30 s.
@@ -221,10 +223,11 @@ query($id: ID!) {
 }
 """ % (ORDER_LINE_LIMIT, ORDER_REFUND_LIMIT, ORDER_LINE_LIMIT)
 
-SHOP_INFO_QUERY = "{ shop { name myshopifyDomain currencyCode ianaTimezone } }"
+# shopAddress, not billingAddress (deprecated in 2026-10); countryCodeV2, not countryCode (deprecated).
+SHOP_INFO_QUERY = "{ shop { name myshopifyDomain currencyCode ianaTimezone shopAddress { countryCodeV2 } } }"
 # Test Connection also reads the app's granted scopes.
 TEST_CONNECTION_QUERY = (
-	"{ shop { name myshopifyDomain currencyCode ianaTimezone } "
+	"{ shop { name myshopifyDomain currencyCode ianaTimezone shopAddress { countryCodeV2 } } "
 	"currentAppInstallation { accessScopes { handle } } }"
 )
 
@@ -311,6 +314,7 @@ class ShopifyConnector(BaseConnector):
 				"scopes": [],
 				"currency": "",
 				"timezone": "",
+				"country": "",
 				"message": e.message,
 			}
 
@@ -325,6 +329,7 @@ class ShopifyConnector(BaseConnector):
 			"scopes": [s["handle"] for s in scopes if s.get("handle")],
 			"currency": shop.get("currencyCode") or "",
 			"timezone": shop.get("ianaTimezone") or "",
+			"country": _shop_country(shop),
 			"message": _("Connected to {0} ({1})").format(shop.get("name"), shop.get("myshopifyDomain")),
 		}
 
@@ -676,7 +681,7 @@ class ShopifyConnector(BaseConnector):
 	def _create_confirmed_order(self, field_order, retailer) -> dict:
 		"""``orderCreate`` with explicit tax, discount and payment pending; returns ``{"id", "name"}``."""
 		currency = self._get_currency(field_order)
-		address = _customer_address(retailer, to_e164_india(retailer.phone))
+		address = _customer_address(retailer, retailer_phone(retailer))
 
 		order_input = {
 			"customer": {"toAssociate": {"id": to_gid("Customer", retailer.external_customer_id)}},
@@ -777,7 +782,7 @@ class ShopifyConnector(BaseConnector):
 
 	def _create_draft(self, field_order, retailer) -> dict:
 		currency = self._get_currency(field_order)
-		address = _customer_address(retailer, to_e164_india(retailer.phone))
+		address = _customer_address(retailer, retailer_phone(retailer))
 
 		line_items = [_draft_line_item(row, currency) for row in field_order.items]
 		tax_line = _tax_line_item(field_order, currency)
@@ -808,12 +813,16 @@ class ShopifyConnector(BaseConnector):
 		return data["draftOrderCreate"]["draftOrder"]
 
 	def get_shop_settings(self) -> dict:
-		"""The shop's currency and IANA time zone (raises ``ConnectorError``)."""
+		"""The shop's currency, IANA time zone and country (raises ``ConnectorError``)."""
 		data = self._graphql(SHOP_INFO_QUERY, operation="Test Connection")
 		shop = data.get("shop") or {}
 		if shop.get("currencyCode"):
 			self._currency = shop["currencyCode"]
-		return {"currency": shop.get("currencyCode") or "", "timezone": shop.get("ianaTimezone") or ""}
+		return {
+			"currency": shop.get("currencyCode") or "",
+			"timezone": shop.get("ianaTimezone") or "",
+			"country": _shop_country(shop),
+		}
 
 	def _get_currency(self, field_order) -> str:
 		"""
@@ -1158,10 +1167,57 @@ def from_gid(gid: str | None) -> str | None:
 	return gid.rsplit("/", 1)[-1] if gid else None
 
 
-def to_e164_india(phone: str | None) -> str | None:
-	"""``"98765 43210"`` / ``"+91-9876543210"`` -> ``"+919876543210"``; ``None`` if under 10 digits."""
-	digits = re.sub(r"\D", "", phone or "")
-	return f"+91{digits[-10:]}" if len(digits) >= 10 else None
+def _shop_country(shop: dict) -> str:
+	"""The shop's ISO country code from ``shop { shopAddress { countryCodeV2 } }``, or ``""``."""
+	return ((shop.get("shopAddress") or {}).get("countryCodeV2") or "").upper()
+
+
+def retailer_country_code(retailer) -> str:
+	"""The retailer's ISO country code (``Country.code``, upper case), or ``""`` if unknown."""
+	country = retailer.get("country") if hasattr(retailer, "get") else None
+	if not country:
+		return ""
+	return (frappe.db.get_value("Country", country, "code") or "").upper()
+
+
+def retailer_phone(retailer) -> str | None:
+	"""The retailer's phone in E.164 for its country, or ``None`` if not a valid number."""
+	return to_e164(retailer.phone, retailer_country_code(retailer))
+
+
+# Countries whose Shopify province codes are the ISO 3166-2 ones. Elsewhere (e.g. GB, AE) Shopify
+# has no provinces or its own codes, so the state is sent as text.
+PROVINCE_CODE_COUNTRIES = {"IN", "US", "CA", "AU"}
+# ISO codes Shopify spells differently: send the text for these.
+PROVINCE_CODE_SKIP = {("IN", "TG")}  # Telangana: Shopify uses TS; newer ISO data says TG
+
+
+def province_code(country_code: str, state: str | None) -> str | None:
+	"""
+	Shopify ``provinceCode`` for ``state`` (a name like "Tamil Nadu" or a code like "TN"), when the
+	country uses ISO codes in Shopify and the state matches exactly one ISO 3166-2 subdivision;
+	else ``None`` (the caller sends the text instead).
+	"""
+	country_code = (country_code or "").upper()
+	state = (state or "").strip()
+	if country_code not in PROVINCE_CODE_COUNTRIES or not state:
+		return None
+	wanted = _plain(state)
+	matches = {
+		sub.code.split("-", 1)[1]
+		for sub in pycountry.subdivisions.get(country_code=country_code) or []
+		if _plain(sub.name) == wanted or _plain(sub.code.split("-", 1)[1]) == wanted
+	}
+	if len(matches) != 1:
+		return None
+	code = matches.pop()
+	return None if (country_code, code) in PROVINCE_CODE_SKIP else code
+
+
+def _plain(text: str) -> str:
+	"""Case- and accent-insensitive form ("Tamil Nādu" == "tamil nadu")."""
+	decomposed = unicodedata.normalize("NFKD", text)
+	return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold().strip()
 
 
 def _is_missing_customer(error: ConnectorError) -> bool:
@@ -1195,23 +1251,34 @@ def _customer_input(retailer) -> dict:
 	}
 	if retailer.email:
 		customer_input["email"] = retailer.email.strip()
-	phone = to_e164_india(retailer.phone)
+	phone = retailer_phone(retailer)
 	if phone:
 		customer_input["phone"] = phone
 	return customer_input
 
 
 def _customer_address(retailer, phone: str | None) -> dict:
-	"""Retailer address -> MailingAddressInput. ``province`` is deprecated but still accepted."""
+	"""
+	Retailer address -> MailingAddressInput, in the retailer's country.
+
+	The state goes as ``provinceCode`` when it maps to one subdivision of that country,
+	else as ``province`` text (deprecated but still accepted).
+	"""
+	country_code = retailer_country_code(retailer)
 	address = {
 		"address1": retailer.address_line1 or "",
 		"address2": retailer.address_line2 or "",
 		"city": retailer.city or "",
-		"province": retailer.state or "",
 		"zip": retailer.pincode or "",
-		"countryCode": "IN",
 		"company": retailer.retailer_name,
 	}
+	if country_code:
+		address["countryCode"] = country_code
+	code = province_code(country_code, retailer.state)
+	if code:
+		address["provinceCode"] = code
+	elif retailer.state:
+		address["province"] = retailer.state
 	if phone:
 		address["phone"] = phone
 	return address

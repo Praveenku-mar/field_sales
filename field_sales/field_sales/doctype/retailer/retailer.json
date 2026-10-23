@@ -27,6 +27,7 @@
   "col_break_address",
   "state",
   "pincode",
+  "country",
   "location_section",
   "latitude",
   "longitude",
@@ -114,7 +115,9 @@
   {
    "fieldname": "gstin",
    "fieldtype": "Data",
-   "label": "GSTIN"
+   "label": "GSTIN",
+   "depends_on": "eval:doc.country=='India'",
+   "description": "Indian GST number; shown on the tax invoice."
   },
   {
    "fieldname": "status",
@@ -166,7 +169,14 @@
   {
    "fieldname": "pincode",
    "fieldtype": "Data",
-   "label": "Pincode"
+   "label": "Postal Code"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "options": "Country",
+   "label": "Country",
+   "description": "Sets how the phone number is checked and the address sent to the store. New retailers start with the store's country."
   },
   {
    "fieldname": "location_section",
@@ -291,7 +301,7 @@
    "group": "Activity"
   }
  ],
- "modified": "2026-10-10 17:40:00.000000",
+ "modified": "2026-10-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Retailer",

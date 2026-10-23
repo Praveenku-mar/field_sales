@@ -315,15 +315,15 @@ function _create_payment_link(frm, replace) {
 
 function _share_on_whatsapp(frm) {
 	var d = frm.doc;
-	frappe.db.get_value("Retailer", d.retailer, ["retailer_name", "phone"]).then(function (r) {
-		var retailer = r.message || {};
+	// The server reads the number for the retailer's country (frontend_api.get_order_payment_info).
+	frappe.xcall("field_sales.frontend_api.get_order_payment_info", { field_order: d.name }, "GET").then(function (info) {
 		var text = __("Hello {0}, please pay {1} for order {2} using this link: {3}", [
-			retailer.retailer_name || d.retailer_name || d.retailer,
+			d.retailer_name || d.retailer,
 			format_currency(d.grand_total, frappe.defaults.get_default("currency")),
 			d.store_order_name || d.name,
 			d.razorpay_payment_link_url,
 		]);
-		var phone = _whatsapp_number(retailer.phone);
+		var phone = info.whatsapp_number || "";
 		if (!phone) {
 			frappe.show_alert({
 				message: __("The retailer has no valid mobile number; pick the contact in WhatsApp."),
@@ -335,12 +335,6 @@ function _share_on_whatsapp(frm) {
 }
 
 // Indian mobile for wa.me: digits only with the 91 prefix (same rule as razorpay.indian_phone).
-function _whatsapp_number(phone) {
-	var digits = String(phone || "").replace(/\D/g, "");
-	if (digits.length === 12 && digits.indexOf("91") === 0) digits = digits.slice(2);
-	else if (digits.length === 11 && digits[0] === "0") digits = digits.slice(1);
-	return digits.length === 10 && "6789".indexOf(digits[0]) !== -1 ? "91" + digits : "";
-}
 
 function _show_sync_status(frm) {
 	if (frm.doc.docstatus !== 1) return;

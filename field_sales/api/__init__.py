@@ -56,7 +56,9 @@ def _sync_shop_settings(result: dict) -> dict:
 	from field_sales.sync.shop_settings import sync_shop_settings
 
 	try:
-		return sync_shop_settings({"currency": result.get("currency"), "timezone": result.get("timezone")})
+		return sync_shop_settings(
+			{"currency": result.get("currency"), "timezone": result.get("timezone"), "country": result.get("country")}
+		)
 	except Exception:
 		frappe.log_error(title=_("Store currency and time zone sync failed"))
 		return {"changes": [], "mismatch": []}

@@ -29,6 +29,7 @@ SYNCED_FIELDS = (
 	"city",
 	"state",
 	"pincode",
+	"country",
 )
 
 

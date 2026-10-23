@@ -41,6 +41,14 @@ export function useAdminToasts(toast) {
   toast.error = show(true)
 }
 
+/**
+ * Open an app path (e.g. "/fieldsales/visits/VIS-0001") in a new browser tab, outside the
+ * Shopify admin: the standalone app, where location and camera work (needs its own login).
+ */
+export function openStandalone(path) {
+  window.open(new URL(path, window.location.origin).href, '_blank', 'noopener')
+}
+
 /** Boot values shown on the embedded Settings page. */
 export function embeddedShop() {
   return window.shop || ''

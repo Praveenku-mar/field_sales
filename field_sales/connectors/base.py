@@ -174,9 +174,9 @@ class BaseConnector:
 		Verify credentials and reachability.
 
 		:return: ``{"ok": bool, "shop_name": str, "shop_domain": str, "scopes": [str, ...], "currency": str,
-			"timezone": str, "message": str}``; ``scopes`` are the permissions granted to the app (empty if
+			"timezone": str, "country": str, "message": str}``; ``scopes`` are the permissions granted to the app (empty if
 			the platform has none or on failure); ``currency`` (ISO code) and ``timezone`` (IANA name) are
-			the store's, empty strings on failure.
+			the store's, empty strings on failure; ``country`` is the shop's ISO 3166-1 alpha-2 code.
 		"""
 		raise NotImplementedError
 
@@ -184,7 +184,8 @@ class BaseConnector:
 		"""
 		The store's own settings the site should follow.
 
-		:return: ``{"currency": str, "timezone": str}`` (ISO currency code, IANA time zone name).
+		:return: ``{"currency": str, "timezone": str, "country": str}`` (ISO currency code, IANA time
+			zone name, ISO 3166-1 alpha-2 country code of the shop's address; empty strings if unknown).
 		:raises ConnectorError: on a platform error.
 		"""
 		raise NotImplementedError

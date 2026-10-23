@@ -4,6 +4,15 @@
 const COORD_PRECISION = 6;
 
 frappe.ui.form.on("Retailer", {
+	onload(frm) {
+		// New retailers start in the store's country (else System Settings').
+		if (frm.is_new() && !frm.doc.country) {
+			frappe
+				.xcall("field_sales.field_sales.doctype.retailer.retailer.get_default_country", {}, "GET")
+				.then((country) => country && !frm.doc.country && frm.set_value("country", country));
+		}
+	},
+
 	refresh(frm) {
 		lock_location(frm);
 		add_use_my_location_button(frm);

@@ -2,7 +2,8 @@
 # For license information, please see license.txt
 
 """
-Keep the site's currency and time zone the same as the connected store's.
+Keep the site's currency and time zone the same as the connected store's, and record the
+store's country (the default country for new Retailers).
 
 The store is the source of truth: product prices come from it and order prices go back to it
 without conversion, so the site must use the store's currency.
@@ -21,7 +22,7 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 	Save the store's currency and time zone on Store Connection and, when Match Store Currency
 	and Timezone is on, apply them to the site.
 
-	:param shop: ``{"currency", "timezone"}`` already fetched (e.g. by Test Connection); fetched
+	:param shop: ``{"currency", "timezone", "country"}`` already fetched (e.g. by Test Connection); fetched
 		from the store when ``None`` (raises ``ConnectorError`` on a store error).
 	:return: ``{"changes": [str], "mismatch": [str]}``: what was changed on the site, and the
 		differences still left between the store and the site.
@@ -30,12 +31,15 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		shop = get_connector().get_shop_settings()
 	currency = (shop.get("currency") or "").strip().upper()
 	timezone = (shop.get("timezone") or "").strip()
+	country = (shop.get("country") or "").strip().upper()
 
 	values = {}
 	if currency:
 		values["shop_currency"] = currency
 	if timezone:
 		values["shop_timezone"] = timezone
+	if country:
+		values["shop_country"] = country
 	if values:
 		frappe.db.set_single_value("Store Connection", values)
 

@@ -6,7 +6,14 @@
         <h3 class="text-base font-medium text-ink-gray-9">Details</h3>
         <div class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
           <TextInput v-model="form.retailer_name" label="Customer Name" required placeholder="Kovai Mart" />
-          <TextInput v-model="form.phone" label="Phone" required type="tel" placeholder="98765 43210" description="10 digits, optionally with +91" />
+          <TextInput
+            v-model="form.phone"
+            label="Phone"
+            required
+            type="tel"
+            :placeholder="phoneHint.placeholder"
+            :description="phoneHint.description"
+          />
           <TextInput v-model="form.owner_name" label="Owner Name" />
           <TextInput v-model="form.email" label="Email" type="email" />
           <Combobox
@@ -19,7 +26,8 @@
             description="Customers are visible through their Sales Rep"
           />
           <Select v-model="form.retailer_type" :options="RETAILER_TYPES" label="Customer Type" placeholder="Select type" />
-          <TextInput v-model="form.gstin" label="GSTIN" />
+          <!-- Indian GST number: only for retailers in India -->
+          <TextInput v-if="isIndia" v-model="form.gstin" label="GSTIN" />
           <Select v-model="form.status" :options="['Active', 'Inactive']" label="Status" />
         </div>
       </section>
@@ -32,7 +40,16 @@
           <TextInput v-model="form.address_line2" label="Address Line 2" />
           <TextInput v-model="form.city" label="City" required />
           <TextInput v-model="form.state" label="State" />
-          <TextInput v-model="form.pincode" label="Pincode" />
+          <TextInput v-model="form.pincode" label="Postal Code" />
+          <Combobox
+            v-model="form.country"
+            :options="countryOptions"
+            trigger="button"
+            label="Country"
+            placeholder="Select country"
+            empty-text="No countries found"
+            description="Sets how the phone number is checked"
+          />
           <TextInput
             v-if="session.isManager"
             v-model="form.geofence_radius_m"
@@ -53,7 +70,9 @@
             icon-left="lucide-map-pin-plus"
             @click="pickerOpen = true"
           />
+          <!-- No location inside Shopify admin: pick on the map there -->
           <Button
+            v-if="!embedded"
             variant="outline"
             label="Use My Location"
             icon-left="lucide-locate-fixed"
@@ -62,7 +81,7 @@
           />
         </div>
         <p v-if="!locationLocked" class="mt-2 text-sm text-ink-gray-5">
-          Pick on a map or capture your GPS position; otherwise coordinates are set automatically at the first visit check-in.
+          {{ embedded ? 'Pick on a map' : 'Pick on a map or capture your GPS position' }}; otherwise coordinates are set automatically at the first visit check-in.
         </p>
       </section>
     </div>
@@ -97,6 +116,9 @@ import { Button, Combobox, Dialog, Select, TextInput, createListResource, create
 import { callMethod, getPosition } from '@/utils/api'
 import MapPickerDialog from '@/components/MapPickerDialog.vue'
 import { useSessionStore } from '@/stores/session'
+import { isEmbedded } from '@/shopify/embedded'
+
+const embedded = isEmbedded()
 
 const RETAILER_TYPES = ['Kirana', 'Supermarket', 'Wholesaler', 'Medical', 'Other']
 
@@ -122,6 +144,7 @@ const reps = createListResource({
 })
 const repOptions = computed(() => (reps.data || []).map((r) => ({ label: r.full_name || r.name, value: r.name })))
 
+
 // Only the fields a creator sets; sync bookkeeping and coordinates are managed
 // by the sync engine and the first check-in respectively.
 const FIELDS = [
@@ -138,6 +161,7 @@ const FIELDS = [
   'city',
   'state',
   'pincode',
+  'country',
   'geofence_radius_m',
   'latitude',
   'longitude',
@@ -156,11 +180,38 @@ const emptyForm = () => ({
   city: '',
   state: '',
   pincode: '',
+  country: null,
   geofence_radius_m: '',
   latitude: '',
   longitude: '',
 })
 const form = reactive(emptyForm())
+
+const countries = createListResource({ doctype: 'Country', fields: ['name'], orderBy: 'name asc', pageLength: 500, auto: true })
+const countryOptions = computed(() => (countries.data || []).map((c) => ({ label: c.name, value: c.name })))
+const defaultCountry = createResource({
+  url: 'field_sales.field_sales.doctype.retailer.retailer.get_default_country',
+  method: 'GET',
+})
+const isIndia = computed(() => form.country === 'India')
+
+// Phone hint for the selected country: an example number from the server (phonenumbers).
+// India keeps its own rule (10 digits, optionally +91).
+const phoneInfo = createResource({
+  url: 'field_sales.field_sales.doctype.retailer.retailer.get_phone_hint',
+  method: 'GET',
+  makeParams: () => ({ country: form.country }),
+})
+watch(
+  () => form.country,
+  (country) => country && !isIndia.value && phoneInfo.fetch(),
+  { immediate: true },
+)
+const phoneHint = computed(() => {
+  if (!form.country || isIndia.value) return { placeholder: '98765 43210', description: '10 digits, optionally with +91' }
+  const example = phoneInfo.data?.example
+  return { placeholder: example || '', description: example ? `For ${form.country}, e.g. ${example}` : `A ${form.country} number` }
+})
 const loaded = ref(null)
 const busy = ref(false)
 
@@ -181,7 +232,7 @@ watch(open, async (value) => {
     try {
       const doc = await editDoc.fetch()
       for (const field of FIELDS) {
-        form[field] = field === 'sales_rep' ? doc[field] || null : doc[field] ?? ''
+        form[field] = field === 'sales_rep' || field === 'country' ? doc[field] || null : doc[field] ?? ''
       }
       loaded.value = { ...form }
     } catch {
@@ -191,6 +242,10 @@ watch(open, async (value) => {
   } else {
     // A rep's own retailer defaults to them; the server assigns it anyway on insert.
     form.sales_rep = session.salesRep?.name || null
+    // New retailers start in the store's country (the server falls back the same way).
+    defaultCountry.fetch().then((country) => {
+      if (country && !form.country) form.country = country
+    })
   }
 })
 
@@ -234,7 +289,7 @@ async function submit() {
       await createRetailer()
     }
   } catch {
-    // callMethod already toasted the error (e.g. phone must be 10 digits).
+    // callMethod already toasted the error (e.g. the phone is not valid for the country).
   } finally {
     busy.value = false
   }

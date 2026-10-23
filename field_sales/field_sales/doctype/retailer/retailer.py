@@ -12,6 +12,7 @@ from field_sales.permissions import get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 from field_sales.utils.geo import has_coords
 from field_sales.utils.guards import is_system_manager, keep_server_fields
+from field_sales.utils.phone import example_number, is_valid
 
 # Written only by the server: the customer sync (_record_result) and Visit (last_visit).
 SERVER_FIELDS = (
@@ -36,6 +37,8 @@ class Retailer(Document):
 			self.sales_rep = get_own_rep()
 
 	def validate(self):
+		if not self.country and self.is_new():
+			self.country = get_default_country()
 		self._keep_server_fields()
 		self._guard_location()
 		self._validate_phone()
@@ -86,8 +89,22 @@ class Retailer(Document):
 			enqueue_push(self.name)
 
 	def _validate_phone(self):
-		
+		"""
+		The phone must be a valid number for the retailer's country (phonenumbers). India keeps
+		its original rule: 10 digits, optionally prefixed with +91.
+		"""
 		if not self.phone:
+			return
+
+		country_code = country_code_of(self.country)
+		if country_code and country_code != "IN":
+			if not is_valid(self.phone, country_code):
+				example = example_number(country_code)
+				frappe.throw(
+					_("Enter a valid phone number for {0}{1}. Received: {2}").format(
+						self.country, _(", e.g. {0}").format(example) if example else "", self.phone
+					)
+				)
 			return
 
 		cleaned = self.phone.strip()
@@ -126,3 +143,31 @@ class Retailer(Document):
 			frappe.throw(
 				_("Longitude must be between -180 and 180. Received: {0}").format(self.longitude)
 			)
+
+
+def country_code_of(country: str | None) -> str:
+	"""ISO alpha-2 code (upper case) of a Country, or ``""``."""
+	if not country:
+		return ""
+	return (frappe.db.get_value("Country", country, "code") or "").upper()
+
+
+@frappe.whitelist(methods=["GET"])
+def get_default_country() -> str | None:
+	"""
+	Country for a new retailer: the store's (Store Connection ``shop_country``), else
+	System Settings' country.
+	"""
+	shop_country = (frappe.db.get_single_value("Store Connection", "shop_country") or "").strip()
+	if shop_country:
+		country = frappe.db.get_value("Country", {"code": shop_country.lower()}, "name")
+		if country:
+			return country
+	return frappe.db.get_single_value("System Settings", "country") or None
+
+
+@frappe.whitelist(methods=["GET"])
+def get_phone_hint(country: str | None = None) -> dict:
+	"""``{"code", "example"}`` for the phone field's hint in the app (example mobile number)."""
+	code = country_code_of(country)
+	return {"code": code, "example": example_number(code) if code else None}

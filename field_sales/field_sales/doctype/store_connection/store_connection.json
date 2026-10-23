@@ -53,6 +53,7 @@
   "last_tested_on",
   "shop_name",
   "shop_currency",
+  "shop_country",
   "shop_timezone",
   "metafields_ready_on",
   "invoice_section",
@@ -412,6 +413,13 @@
    "read_only": 1
   },
   {
+   "fieldname": "shop_country",
+   "fieldtype": "Data",
+   "label": "Store Country",
+   "read_only": 1,
+   "description": "Country code of the store's address (from the store); new Retailers start in this country."
+  },
+  {
    "description": "The store's time zone, from the last check.",
    "fieldname": "shop_timezone",
    "fieldtype": "Data",
@@ -434,7 +442,7 @@
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-24 12:00:00.000000",
+ "modified": "2026-10-24 12:10:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

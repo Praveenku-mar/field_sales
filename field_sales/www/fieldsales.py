@@ -14,6 +14,13 @@ APP_ROLES = ("System Manager", "Sales Manager", "Field Sales Rep")
 
 
 def get_context(context):
+	# Opened inside a store's admin (no Frappe cookie there): the app signs its API calls
+	# with the store's session token instead, so no login redirect and no CSRF token.
+	embedded = _embedded_boot()
+	if embedded:
+		context.boot = get_boot(embedded)
+		return context
+
 	if frappe.session.user == "Guest":
 		_redirect(f"/login?redirect-to={quote(frappe.request.path if frappe.request else '/fieldsales')}")
 
@@ -31,13 +38,17 @@ def has_app_access(user: str | None = None) -> bool:
 	return user == "Administrator" or bool(set(APP_ROLES) & set(frappe.get_roles(user)))
 
 
-def get_boot() -> dict:
-	"""Values the SPA reads from `window` before it mounts (see frontend/src/main.js)."""
-	return frappe._dict(
+def get_boot(embedded: dict | None = None) -> dict:
+	"""
+	Values the SPA reads from `window` before it mounts (see frontend/src/main.js).
+
+	:param embedded: Extra values for a page opened inside a store's admin (``embedded``,
+		``shop``, ``host``, ``shopify_api_key``); such a page gets no CSRF token.
+	"""
+	boot = frappe._dict(
 		{
 			"frappe_version": frappe.__version__,
 			"site_name": frappe.local.site,
-			"csrf_token": frappe.sessions.get_csrf_token(),
 			"default_route": _app_base(),
 			"sysdefaults": frappe.defaults.get_defaults(),
 			# Realtime socket (composables/useRealtime.js): its own port under bench start.
@@ -45,6 +56,11 @@ def get_boot() -> dict:
 			"dev_server": frappe._dev_server,
 		}
 	)
+	if embedded:
+		boot.update(embedded)
+	else:
+		boot.csrf_token = frappe.sessions.get_csrf_token()
+	return boot
 
 
 @frappe.whitelist(methods=["GET"], allow_guest=True)
@@ -58,6 +74,15 @@ def get_context_for_dev():
 	if not frappe.conf.developer_mode:
 		frappe.throw(_("This method is only meant for developer mode"))
 	return get_boot()
+
+
+def _embedded_boot() -> dict | None:
+	"""Boot values from the first ``field_sales_embedded_page`` hook that recognises the request."""
+	for method in frappe.get_hooks("field_sales_embedded_page"):
+		values = frappe.get_attr(method)()
+		if values:
+			return values
+	return None
 
 
 def _app_base() -> str:

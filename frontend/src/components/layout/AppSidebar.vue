@@ -60,6 +60,7 @@ import { useRoute } from 'vue-router'
 import { Sidebar, SidebarCollapseToggle, SidebarHeader, SidebarItem, Tooltip, createResource } from 'frappe-ui'
 import { useSessionStore } from '@/stores/session'
 import { NAV_ITEMS } from '@/utils/nav'
+import { getPreference, setPreference } from '@/utils/storage'
 import UserMenu from './UserMenu.vue'
 
 defineEmits(['open-search'])
@@ -84,16 +85,8 @@ function isActive(item) {
 }
 
 // Collapsed state survives reloads; it is a per-browser preference.
-let stored = null
-try {
-  stored = localStorage.getItem('fs:sidebar-collapsed')
-} catch {}
-const collapsed = ref(stored === '1')
-watch(collapsed, (v) => {
-  try {
-    localStorage.setItem('fs:sidebar-collapsed', v ? '1' : '0')
-  } catch {}
-})
+const collapsed = ref(getPreference('fs:sidebar-collapsed') === '1')
+watch(collapsed, (v) => setPreference('fs:sidebar-collapsed', v ? '1' : '0'))
 
 // Counts change as people work; refresh them when moving between pages.
 watch(() => route.name, () => counts.reload())

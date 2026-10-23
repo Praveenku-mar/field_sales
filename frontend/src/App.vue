@@ -12,7 +12,7 @@
         >
           <div class="flex gap-2">
             <Button v-if="!session.error.noAccess" label="Retry" variant="solid" @click="retry" />
-            <Button label="Go to Desk" href="/app" />
+            <Button v-if="!session.error.embedded" label="Go to Desk" href="/app" />
           </div>
         </EmptyState>
       </div>

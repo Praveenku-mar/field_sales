@@ -1,5 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { createListResource, createResource } from 'frappe-ui'
+import { getPreference, setPreference } from '@/utils/storage'
 
 /**
  * A paged, filterable list of one doctype, plus its total count.
@@ -82,11 +83,7 @@ export function useDocList({
   // A new page size reloads from the first row, as the desk list does.
   watch(pageSize, (size) => {
     list.pageLength = size
-    try {
-      localStorage.setItem(storageKey, String(size))
-    } catch {
-      // Not remembered; the list still works.
-    }
+    setPreference(storageKey, size)
     refresh()
   })
 
@@ -107,9 +104,5 @@ export function useDocList({
 }
 
 function readPageSize(key) {
-  try {
-    return Number(localStorage.getItem(key)) || null
-  } catch {
-    return null
-  }
+  return Number(getPreference(key)) || null
 }

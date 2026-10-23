@@ -27,7 +27,7 @@
           />
         </template>
         <Button
-          v-if="session.isAdmin && tab === 'store'"
+          v-if="session.isAdmin && tab === 'store' && !embedded"
           :variant="storeForm?.isDirty ? 'subtle' : 'solid'"
           label="Fetch Locations"
           icon-left="lucide-refresh-cw"
@@ -40,9 +40,11 @@
     <div class="px-5 pb-5">
       <!-- Sales Managers may also edit Razorpay; the other tabs are System Manager only -->
       <RazorpaySettings v-if="tab === 'razorpay' && canEdit" ref="razorpayForm" />
+      <!-- Inside the Shopify admin the install owns the connection: a read-only summary for managers -->
+      <ShopifyStoreStatus v-else-if="embedded && tab === 'store' && session.isManager" />
       <template v-else-if="session.isAdmin">
         <!-- v-show keeps unsaved Store Connection edits while another tab is open -->
-        <StoreConnectionForm v-show="tab === 'store'" ref="storeForm" />
+        <StoreConnectionForm v-if="!embedded" v-show="tab === 'store'" ref="storeForm" />
         <InvoiceSettings v-if="tab === 'invoice'" ref="invoiceForm" @saved="refreshStoreForm" />
         <CommissionSettings v-if="tab === 'commission'" ref="commissionForm" @saved="refreshStoreForm" />
         <EmailAccountSettings v-if="tab === 'email'" />
@@ -72,8 +74,11 @@ import CommissionSettings from '@/components/CommissionSettings.vue'
 import EmailAccountSettings from '@/components/EmailAccountSettings.vue'
 import RazorpaySettings from '@/components/RazorpaySettings.vue'
 import { useSessionStore } from '@/stores/session'
+import ShopifyStoreStatus from '@/shopify/ShopifyStoreStatus.vue'
+import { isEmbedded } from '@/shopify/embedded'
 
 const session = useSessionStore()
+const embedded = isEmbedded()
 const storeForm = ref(null)
 const invoiceForm = ref(null)
 const commissionForm = ref(null)

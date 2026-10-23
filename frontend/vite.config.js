@@ -18,6 +18,13 @@ const benchSites = fs.existsSync(sitesDir)
 
 export default defineConfig({
   plugins: [
+    // index.html's Jinja block (App Bridge for the Shopify admin) only means something once
+    // Frappe renders the built page; the dev server would serve it as text.
+    {
+      name: 'strip-embedded-head-in-dev',
+      apply: 'serve',
+      transformIndexHtml: (html) => html.replace(/\{% if boot\.embedded %\}[\s\S]*?\{% endif %\}\s*/, ''),
+    },
     frappeui({
       frappeProxy: { port: Number(process.env.FS_DEV_PORT) || undefined },
       jinjaBootData: true,
@@ -29,7 +36,10 @@ export default defineConfig({
         emptyOutDir: true,
       },
     }),
-    vue(),
+    vue({
+      // App Bridge web components (<s-app-nav>, <s-link>; src/shopify/EmbeddedNav.vue).
+      template: { compilerOptions: { isCustomElement: (tag) => tag.startsWith('s-') } },
+    }),
     // Installable PWA. The service worker (src/sw.js) only precaches the built assets;
     // the HTML is rendered by Frappe with boot data and is never cached.
     VitePWA({

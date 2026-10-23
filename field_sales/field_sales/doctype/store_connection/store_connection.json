@@ -21,6 +21,7 @@
   "shopify_scopes",
   "installed_on",
   "uninstalled_on",
+  "embedded_user",
   "woocommerce_section",
   "woo_consumer_key",
   "col_break_woo",
@@ -156,6 +157,14 @@
    "label": "Uninstalled On",
    "read_only": 1,
    "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "embedded_user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Embedded App User",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'",
+   "description": "Requests from inside the Shopify admin run as this user. Left empty, shopify-admin@<site> is created on first use (Sales Manager, with its own Sales Rep)."
   },
   {
    "fieldname": "woocommerce_section",
@@ -425,7 +434,7 @@
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-23 12:00:00.000000",
+ "modified": "2026-10-24 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

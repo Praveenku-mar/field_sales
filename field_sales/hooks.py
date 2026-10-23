@@ -98,6 +98,10 @@ add_to_apps_screen = [
 
 # Desktop app (frontend/, built into public/frontend): every /fieldsales/* path serves www/fieldsales.html.
 # /fs is a short alias for the same app; the router picks its base from the URL.
+# Called by www/fieldsales.py (core never imports field_sales.shopify): returns boot values
+# when the page is opened inside a store's admin, else None.
+field_sales_embedded_page = ["field_sales.shopify.embedded.page_context"]
+
 website_route_rules = [
 	{"from_route": "/fieldsales/<path:app_path>", "to_route": "fieldsales"},
 	{"from_route": "/fs", "to_route": "fieldsales"},
@@ -297,7 +301,8 @@ scheduler_events = {
 # Request Events
 # ----------------
 # before_request = ["field_sales.utils.before_request"]
-# after_request = ["field_sales.utils.after_request"]
+# Embedded /fieldsales page: frame-ancestors for the shop's admin (only set on that page).
+after_request = ["field_sales.shopify.embedded.after_request"]
 
 # Job Events
 # ----------
@@ -333,9 +338,9 @@ scheduler_events = {
 # Authentication and authorization
 # --------------------------------
 
-# auth_hooks = [
-# 	"field_sales.auth.validate"
-# ]
+# Shopify admin (embedded app): requests with an App Bridge session token sign in as
+# Store Connection's embedded user. A no-op for every other request.
+auth_hooks = ["field_sales.shopify.session_token.authenticate"]
 
 # Automatically update python controller files with type annotations for this app.
 export_python_type_annotations = True

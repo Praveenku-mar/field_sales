@@ -43,14 +43,16 @@ Store Connection has two **Auth Modes**. *Client Credentials* (the default, and 
 
 **2. Dev Dashboard / `shopify.app.toml`.** Copy `shopify.app.toml` from the repo root, replace the client id and every `https://fieldsales.example.com` with your public address, and deploy it with `shopify app deploy` (or enter the same values in the Dev Dashboard):
 
-- App URL: `https://<site>/api/method/field_sales.shopify.oauth.install`
-- Allowed redirection URL: `https://<site>/api/method/field_sales.shopify.oauth.callback`
+- App URL: `https://<site>/fieldsales` (the app opens embedded in the Shopify admin)
+- Allowed redirection URL: `https://<site>/api/method/field_sales.shopify.oauth.callback` (only for installs started outside the admin through `/api/method/field_sales.shopify.oauth.install`)
 - Compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`): `https://<site>/api/method/field_sales.shopify.webhooks.receive`
 - Store data webhooks (stock, products, orders): `https://<site>/api/method/field_sales.api.webhooks.receive`
 
-`app/uninstalled` is subscribed automatically after each install. The toml uses `use_legacy_install_flow = true` because Field Sales runs the OAuth authorization code grant itself.
+`app/uninstalled` is subscribed automatically after each install. Installation is Shopify managed (`embedded = true`, scopes from `[access_scopes]`): on the first load inside the admin, Field Sales exchanges the App Bridge ID token for an expiring offline token.
 
-**3. Install on a development store.** Create a development store in the Dev Dashboard, then open *Apps > Field Sales > Test on development store* (or visit `https://<site>/api/method/field_sales.shopify.oauth.install?shop=<store>.myshopify.com` from Shopify's install link, which adds the signed `hmac` and `timestamp`). Approve the scopes; you land on `/fieldsales`, and Store Connection shows Auth Mode *OAuth*, the store URL, granted scopes and *Installed On*. Log in to Field Sales as usual: the install connects the store, it does not log you in. A local site needs a public HTTPS tunnel (e.g. ngrok) as `shopify_app_url`.
+**Inside the Shopify admin** the manager screens run in the admin's iframe with no Frappe login: each request carries an App Bridge session token and runs as Store Connection's **Embedded App User** (default `shopify-admin@<site>`, created on first use with the Sales Manager role and its own Sales Rep; pick another manager user there to use it instead). Managers create reps from the Sales Reps page there; reps get the welcome or reset email and sign in to the standalone `/fieldsales` as before. Production nginx: bench's template adds `X-Frame-Options: SAMEORIGIN` to every response; browsers ignore it when the page sends CSP `frame-ancestors` (Field Sales does, for embedded loads), but remove it for `/fieldsales` if a review tool flags it.
+
+**3. Install on a development store.** Create a development store in the Dev Dashboard, then open *Apps > Field Sales > Test on development store*. Approve the scopes; Field Sales opens inside the admin, and Store Connection shows Auth Mode *OAuth*, the store URL, granted scopes and *Installed On*. A local site needs a public HTTPS tunnel (e.g. ngrok) as `shopify_app_url` and App URL.
 
 Field Sales asks for **expiring offline tokens** (1 hour access token, 90-day refresh token) and renews them in the background. If the refresh token runs out or Shopify rejects it, the connection is disabled and Store Connection says *Reinstall required*: open the app from Shopify admin to reconnect. Uninstalling clears the tokens and disables the connection. Privacy requests from Shopify appear as **Privacy Request** records: a customer data request gets a private JSON export attached and System Managers are emailed to send it to the store owner within 30 days; customer and shop redaction anonymise the data and keep order amounts and dates for reporting.
 

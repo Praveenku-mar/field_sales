@@ -102,7 +102,8 @@
               >
                 <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
               </TextInput>
-              <Button icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
+              <!-- No camera inside Shopify admin (iframe) -->
+          <Button v-if="!embedded" icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
             </div>
             <ul
               v-if="quickOpen && (quickSearch.loading || quickRows.length)"
@@ -498,6 +499,9 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import LinkField from '@/components/LinkField.vue'
 import BarcodeScanner from '@/components/BarcodeScanner.vue'
+import { isEmbedded } from '@/shopify/embedded'
+
+const embedded = isEmbedded()
 import { useSessionStore } from '@/stores/session'
 import { useSellLocations } from '@/composables/useSellLocations'
 import { onDocEvent, onDoctypeEvent } from '@/composables/useRealtime'

@@ -19,7 +19,8 @@
     <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
       <ListFilters v-model="model" search-placeholder="Search title, SKU or barcode" :tabs="tabs">
         <template #search-actions>
-          <Button icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
+          <!-- No camera inside Shopify admin (iframe) -->
+          <Button v-if="!embedded" icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
         </template>
         <PresetChip :label="presetLabel" />
       </ListFilters>
@@ -68,6 +69,9 @@ import PresetChip from '@/components/PresetChip.vue'
 import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import BarcodeScanner from '@/components/BarcodeScanner.vue'
+import { isEmbedded } from '@/shopify/embedded'
+
+const embedded = isEmbedded()
 import { useDocList } from '@/composables/useDocList'
 import { formatCurrency, formatNumber } from '@/utils/format'
 import { callMethod, findProductByBarcode } from '@/utils/api'

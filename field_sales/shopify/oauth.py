@@ -53,7 +53,7 @@ def install(shop: str | None = None, hmac: str | None = None, timestamp: str | N
 	"""
 	try:
 		shop = _check_signed_request()
-		_check_shop_allowed(shop)
+		check_shop_allowed(shop)
 
 		state = secrets.token_urlsafe(32)
 		frappe.cache.set(_state_key(state), shop, ex=STATE_TTL_SECONDS)
@@ -92,9 +92,9 @@ def callback(
 			raise InstallError("Unknown or expired install request; start the install again.")
 		if not code:
 			raise InstallError("Missing authorization code.")
-		_check_shop_allowed(shop)
+		check_shop_allowed(shop)
 		body = _exchange_code(shop, code)
-		missing = _save_install(shop, body)
+		missing = save_installation(shop, body)
 	except InstallError as e:
 		return _fail(str(e), shop)
 
@@ -131,7 +131,7 @@ def _check_signed_request() -> str:
 	return shop
 
 
-def _check_shop_allowed(shop: str) -> None:
+def check_shop_allowed(shop: str) -> None:
 	"""One site, one shop: refuse a different shop while one is connected (enabled)."""
 	settings = frappe.get_single("Store Connection")
 	connected = settings.enabled and settings.platform == "Shopify" and settings.store_url
@@ -184,7 +184,7 @@ def _exchange_code(shop: str, code: str) -> dict:
 	return body
 
 
-def _save_install(shop: str, body: dict) -> list[str]:
+def save_installation(shop: str, body: dict) -> list[str]:
 	"""
 	Point Store Connection at ``shop`` in OAuth mode with the new tokens, then queue
 	webhook registration. Saved as Administrator (the request is a guest's).

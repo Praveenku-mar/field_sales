@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { createResource } from 'frappe-ui'
+import { isEmbedded } from '@/shopify/embedded'
 
 // Roles that may open the app at all (checked again on the server).
 export const APP_ROLES = ['System Manager', 'Sales Manager', 'Field Sales Rep']
@@ -66,7 +67,10 @@ export const useSessionStore = defineStore('session', () => {
    */
   async function load() {
     if (ready.value) return !!user.value
-    if (!cookieUser()) {
+    // Inside the Shopify admin the session token signs requests in; there is no login page
+    // to go to (it can't set cookies in the admin's iframe), so failures show a message.
+    const embedded = isEmbedded()
+    if (!embedded && !cookieUser()) {
       redirectToLogin()
       return false
     }
@@ -74,13 +78,14 @@ export const useSessionStore = defineStore('session', () => {
       await resource.fetch()
       error.value = null
     } catch (e) {
-      if (isAuthError(e)) {
+      if (isAuthError(e) && !embedded) {
         redirectToLogin()
         return false
       }
       const noAccess = e?.status === 403 || e?.exc_type === 'PermissionError'
       error.value = {
         noAccess,
+        embedded,
         title: noAccess ? 'No access to Field Sales' : 'Could not load Field Sales',
         message: noAccess
           ? 'Your account needs the Field Sales Rep, Sales Manager or System Manager role.'

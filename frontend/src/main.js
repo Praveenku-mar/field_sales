@@ -7,9 +7,12 @@ import { FrappeUI, setConfig, frappeRequest, toast } from 'frappe-ui'
 import App from './App.vue'
 import router from './router'
 import './composables/useInstallPrompt' // listens for beforeinstallprompt from page load
+import { isEmbedded, useAdminToasts, withSessionToken } from './shopify/embedded'
 
 // createResource / createListResource / createDocumentResource all fetch through this.
-setConfig('resourceFetcher', frappeRequest)
+// Inside the Shopify admin there is no Frappe cookie: each request carries a session token.
+setConfig('resourceFetcher', isEmbedded() ? withSessionToken(frappeRequest) : frappeRequest)
+if (isEmbedded()) useAdminToasts(toast)
 // frappe-ui sends the browser's hostname as X-Frappe-Site-Name, which names no site
 // behind a tunnel or proxy (ngrok, a custom domain). Send the site that served the page.
 setConfig('requestHeaders', () =>
@@ -37,8 +40,9 @@ async function start() {
 }
 
 // Precaches the built assets and makes the app installable (see src/sw.js).
+// Not inside the Shopify admin: the app is not installable there.
 function registerServiceWorker() {
-  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return
+  if (!import.meta.env.PROD || !('serviceWorker' in navigator) || isEmbedded()) return
   // Only an update replaces an existing controller; the first install does not.
   const hadController = !!navigator.serviceWorker.controller
   navigator.serviceWorker.addEventListener('controllerchange', () => {

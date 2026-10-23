@@ -1,4 +1,5 @@
 import { createResource, toast } from 'frappe-ui'
+import { isEmbedded } from '@/shopify/embedded'
 
 /** One-off server call that toasts the error message; resolves to the method's return value. */
 export function callMethod(url, params = {}) {
@@ -13,6 +14,11 @@ export function callMethod(url, params = {}) {
 /** Browser GPS fix (same options as the desk's Check In button). */
 export function getPosition() {
   return new Promise((resolve, reject) => {
+    // The Shopify admin's iframe is not allowed to use location (Permissions Policy).
+    if (isEmbedded()) {
+      reject(new Error('Location is not available inside Shopify admin. Use the Field Sales app (/fieldsales) on your phone.'))
+      return
+    }
     if (!window.isSecureContext || !navigator.geolocation) {
       reject(new Error('Location is not available here. Allow location access in your browser and use HTTPS.'))
       return

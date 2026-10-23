@@ -7,19 +7,20 @@
 
 client_id = "REPLACE_WITH_CLIENT_ID"
 name = "Field Sales"
-# Shopify opens this with ?shop=&hmac=&timestamp= on install and when the merchant
-# opens the app; it starts the OAuth grant and ends on /fieldsales.
-application_url = "https://fieldsales.example.com/api/method/field_sales.shopify.oauth.install"
-embedded = false
+# Loaded inside the Shopify admin (embedded) with ?shop=&host=&embedded=1&id_token=...
+# The page exchanges the ID token for an offline token on the first load after install.
+application_url = "https://fieldsales.example.com/fieldsales"
+embedded = true
 
 [access_scopes]
 # Keep in step with site_config `shopify_app_scopes` (default in field_sales/shopify/config.py).
 scopes = "read_products,read_inventory,read_locations,write_customers,read_customers,write_draft_orders,read_draft_orders,write_orders,read_orders"
-# The app runs the authorization code grant itself (install -> callback), so scopes are
-# sent in the authorize URL rather than Shopify managed installation.
-use_legacy_install_flow = true
+# Shopify managed installation: Shopify installs the app and grants these scopes before
+# the first load; no install redirect is needed.
 
 [auth]
+# Only used by the authorization code grant (field_sales.shopify.oauth.install), kept for
+# installs started outside the admin; embedded installs use token exchange instead.
 redirect_urls = [
   "https://fieldsales.example.com/api/method/field_sales.shopify.oauth.callback",
 ]

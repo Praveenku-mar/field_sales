@@ -24,6 +24,7 @@ from field_sales.sync.products import enqueue_sync
 from field_sales.sync.stock import fetch_live_stock
 from field_sales.sync.stock import get_sell_locations as _get_sell_locations
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
+from field_sales.utils.limits import SALES_REPS, check_limit
 
 VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
 # Roles a user may hold for a manager to reset their password (the rest are automatic roles).
@@ -168,6 +169,7 @@ def create_sales_rep(
 	:return: ``{"name", "user_created"}``
 	"""
 	frappe.has_permission("Sales Rep", "create", throw=True)
+	check_limit(SALES_REPS)
 
 	user = (user or "").strip().lower()
 	frappe.utils.validate_email_address(user, throw=True)

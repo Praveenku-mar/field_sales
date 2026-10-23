@@ -131,6 +131,8 @@ import {
   createListResource,
   toast,
 } from 'frappe-ui'
+import { isEmbedded } from '@/shopify/embedded'
+import { createMerchantEmailAccounts, saveMerchantEmailAccountUrl } from '@/shopify/merchantSettings'
 import EmptyState from './EmptyState.vue'
 import { callMethod } from '@/utils/api'
 
@@ -169,13 +171,17 @@ const FIELDS = [
   'always_use_account_email_id_as_sender',
 ]
 
-const accounts = createListResource({
-  doctype: 'Email Account',
-  fields: FIELDS,
-  orderBy: 'default_outgoing desc, modified desc',
-  pageLength: 50,
-  auto: true,
-})
+// Inside the Shopify admin the manager can't read Email Account directly: merchant endpoints.
+const embedded = isEmbedded()
+const accounts = embedded
+  ? createMerchantEmailAccounts()
+  : createListResource({
+      doctype: 'Email Account',
+      fields: FIELDS,
+      orderBy: 'default_outgoing desc, modified desc',
+      pageLength: 50,
+      auto: true,
+    })
 
 const form = reactive({ open: false, name: null, saving: false, showPassword: false })
 const blank = () => ({
@@ -262,7 +268,11 @@ async function save() {
   }
   if (f.password) values.password = f.password
   try {
-    if (form.name) {
+    if (embedded) {
+      const email = { ...values, email_id: f.email_id.trim(), email_account_name: f.email_account_name.trim() || null }
+      const saved = await callMethod(saveMerchantEmailAccountUrl, { name: form.name, values: email })
+      toast.success(form.name ? 'Email account saved' : `Email account ${saved.name} created`)
+    } else if (form.name) {
       await callMethod('frappe.client.set_value', { doctype: 'Email Account', name: form.name, fieldname: values })
       toast.success('Email account saved')
     } else {

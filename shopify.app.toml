@@ -7,6 +7,8 @@
 
 client_id = "REPLACE_WITH_CLIENT_ID"
 name = "Field Sales"
+# The app's URL handle; also site_config shopify_app_handle (plan page link).
+handle = "REPLACE_WITH_APP_HANDLE"
 # Loaded inside the Shopify admin (embedded) with ?shop=&host=&embedded=1&id_token=...
 # The page exchanges the ID token for an offline token on the first load after install.
 application_url = "https://fieldsales.example.com/fieldsales"

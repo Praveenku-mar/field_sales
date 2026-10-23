@@ -235,6 +235,12 @@ def page_context() -> dict | None:
 			return None
 		_try_exchange(shop, id_token)
 
+	if args.get("plan_handle"):
+		# Back from Shopify's plan page (welcome link): the plan may have changed.
+		from field_sales.shopify import billing
+
+		billing.clear_cache()
+
 	frappe.local.shopify_frame_shop = shop
 	return {
 		"embedded": True,

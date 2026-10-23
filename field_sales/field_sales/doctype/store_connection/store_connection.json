@@ -66,7 +66,13 @@
   "company_phone",
   "company_email",
   "commission_section",
-  "enable_commission"
+  "enable_commission",
+  "privacy_section",
+  "failed_log_retention_days",
+  "col_break_privacy",
+  "retailer_inactive_anonymise_days",
+  "plans_section",
+  "plan_limits"
  ],
  "fields": [
   {
@@ -437,12 +443,49 @@
    "fieldtype": "Check",
    "label": "Pay Commission to Sales Reps",
    "description": "Turn off if this company does not pay commission. New orders then create no commission entries, no monthly statements are made, and the Commission screens are hidden. Existing records are kept."
+  },
+  {
+   "fieldname": "privacy_section",
+   "fieldtype": "Section Break",
+   "label": "Data Retention"
+  },
+  {
+   "fieldname": "failed_log_retention_days",
+   "fieldtype": "Int",
+   "label": "Keep Failed Sync Logs (days)",
+   "default": "180",
+   "non_negative": 1,
+   "description": "Failed and Retrying Sync Logs older than this are deleted daily. 0 keeps them. Successful ones are kept 30 days."
+  },
+  {
+   "fieldname": "col_break_privacy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "retailer_inactive_anonymise_days",
+   "fieldtype": "Int",
+   "label": "Anonymise Inactive Retailers After (days)",
+   "default": "0",
+   "non_negative": 1,
+   "description": "Inactive retailers not changed for this many days get their name, contact, address and location removed (orders keep amounts and dates). 0 turns it off."
+  },
+  {
+   "fieldname": "plans_section",
+   "fieldtype": "Section Break",
+   "label": "App Plans",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "plan_limits",
+   "fieldtype": "JSON",
+   "label": "Plan Limits",
+   "description": "Limits per Shopify App Pricing plan handle, e.g. {\"starter\": {\"sales_reps\": 3, \"orders_per_month\": 200}}. Empty = no limits. Never applies in Client Credentials mode."
   }
  ],
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-24 12:10:00.000000",
+ "modified": "2026-10-25 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

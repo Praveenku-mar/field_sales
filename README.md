@@ -39,6 +39,9 @@ Store Connection has two **Auth Modes**. *Client Credentials* (the default, and 
 | `shopify_app_client_secret` | Client secret from the Dev Dashboard (also verifies webhook signatures) |
 | `shopify_app_scopes` | Optional. Default `read_products,read_inventory,read_locations,write_customers,read_customers,write_draft_orders,read_draft_orders,write_orders,read_orders` |
 | `shopify_app_api_version` | Optional. Admin API version used in OAuth mode, default `2026-10` |
+| `shopify_app_handle` | Optional. The app's handle (its URL name in Shopify), used for the "Change your plan" link |
+| `shopify_partner_org_id`, `shopify_partner_api_token`, `shopify_app_gid` | Optional. Partner API organization id, Partner API client token and the app's `gid://shopify/App/<id>`, to read the shop's Shopify App Pricing plan (plan limits are off without them) |
+| `field_sales_demo_passwords` | Optional. `{"manager": "...", "rep": "..."}` for `bench --site <site> field-sales-demo` (demo data and reviewer logins) |
 | `shopify_app_url` | The site's public HTTPS address, e.g. `https://sales.example.com` (used for the redirect URI and webhook address; falls back to the site URL) |
 
 **2. Dev Dashboard / `shopify.app.toml`.** Copy `shopify.app.toml` from the repo root, replace the client id and every `https://fieldsales.example.com` with your public address, and deploy it with `shopify app deploy` (or enter the same values in the Dev Dashboard):

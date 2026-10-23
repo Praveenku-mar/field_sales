@@ -101,6 +101,8 @@ add_to_apps_screen = [
 # Called by www/fieldsales.py (core never imports field_sales.shopify): returns boot values
 # when the page is opened inside a store's admin, else None.
 field_sales_embedded_page = ["field_sales.shopify.embedded.page_context"]
+# Plan limits checked before adding a sales rep or submitting an order (utils/limits.py).
+field_sales_limit_checks = ["field_sales.shopify.billing.check_limit"]
 
 website_route_rules = [
 	{"from_route": "/fieldsales/<path:app_path>", "to_route": "fieldsales"},
@@ -233,6 +235,8 @@ scheduler_events = {
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 		# Keep the site's currency and time zone the same as the store's.
 		"field_sales.sync.shop_settings.scheduled_sync",
+		# Store Connection retailer_inactive_anonymise_days (0 = off).
+		"field_sales.utils.anonymise.anonymise_inactive_retailers",
 	],
 	# Razorpay payment links whose webhook never arrived (Link Sent, last 7 days, 50 a run).
 	"hourly": [

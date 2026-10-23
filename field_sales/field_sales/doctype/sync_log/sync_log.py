@@ -6,7 +6,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, cint, nowdate
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -32,6 +32,31 @@ _MASK_RE: re.Pattern = re.compile(
 	r'("(?:'
 	+ "|".join(re.escape(k) for k in sorted(_SENSITIVE_KEYS))
 	+ r')"\s*:\s*)"[^"]*"',
+	re.IGNORECASE,
+)
+
+# Personal data of customers (Shopify's camelCase and snake_case, Razorpay's ``contact``):
+# masked too, so a log never holds who a customer is. Ids, amounts and error text stay.
+_PERSONAL_KEYS: frozenset[str] = frozenset(
+	{
+		"email",
+		"phone",
+		"contact",
+		"firstName",
+		"lastName",
+		"first_name",
+		"last_name",
+		"address1",
+		"address2",
+		"zip",
+	}
+)
+_PERSONAL_MASK = '"[redacted]"'
+
+_PERSONAL_RE: re.Pattern = re.compile(
+	r'("(?:'
+	+ "|".join(re.escape(k) for k in sorted(_PERSONAL_KEYS))
+	+ r')"\s*:\s*)"(?:[^"\\]|\\.)*"',
 	re.IGNORECASE,
 )
 
@@ -75,7 +100,7 @@ class SyncLog(Document):
 				self.set(fieldname, value[:_MAX_PAYLOAD_CHARS] + "\n\u2026 [truncated]")
 
 	def _mask_sensitive_keys(self):
-		"""Replace values of sensitive keys with '****' in both payloads."""
+		"""Replace secrets with '****' and personal data with '[redacted]' in both payloads."""
 		for fieldname in ("request_payload", "response_payload"):
 			value: str | None = self.get(fieldname)
 			if value:
@@ -100,7 +125,8 @@ def _mask_payload(payload: str) -> str:
 		>>> _mask_payload('{"access_token": "tok_live_abc123", "amount": 500}')
 		'{"access_token": "****", "amount": 500}'
 	"""
-	return _MASK_RE.sub(lambda m: m.group(1) + '"****"', payload)
+	masked = _MASK_RE.sub(lambda m: m.group(1) + '"****"', payload)
+	return _PERSONAL_RE.sub(lambda m: m.group(1) + _PERSONAL_MASK, masked)
 
 
 def log_sync(
@@ -183,9 +209,9 @@ def log_sync_durable(**fields) -> str:
 
 def clear_old_logs() -> None:
 	"""
-	Scheduled daily job — purge Success Sync Logs older than 30 days.
+	Scheduled daily job — purge Success Sync Logs older than 30 days, and Failed / Retrying
+	ones older than Store Connection ``failed_log_retention_days`` (default 180; 0 keeps them).
 
-	Failed and Retrying logs are **retained indefinitely** for audit purposes.
 	Called via::
 
 	    field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs
@@ -201,4 +227,10 @@ def clear_old_logs() -> None:
 			"creation": ["<", cutoff],
 		},
 	)
+	failed_days = cint(frappe.db.get_single_value("Store Connection", "failed_log_retention_days"))
+	if failed_days > 0:
+		frappe.db.delete(
+			"Sync Log",
+			{"status": ["in", ["Failed", "Retrying"]], "creation": ["<", add_days(nowdate(), -failed_days)]},
+		)
 	frappe.db.commit()

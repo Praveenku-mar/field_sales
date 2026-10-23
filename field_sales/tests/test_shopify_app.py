@@ -207,7 +207,9 @@ class TestOAuthInstall(ShopifyAppTestCase):
 		self.assertTrue(settings.installed_on and settings.token_expiry and settings.refresh_token_expiry)
 		self.assertFalse(settings.uninstalled_on)
 		self.assertGreater(get_datetime(settings.refresh_token_expiry), add_to_date(now_datetime(), days=89))
-		self.assertEqual(enqueue.call_args.args[0], "field_sales.shopify.webhooks.register_webhooks")
+		queued = [c.args[0] for c in enqueue.call_args_list]
+		self.assertIn("field_sales.shopify.webhooks.register_webhooks", queued)
+		self.assertIn("field_sales.shopify.merchant_settings.setup_new_store", queued)
 		self.assertEqual(frappe.session.user, "Administrator")  # restored
 
 	def test_reinstall_overwrites_old_tokens(self):
@@ -571,8 +573,10 @@ class TestPrivacy(ShopifyAppTestCase):
 		with (
 			patch.object(privacy.frappe, "sendmail") as sendmail,
 			patch.object(privacy, "users_with_roles", return_value=["sm@example.com"]),
+			patch("frappe.core.doctype.access_log.access_log.make_access_log") as access_log,
 		):
 			privacy.process(request.name, {"customer": {"id": 777}, "orders_requested": [5001]})
+		self.assertEqual(access_log.call_args.kwargs["document"], request.name)
 
 		request.reload()
 		self.assertEqual(request.status, "Completed")

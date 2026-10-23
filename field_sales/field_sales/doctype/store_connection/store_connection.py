@@ -4,13 +4,17 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils.password import remove_encrypted_password
 
-from field_sales.connectors.shopify import is_myshopify_domain, normalize_shop_domain
+from field_sales.connectors import CONNECTORS
+
+# Set by the Shopify install flow: store_url is then filled by it, not typed by the user.
+OAUTH_MODE = "OAuth"
 
 
 class StoreConnection(Document):
 	def validate(self):
-		self._normalize_shopify_store_url()
+		self._normalize_store_url()
 		self._clear_token_on_credential_change()
 		self._validate_locations()
 		# Read here: after the save the field only holds the masked value.
@@ -19,6 +23,9 @@ class StoreConnection(Document):
 		)
 
 	def on_update(self):
+		if self.flags.clear_stored_tokens:
+			for field in ("access_token", "refresh_token"):
+				remove_encrypted_password(self.doctype, self.name, field)
 		self._queue_shop_settings_sync()
 
 	def _queue_shop_settings_sync(self):
@@ -82,25 +89,34 @@ class StoreConnection(Document):
 		if not before:
 			return
 
-		changed = any(
-			self.get(f) != before.get(f) for f in ("platform", "store_url", "shopify_client_id")
-		) or not self.is_dummy_password(self.shopify_client_secret or "")
-		if changed and (before.get("access_token") or before.get("token_expiry")):
+		fields = ["platform", "store_url", "shopify_auth_mode"]
+		secret_changed = False
+		if self.shopify_auth_mode != OAUTH_MODE:
+			# The app credentials on this form only matter for the client credentials grant.
+			fields.append("shopify_client_id")
+			secret = self.shopify_client_secret or ""
+			secret_changed = (bool(secret) and not self.is_dummy_password(secret)) or (
+				not secret and bool(before.get("shopify_client_secret"))
+			)
+		changed = secret_changed or any(self.get(f) != before.get(f) for f in fields)
+		if changed and (before.get("access_token") or before.get("token_expiry") or before.get("refresh_token")):
 			self.access_token = None
 			self.token_expiry = None
+			self.refresh_token = None
+			self.refresh_token_expiry = None
+			self.flags.clear_stored_tokens = True
 
-	def _normalize_shopify_store_url(self):
-		"""Store the bare ``*.myshopify.com`` domain, whatever form of URL was pasted."""
-		if self.platform != "Shopify" or not self.store_url:
-			return
+	def _normalize_store_url(self):
+		"""
+		Let the platform's connector clean up and check Store URL (``normalize_store_url``).
 
-		domain = normalize_shop_domain(self.store_url)
-		if not is_myshopify_domain(domain):
-			frappe.throw(
-				_(
-					"Store URL must be the shop's myshopify.com domain (e.g. your-store.myshopify.com). "
-					"You can find it in Shopify admin under Settings > Domains."
-				),
-				title=_("Invalid Store URL"),
-			)
-		self.store_url = domain
+		In OAuth mode the install flow sets Store URL; a typed change is undone.
+		"""
+		if self.shopify_auth_mode == OAUTH_MODE and not self.flags.from_store_install and not self.is_new():
+			before = self.get_doc_before_save()
+			if before and before.store_url:
+				self.store_url = before.store_url
+
+		connector_cls = CONNECTORS.get(self.platform)
+		if connector_cls and self.store_url:
+			self.store_url = connector_cls.normalize_store_url(self.store_url)

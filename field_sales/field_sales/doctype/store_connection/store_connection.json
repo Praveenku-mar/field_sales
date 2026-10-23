@@ -13,10 +13,14 @@
   "enabled",
   "store_url",
   "shopify_section",
+  "shopify_auth_mode",
   "shopify_client_id",
   "col_break_shopify",
   "shopify_client_secret",
   "shopify_api_version",
+  "shopify_scopes",
+  "installed_on",
+  "uninstalled_on",
   "woocommerce_section",
   "woo_consumer_key",
   "col_break_woo",
@@ -29,8 +33,10 @@
   "odoo_api_key",
   "token_section",
   "access_token",
+  "refresh_token",
   "col_break_token",
   "token_expiry",
+  "refresh_token_expiry",
   "defaults_section",
   "default_location_id",
   "col_break_defaults",
@@ -87,7 +93,8 @@
    "fieldtype": "Data",
    "label": "Store URL",
    "reqd": 1,
-   "description": "Shopify: kovai-mart.myshopify.com · WooCommerce: https://shop.com · Odoo: https://company.odoo.com"
+   "description": "Shopify: kovai-mart.myshopify.com · WooCommerce: https://shop.com · Odoo: https://company.odoo.com",
+   "read_only_depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
   },
   {
    "fieldname": "shopify_section",
@@ -96,10 +103,19 @@
    "depends_on": "eval:doc.platform=='Shopify'"
   },
   {
+   "fieldname": "shopify_auth_mode",
+   "fieldtype": "Select",
+   "label": "Auth Mode",
+   "options": "Client Credentials\nOAuth",
+   "default": "Client Credentials",
+   "depends_on": "eval:doc.platform=='Shopify'",
+   "description": "Client Credentials: a store in our own Shopify organization, credentials entered here. OAuth: installed from the Shopify App Store; the install fills the Store URL and tokens."
+  },
+  {
    "fieldname": "shopify_client_id",
    "fieldtype": "Data",
    "label": "Client ID",
-   "depends_on": "eval:doc.platform=='Shopify'",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode!='OAuth'",
    "mandatory_depends_on": "eval:doc.platform=='Shopify'"
   },
   {
@@ -110,7 +126,7 @@
    "fieldname": "shopify_client_secret",
    "fieldtype": "Password",
    "label": "Client Secret",
-   "depends_on": "eval:doc.platform=='Shopify'",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode!='OAuth'",
    "mandatory_depends_on": "eval:doc.platform=='Shopify'"
   },
   {
@@ -118,7 +134,28 @@
    "fieldtype": "Data",
    "label": "API Version",
    "default": "2026-10",
-   "depends_on": "eval:doc.platform=='Shopify'"
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode!='OAuth'"
+  },
+  {
+   "fieldname": "shopify_scopes",
+   "fieldtype": "Small Text",
+   "label": "Granted Scopes",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "installed_on",
+   "fieldtype": "Datetime",
+   "label": "Installed On",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "uninstalled_on",
+   "fieldtype": "Datetime",
+   "label": "Uninstalled On",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
   },
   {
    "fieldname": "woocommerce_section",
@@ -197,6 +234,14 @@
    "hidden": 1
   },
   {
+   "fieldname": "refresh_token",
+   "fieldtype": "Password",
+   "label": "Refresh Token",
+   "hidden": 1,
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
    "fieldname": "col_break_token",
    "fieldtype": "Column Break"
   },
@@ -205,6 +250,13 @@
    "fieldtype": "Datetime",
    "label": "Token Expiry",
    "read_only": 1
+  },
+  {
+   "fieldname": "refresh_token_expiry",
+   "fieldtype": "Datetime",
+   "label": "Refresh Token Expiry",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
   },
   {
    "fieldname": "defaults_section",
@@ -373,7 +425,7 @@
  "in_create": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-22 13:00:00.000000",
+ "modified": "2026-10-23 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store Connection",

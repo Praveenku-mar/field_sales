@@ -1,0 +1,47 @@
+# Shopify app configuration for the Shopify CLI / Dev Dashboard (`shopify app deploy`).
+#
+# Replace per deployment: client_id, and every https://fieldsales.example.com URL with
+# the site's public HTTPS address (the same value as site_config `shopify_app_url`).
+# The client secret never goes in this file; it belongs in site_config
+# (`shopify_app_client_secret`).
+
+client_id = "REPLACE_WITH_CLIENT_ID"
+name = "Field Sales"
+# Shopify opens this with ?shop=&hmac=&timestamp= on install and when the merchant
+# opens the app; it starts the OAuth grant and ends on /fieldsales.
+application_url = "https://fieldsales.example.com/api/method/field_sales.shopify.oauth.install"
+embedded = false
+
+[access_scopes]
+# Keep in step with site_config `shopify_app_scopes` (default in field_sales/shopify/config.py).
+scopes = "read_products,read_inventory,read_locations,write_customers,read_customers,write_draft_orders,read_draft_orders,write_orders,read_orders"
+# The app runs the authorization code grant itself (install -> callback), so scopes are
+# sent in the authorize URL rather than Shopify managed installation.
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = [
+  "https://fieldsales.example.com/api/method/field_sales.shopify.oauth.callback",
+]
+
+[webhooks]
+api_version = "2026-10"
+
+# Mandatory privacy compliance topics (can't be subscribed through the API).
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+uri = "https://fieldsales.example.com/api/method/field_sales.shopify.webhooks.receive"
+
+# Store data the sync needs (stock, prices, commission). Same endpoint as client
+# credentials sites use.
+[[webhooks.subscriptions]]
+topics = [
+  "inventory_levels/update",
+  "products/update",
+  "products/delete",
+  "orders/paid",
+  "orders/fulfilled",
+  "orders/cancelled",
+  "refunds/create",
+]
+uri = "https://fieldsales.example.com/api/method/field_sales.api.webhooks.receive"

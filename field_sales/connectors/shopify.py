@@ -4,17 +4,20 @@
 """
 Shopify connector (Admin GraphQL API).
 
-Auth uses the OAuth *client credentials* grant: the app's client id/secret
-from Store Connection are exchanged for a short-lived access token, which is
-cached encrypted on Store Connection and refreshed shortly before it expires
-(or immediately on a 401).
+Two auth modes (``Store Connection.shopify_auth_mode``):
+
+- **Client Credentials** (stores in our own Shopify organization): the client
+  id/secret on Store Connection are exchanged for a short-lived access token.
+- **OAuth** (App Store installs): ``field_sales.shopify.oauth`` stores an
+  expiring offline token and its refresh token; the app's credentials and API
+  version come from site_config (``field_sales.shopify.config``).
+
+Either way the access token is cached encrypted on Store Connection and renewed
+shortly before it expires (or once on a 401).
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
 import re
 import time
@@ -24,7 +27,7 @@ import frappe
 import requests
 from frappe import _
 from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime
-from frappe.utils.password import set_encrypted_password
+from frappe.utils.password import get_decrypted_password, remove_encrypted_password, set_encrypted_password
 
 from field_sales.connectors.base import (
 	ORDER_CANCELLED_TOPIC,
@@ -37,12 +40,16 @@ from field_sales.connectors.base import (
 	BaseConnector,
 	ConnectorError,
 )
+from field_sales.shopify import config as app_config
 
 # (connect, read) seconds. A short connect limit means an unreachable address (e.g. a broken
 # IPv6 route) is given up quickly and the next one (IPv4) is tried; replies still get 30 s.
 REQUEST_TIMEOUT = (5, 30)
 TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 DEFAULT_TOKEN_TTL = 24 * 60 * 60  # used if Shopify omits expires_in
+# Only one worker may refresh an OAuth token at a time (Shopify retires the other one's token).
+TOKEN_LOCK_KEY = "field_sales:shopify_token_refresh"
+TOKEN_LOCK_SECONDS = 30
 THROTTLE_MIN_AVAILABLE = 100  # query cost points
 THROTTLE_SLEEP_SECONDS = 2
 PAGE_SIZE = 50
@@ -221,6 +228,19 @@ TEST_CONNECTION_QUERY = (
 	"currentAppInstallation { accessScopes { handle } } }"
 )
 
+WEBHOOK_SUBSCRIPTIONS_QUERY = """
+query($topics: [WebhookSubscriptionTopic!]) {
+  webhookSubscriptions(first: 50, topics: $topics) { nodes { id topic uri } }
+}"""
+
+WEBHOOK_SUBSCRIPTION_CREATE = """
+mutation($topic: WebhookSubscriptionTopic!, $sub: WebhookSubscriptionInput!) {
+  webhookSubscriptionCreate(topic: $topic, webhookSubscription: $sub) {
+    webhookSubscription { id topic uri }
+    userErrors { field message }
+  }
+}"""
+
 # Shopify needs a code for an order-level fixed discount; this one is shown on the order.
 ORDER_DISCOUNT_CODE = "FIELD-ORDER"
 
@@ -241,10 +261,12 @@ class ShopifyConnector(BaseConnector):
 					self.shop_domain
 				)
 			)
-		if not settings.shopify_api_version:
+		self.oauth = is_oauth(settings)
+		api_version = app_config.api_version() if self.oauth else settings.shopify_api_version
+		if not api_version:
 			frappe.throw(_("Shopify API Version is required on Store Connection"))
 
-		self.graphql_url = f"https://{self.shop_domain}/admin/api/{settings.shopify_api_version}/graphql.json"
+		self.graphql_url = f"https://{self.shop_domain}/admin/api/{api_version}/graphql.json"
 		self.token_url = f"https://{self.shop_domain}/admin/oauth/access_token"
 
 		# Token cached for the life of this instance, so a refresh made here is
@@ -256,6 +278,22 @@ class ShopifyConnector(BaseConnector):
 		self._token_is_fresh = False
 		# Shop currency (order prices are sent in it), looked up once per instance.
 		self._currency: str | None = None
+
+	@staticmethod
+	def normalize_store_url(url: str | None) -> str:
+		"""Store the bare ``*.myshopify.com`` domain, whatever form of URL was pasted."""
+		if not (url or "").strip():
+			return ""
+		domain = normalize_shop_domain(url)
+		if not is_myshopify_domain(domain):
+			frappe.throw(
+				_(
+					"Store URL must be the shop's myshopify.com domain (e.g. your-store.myshopify.com). "
+					"You can find it in Shopify admin under Settings > Domains."
+				),
+				title=_("Invalid Store URL"),
+			)
+		return domain
 
 	# ------------------------------------------------------------------
 	# Public API
@@ -289,6 +327,24 @@ class ShopifyConnector(BaseConnector):
 			"timezone": shop.get("ianaTimezone") or "",
 			"message": _("Connected to {0} ({1})").format(shop.get("name"), shop.get("myshopifyDomain")),
 		}
+
+	def ensure_webhook(self, topic: str, uri: str) -> str:
+		"""
+		Subscribe ``uri`` to ``topic`` (a ``WebhookSubscriptionTopic`` such as ``APP_UNINSTALLED``)
+		unless that subscription exists. Shopify-only; used by ``field_sales.shopify.webhooks``.
+
+		:return: ``"exists"`` or ``"created"``.
+		"""
+		data = self._graphql(WEBHOOK_SUBSCRIPTIONS_QUERY, {"topics": [topic]}, operation="Register Webhooks")
+		nodes = (data.get("webhookSubscriptions") or {}).get("nodes") or []
+		if any(n.get("uri") == uri for n in nodes):
+			return "exists"
+		self._graphql(
+			WEBHOOK_SUBSCRIPTION_CREATE,
+			{"topic": topic, "sub": {"uri": uri}},
+			operation="Register Webhooks",
+		)
+		return "created"
 
 	def ensure_order_metafields(self) -> bool:
 		"""
@@ -387,16 +443,12 @@ class ShopifyConnector(BaseConnector):
 		return [_normalize_variant(v) for v in (product.get("variants") or {}).get("nodes") or []]
 
 	def verify_webhook(self, headers, raw_body: bytes) -> bool:
-		"""HMAC-SHA256 of the body (keyed with the client secret) must match, from this shop."""
-		secret = self.settings.get_password("shopify_client_secret", raise_exception=False)
+		"""HMAC-SHA256 of the body (keyed with the app's client secret) must match, from this shop."""
 		signature = headers.get("X-Shopify-Hmac-Sha256")
 		shop = headers.get("X-Shopify-Shop-Domain")
-		if not secret or not signature or not shop:
+		if not signature or not shop:
 			return False
-
-		digest = hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()
-		expected = base64.b64encode(digest).decode()
-		signature_ok = hmac.compare_digest(expected.encode(), signature.strip().encode())
+		signature_ok = app_config.verify_body_hmac(raw_body, signature, [self._client_secret()])
 		return signature_ok and shop.strip().lower() == self.shop_domain.lower()
 
 	def parse_webhook(self, headers, raw_body: bytes) -> dict:
@@ -789,31 +841,43 @@ class ShopifyConnector(BaseConnector):
 	# Auth
 	# ------------------------------------------------------------------
 
+	def _client_id(self) -> str:
+		"""The app's client id: site_config in OAuth mode, Store Connection otherwise."""
+		return app_config.client_id() if self.oauth else (self.settings.shopify_client_id or "")
+
+	def _client_secret(self) -> str:
+		"""The app's client secret (also the webhook signing key); never logged."""
+		if self.oauth:
+			return app_config.client_secret()
+		return self.settings.get_password("shopify_client_secret", raise_exception=False) or ""
+
 	def _get_token(self, force_refresh: bool = False) -> str:
 		"""
 		Return a valid access token, requesting a new one if needed.
 
 		The stored token is reused while it has more than ``TOKEN_REFRESH_MARGIN``
-		left. ``force_refresh`` skips that check (used after a 401).
+		left (an OAuth token without an expiry is non-expiring). ``force_refresh``
+		skips that check (used after a 401).
 		"""
 		if not force_refresh:
 			if self._token is None:
 				self._token = self.settings.get_password("access_token", raise_exception=False)
 				self._token_expiry = self.settings.token_expiry
 
-			if (
-				self._token
-				and self._token_expiry
-				and get_datetime(self._token_expiry) > now_datetime() + TOKEN_REFRESH_MARGIN
+			if self._token and (
+				(self._token_expiry and get_datetime(self._token_expiry) > now_datetime() + TOKEN_REFRESH_MARGIN)
+				or (self.oauth and not self._token_expiry)
 			):
 				return self._token
 
+		if self.oauth:
+			return self._refresh_oauth_token(stale_token=self._token)
 		return self._request_new_token()
 
 	def _request_new_token(self) -> str:
 		"""Run the client-credentials grant, store the token encrypted, and commit."""
-		client_id = self.settings.shopify_client_id
-		client_secret = self.settings.get_password("shopify_client_secret", raise_exception=False)
+		client_id = self._client_id()
+		client_secret = self._client_secret()
 		if not client_id or not client_secret:
 			raise ConnectorError(
 				_("Shopify Client ID and Client Secret are required on Store Connection"), code="CONFIG_ERROR"
@@ -867,6 +931,116 @@ class ShopifyConnector(BaseConnector):
 		self._token, self._token_expiry = token, expiry
 		self._token_is_fresh = True
 		return token
+
+	def _refresh_oauth_token(self, stale_token: str | None = None) -> str:
+		"""
+		OAuth mode: swap the stored refresh token for a new access + refresh token, store both, commit.
+
+		Runs under a Redis lock: Shopify retires the other token whenever one is issued, so two
+		workers refreshing at once would invalidate each other. A worker that waited for the lock
+		uses the token the other one stored instead of refreshing again.
+
+		A missing, expired or rejected refresh token disables Store Connection and raises
+		``ConnectorError(code="REAUTH_REQUIRED")``: the merchant must open the app from Shopify again.
+
+		:param stale_token: The token this instance already holds (and wants replaced).
+		"""
+		lock = frappe.cache.lock(
+			frappe.cache.make_key(TOKEN_LOCK_KEY), timeout=TOKEN_LOCK_SECONDS, blocking_timeout=TOKEN_LOCK_SECONDS
+		)
+		if not lock.acquire():
+			raise ConnectorError(_("Timed out waiting for another Shopify token refresh"), code="AUTH_FAILED")
+		try:
+			# End this transaction's snapshot so the reads below see a token another worker committed.
+			frappe.db.commit()
+			current = get_decrypted_password(
+				"Store Connection", "Store Connection", "access_token", raise_exception=False
+			)
+			expiry = _stored_datetime("token_expiry")
+			if (
+				current
+				and current != stale_token
+				and expiry
+				and expiry > now_datetime() + TOKEN_REFRESH_MARGIN
+			):
+				self._token, self._token_expiry = current, expiry
+				return current
+
+			refresh_token = get_decrypted_password(
+				"Store Connection", "Store Connection", "refresh_token", raise_exception=False
+			)
+			refresh_expiry = _stored_datetime("refresh_token_expiry")
+			if not refresh_token:
+				self._require_reauth(_("No Shopify refresh token is stored"))
+			if refresh_expiry and refresh_expiry <= now_datetime():
+				self._require_reauth(_("The Shopify refresh token expired on {0}").format(refresh_expiry))
+
+			client_id, client_secret = self._client_id(), self._client_secret()
+			if not client_id or not client_secret:
+				raise ConnectorError(
+					_("shopify_app_client_id and shopify_app_client_secret must be set in site_config"),
+					code="CONFIG_ERROR",
+				)
+
+			log_request = frappe.as_json({"grant_type": "refresh_token", "client_id": client_id})
+			start = time.monotonic()
+			try:
+				response = requests.post(
+					self.token_url,
+					data={
+						"client_id": client_id,
+						"client_secret": client_secret,
+						"grant_type": "refresh_token",
+						"refresh_token": refresh_token,
+					},
+					headers={"Accept": "application/json"},
+					timeout=REQUEST_TIMEOUT,
+				)
+			except requests.RequestException as e:
+				self._log_token_call("Failed", start, None, log_request, None, str(e), "NETWORK_ERROR")
+				raise ConnectorError(_("Could not reach Shopify: {0}").format(e), code="NETWORK_ERROR") from e
+
+			body = _json_or_none(response) or {}
+			if response.status_code in (400, 401) or (response.ok and not body.get("access_token")):
+				message = _error_text(body, response) or _("No access token in response")
+				self._log_token_call(
+					"Failed", start, response.status_code, log_request, response.text, message, "REAUTH_REQUIRED"
+				)
+				self._require_reauth(_("Shopify rejected the refresh token: {0}").format(message))
+			if not response.ok:
+				message = _error_text(body, response)
+				self._log_token_call(
+					"Failed", start, response.status_code, log_request, response.text, message, "AUTH_FAILED"
+				)
+				raise ConnectorError(
+					_("Shopify token refresh failed: {0}").format(message),
+					code="AUTH_FAILED",
+					http_status=response.status_code,
+				)
+
+			self._log_token_call("Success", start, response.status_code, log_request, response.text)
+			expiry = save_oauth_tokens(body)
+			frappe.db.commit()
+		finally:
+			try:
+				lock.release()
+			except Exception:
+				pass  # the lock timed out and was taken over; nothing to release
+
+		self._token, self._token_expiry = body["access_token"], expiry
+		self._token_is_fresh = True
+		return self._token
+
+	def _require_reauth(self, reason: str):
+		"""Disable the connection, drop the dead tokens, and raise ``REAUTH_REQUIRED``."""
+		message = _("Reinstall required: {0}. Open the app from Shopify admin to reconnect.").format(reason)
+		clear_oauth_tokens()
+		frappe.db.set_single_value(
+			"Store Connection", {"enabled": 0, "last_test_status": message[:140], "last_tested_on": now_datetime()}
+		)
+		frappe.db.commit()
+		self._write_log("Token Refresh", status="Failed", error_code="REAUTH_REQUIRED", error_message=message)
+		raise ConnectorError(message, code="REAUTH_REQUIRED")
 
 	def _log_token_call(self, status, start, http_status, request, response, error=None, code=None):
 		"""Write the Sync Log for one token request."""
@@ -948,7 +1122,14 @@ class ShopifyConnector(BaseConnector):
 
 			# A token only carries the scopes granted when it was issued; if the
 			# store has since accepted more, a fresh token picks them up.
-			if error and error.code == "ACCESS_DENIED" and attempt == 1 and not self._token_is_fresh:
+			# In OAuth mode scopes only change by reinstalling, so a refresh would not help.
+			if (
+				error
+				and error.code == "ACCESS_DENIED"
+				and attempt == 1
+				and not self._token_is_fresh
+				and not self.oauth
+			):
 				self._write_log(**log, status="Retrying", error_message=error.message, error_code=error.code)
 				continue
 
@@ -1215,6 +1396,65 @@ def _normalize_variant(variant: dict) -> dict:
 		"status": STATUS_MAP.get(product.get("status"), "Draft"),
 		"track_inventory": bool(inventory_item.get("tracked")),
 	}
+
+
+def is_oauth(settings) -> bool:
+	"""True when Store Connection uses the App Store (OAuth) install rather than client credentials."""
+	return (settings.get("shopify_auth_mode") or app_config.CLIENT_CREDENTIALS_MODE) == app_config.OAUTH_MODE
+
+
+def save_oauth_tokens(body: dict):
+	"""
+	Store a token response from ``/admin/oauth/access_token`` (code exchange or refresh) on
+	Store Connection: access + refresh tokens encrypted, their expiries, granted scopes.
+	Does not commit.
+
+	:return: The access token's expiry (``None`` for a non-expiring token).
+	"""
+	now = now_datetime()
+	token = body["access_token"]
+	expiry = add_to_date(now, seconds=cint(body["expires_in"])) if body.get("expires_in") else None
+	refresh = body.get("refresh_token")
+	values = {"access_token": "*" * len(token), "token_expiry": expiry}
+
+	set_encrypted_password("Store Connection", "Store Connection", token, "access_token")
+	if refresh:
+		set_encrypted_password("Store Connection", "Store Connection", refresh, "refresh_token")
+		values["refresh_token"] = "*" * len(refresh)
+		values["refresh_token_expiry"] = (
+			add_to_date(now, seconds=cint(body["refresh_token_expires_in"]))
+			if body.get("refresh_token_expires_in")
+			else None
+		)
+	else:
+		remove_encrypted_password("Store Connection", "Store Connection", "refresh_token")
+		values.update(refresh_token=None, refresh_token_expiry=None)
+	if body.get("scope"):
+		values["shopify_scopes"] = body["scope"]
+	frappe.db.set_single_value("Store Connection", values)
+	return expiry
+
+
+def clear_oauth_tokens() -> None:
+	"""Forget the stored access and refresh tokens (uninstall, reauth, shop redact). Does not commit."""
+	for field in ("access_token", "refresh_token"):
+		remove_encrypted_password("Store Connection", "Store Connection", field)
+	frappe.db.set_single_value(
+		"Store Connection",
+		{"access_token": None, "token_expiry": None, "refresh_token": None, "refresh_token_expiry": None},
+	)
+
+
+def _stored_datetime(field: str):
+	"""A Store Connection Datetime straight from the table (``None`` if unset; see Gotchas on Singles)."""
+	singles = frappe.qb.DocType("Singles")
+	rows = (
+		frappe.qb.from_(singles)
+		.select(singles.value)
+		.where((singles.doctype == "Store Connection") & (singles.field == field))
+		.run()
+	)
+	return get_datetime(rows[0][0]) if rows and rows[0][0] else None
 
 
 def normalize_shop_domain(store_url: str | None) -> str:

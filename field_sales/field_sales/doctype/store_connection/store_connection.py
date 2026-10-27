@@ -34,12 +34,14 @@ class StoreConnection(Document):
 
 		Never runs inline, so wrong credentials can't block or fail the save.
 		"""
-		if not (self.enabled and self.platform == "Shopify" and self.match_shop_settings):
+		if self.platform not in ("Shopify", "WooCommerce") or not self.enabled:
 			return
+		# The sync records the store's currency/timezone always; applying them to the
+		# site is what Match Store Currency and Timezone decides.
 		changed = (
 			any(
 				self.has_value_changed(f)
-				for f in ("enabled", "store_url", "shopify_client_id", "match_shop_settings")
+				for f in ("enabled", "store_url", "shopify_client_id", "woo_consumer_key", "match_shop_settings")
 			)
 			or self.flags.secret_entered
 			or not self.shop_currency

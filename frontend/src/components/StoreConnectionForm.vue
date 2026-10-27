@@ -140,7 +140,7 @@
             label="Test Connection"
             icon-left="lucide-cable"
             :loading="testing"
-            :disabled="d.platform !== 'Shopify'"
+            :disabled="!['Shopify', 'WooCommerce'].includes(d.platform)"
             @click="testConnection"
           />
           <p v-if="d.platform && d.platform !== 'Shopify'" class="text-sm text-ink-gray-5">

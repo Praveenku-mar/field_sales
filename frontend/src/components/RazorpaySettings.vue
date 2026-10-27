@@ -30,6 +30,21 @@
       </button>
     </div>
 
+    <!-- The App Store edition: links are off; the store's own checkout pays (Shopify rule). -->
+    <div
+      v-if="locked"
+      role="note"
+      class="flex items-start gap-2.5 rounded-3 border border-outline-blue-2 bg-surface-blue-1 px-4 py-3 text-sm text-ink-blue-7"
+    >
+      <span class="lucide-circle-info mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <p class="min-w-0 flex-1 break-words">
+        <span class="font-semibold">Payment links are off in the Shopify App Store edition.</span>
+        Shopify requires payment for store orders to happen in the store's checkout. To accept
+        Razorpay, install Shopify's official Razorpay app on your store: retailers then pay with the
+        order's <span class="font-medium">Pay in Store Checkout</span> link.
+      </p>
+    </div>
+
     <div class="fs-card">
       <!-- Connection -->
       <section class="p-8">
@@ -39,12 +54,14 @@
             v-model="d.enabled"
             label="Enabled"
             description="Let reps create Razorpay payment links for submitted orders"
+            :disabled="locked"
           />
           <Select
             v-model="d.mode"
             :options="MODES"
             label="Mode"
             description="For display only: Razorpay decides the mode from the key (rzp_test_ / rzp_live_)"
+            :disabled="locked"
           />
         </div>
       </section>
@@ -65,6 +82,7 @@
             placeholder="rzp_test_…"
             :required="!!d.enabled"
             :description="keyModeHint"
+            :disabled="locked"
           />
           <TextInput
             v-model="d.key_secret"
@@ -72,12 +90,13 @@
             label="Key Secret"
             :required="!!d.enabled"
             description="Stored encrypted — the masked value is kept unless you type a new secret"
+            :disabled="locked"
           >
             <template #suffix><SecretToggle field="key_secret" /></template>
           </TextInput>
         </div>
         <div class="mt-6">
-          <Button variant="outline" label="Test Connection" icon-left="lucide-cable" :loading="testing" @click="testConnection" />
+          <Button variant="outline" label="Test Connection" icon-left="lucide-cable" :loading="testing" :disabled="locked" @click="testConnection" />
         </div>
       </section>
 
@@ -106,6 +125,7 @@
             :type="secretsShown.webhook_secret ? 'text' : 'password'"
             label="Webhook Secret"
             description="The secret entered on the Razorpay webhook (not the key secret)"
+            :disabled="locked"
           >
             <template #suffix><SecretToggle field="webhook_secret" /></template>
           </TextInput>
@@ -122,6 +142,7 @@
             min="0"
             label="Link Expiry (Hours)"
             description="0 = the link never expires"
+            :disabled="locked"
           />
           <TextInput
             v-model="d.callback_url"
@@ -129,9 +150,10 @@
             label="Callback URL"
             placeholder="https://…"
             description="Optional: where the retailer is sent after paying"
+            :disabled="locked"
           />
-          <Checkbox v-model="d.notify_sms" label="Send link by SMS" description="Razorpay texts the link to the retailer's phone" />
-          <Checkbox v-model="d.notify_email" label="Send link by email" description="Razorpay emails the link to the retailer" />
+          <Checkbox v-model="d.notify_sms" label="Send link by SMS" description="Razorpay texts the link to the retailer's phone" :disabled="locked" />
+          <Checkbox v-model="d.notify_email" label="Send link by email" description="Razorpay emails the link to the retailer" :disabled="locked" />
         </div>
       </section>
     </div>
@@ -151,6 +173,10 @@ const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.
 
 // frappe.client.get skips the doctype's onload, so the URL comes from its own call.
 const webhookUrl = createResource({ url: 'field_sales.payments.razorpay.get_webhook_url', method: 'GET', auto: true })
+
+// Payment links are off on the Shopify App Store edition; the settings stay readable.
+const config = createResource({ url: 'field_sales.payments.razorpay.get_payment_config', method: 'GET', auto: true })
+const locked = computed(() => config.data?.available === false)
 
 const MODES = ['Test', 'Live'].map((v) => ({ label: v, value: v }))
 

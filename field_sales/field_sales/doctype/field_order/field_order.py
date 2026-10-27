@@ -23,6 +23,7 @@ SYNC_FIELDS = (
 	"external_draft_id",
 	"store_draft_name",
 	"external_order_id",
+	"store_checkout_url",
 	"sync_status",
 	"sync_attempts",
 	"last_sync_attempt",
@@ -145,7 +146,12 @@ class FieldOrder(Document):
 			return
 
 		if not self.location_id:
-			self.location_id = next(loc["location_id"] for loc in locations.values() if loc["is_default"])
+			default = next((loc["location_id"] for loc in locations.values() if loc["is_default"]), None)
+			if not default:
+				frappe.throw(
+					_("The store has no default sell-from location. Pick one on the order, or set a default in Settings.")
+				)
+			self.location_id = default
 		if self.location_id not in locations:
 			frappe.throw(
 				_("Location {0} is not one the shop sells from. Pick one of: {1}").format(

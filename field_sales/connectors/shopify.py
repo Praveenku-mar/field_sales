@@ -121,7 +121,7 @@ query($ids: [ID!]!, $loc: ID!) {
 }
 """
 
-DRAFT_ORDER_FIELDS = "id name status order { id name }"
+DRAFT_ORDER_FIELDS = "id name status invoiceUrl order { id name }"
 
 DRAFT_ORDER_CREATE = """
 mutation($input: DraftOrderInput!) {
@@ -1395,6 +1395,7 @@ def _order_result(draft: dict) -> dict:
 		"draft_name": draft.get("name"),
 		"order_id": from_gid(order.get("id")),
 		"order_name": order.get("name"),
+		"checkout_url": draft.get("invoiceUrl"),
 	}
 
 

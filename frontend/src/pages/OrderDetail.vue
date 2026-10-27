@@ -388,6 +388,19 @@
               />
             </div>
           </div>
+          <div v-if="storeCheckout && !pay.razorpay_payment_link_url" class="space-y-2 p-4 pt-1">
+            <Button
+              class="flex-1"
+              variant="solid"
+              label="Pay in Store Checkout"
+              icon-left="lucide-external-link"
+              @click="openStoreCheckout"
+            />
+            <div class="flex gap-2">
+              <Button class="flex-1" label="Copy Link" icon-left="lucide-copy" @click="copyStoreCheckout" />
+              <Button class="flex-1" label="WhatsApp" icon-left="lucide-message-circle" @click="shareStoreCheckout" />
+            </div>
+          </div>
         </div>
 
         <!-- Invoice and confirmation email -->
@@ -1165,6 +1178,7 @@ const paymentRows = computed(() => {
     { label: 'Amount Paid', value: `${formatCurrency(o.amount_paid || 0)} of ${formatCurrency(o.grand_total ?? d.value.grand_total ?? 0)}`, muted: !o.amount_paid },
   ]
   if (o.razorpay_payment_link_url) rows.push({ label: 'Payment Link', value: o.razorpay_payment_link_id || 'Open', href: o.razorpay_payment_link_url })
+  else if (storeCheckout.value) rows.push({ label: 'Store Checkout', value: 'Pay online', href: o.store_checkout_url })
   else rows.push({ label: 'Payment Link', value: 'Not created', muted: true })
   if (o.payment_link_expires_on && !o.paid_on) rows.push({ label: 'Link Expires', value: when(o.payment_link_expires_on) })
   if (o.paid_on) rows.push({ label: 'Paid On', value: when(o.paid_on) })
@@ -1185,10 +1199,37 @@ const linkActive = computed(
 // a new link would ask for the full total again.
 const linkAction = computed(() => {
   const o = pay.value
-  if (!o.razorpay_enabled || !o.can_create_link || !(o.grand_total > 0)) return null
+  if (!o.razorpay_enabled || !o.can_create_link || o.payment_links_available === false || !(o.grand_total > 0)) return null
   if (o.payment_status === 'Paid' || o.payment_status === 'Partially Paid') return null
   return linkActive.value ? 'New Link' : 'Create Link'
 })
+
+// The store's own checkout link: payment without leaving Shopify (the App Store
+// edition's only payment link; direct installs get it when Razorpay has no link yet).
+const storeCheckout = computed(() => {
+  const o = pay.value
+  return !!o.store_checkout_url && !['Paid', 'Partially Paid'].includes(o.payment_status)
+})
+
+function openStoreCheckout() {
+  window.open(pay.value.store_checkout_url, '_blank', 'noopener')
+}
+
+async function copyStoreCheckout() {
+  try {
+    await navigator.clipboard.writeText(pay.value.store_checkout_url || '')
+    toast.success('Checkout link copied')
+  } catch {
+    toast.error('Could not copy to clipboard')
+  }
+}
+
+function shareStoreCheckout() {
+  const o = pay.value
+  const text = `Hello ${o.retailer_name || d.value.retailer_name || ''}, please pay ${formatCurrency(o.grand_total)} for order ${o.order_label} in the store checkout: ${o.store_checkout_url}`
+  if (!o.whatsapp_number) toast.warning('The retailer has no valid mobile number; pick the contact in WhatsApp.')
+  window.open(`https://wa.me/${o.whatsapp_number || ''}?text=${encodeURIComponent(text)}`, '_blank', 'noopener')
+}
 
 async function reloadPayment() {
   await Promise.all([paymentInfo.reload(), doc.reload()])

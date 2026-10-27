@@ -39,6 +39,8 @@ class TestCommission(IntegrationTestCase):
 			"Store Connection",
 			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_api_version": "2026-10"},
 		)
+		# Earlier runs' entries linger on a shared site; every test counts from empty.
+		frappe.db.delete("Commission Entry")
 		self.conn = get_connector()
 		self.products = {}
 		self.users = 0
@@ -676,11 +678,16 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual(len(result["created"]), 1)
 		statement = frappe.get_doc("Commission Statement", result["created"][0])
 		self.assertEqual((statement.sales_rep, statement.status, statement.net_payable), (with_entries.name, "Draft", 25))
-		self.assertEqual([s["rep"] for s in result["skipped"]], [without_entries.name])
+		# Other active reps on the site are skipped too; check ours, not the whole list.
+		skipped = {s["rep"] for s in result["skipped"]}
+		self.assertIn(without_entries.name, skipped)
+		self.assertNotIn(with_entries.name, skipped)
 
 		again = generate_statements(month)
 		self.assertEqual(again["created"], [])
-		self.assertEqual({s["rep"] for s in again["skipped"]}, {with_entries.name, without_entries.name})
+		again_skipped = {s["rep"] for s in again["skipped"]}
+		self.assertIn(with_entries.name, again_skipped)
+		self.assertIn(without_entries.name, again_skipped)
 
 		# A named rep is processed even when not commission-active.
 		single = generate_statements(month, inactive.name)

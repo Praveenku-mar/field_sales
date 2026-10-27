@@ -117,6 +117,7 @@ def push_order(field_order: str):
 			"store_draft_name": result.get("draft_name"),
 			"external_order_id": result.get("order_id"),
 			"store_order_name": result.get("order_name"),
+			"store_checkout_url": result.get("checkout_url"),
 			"platform": platform,
 			# The location the rep picked stays; only an order without one gets the default.
 			"location_id": doc.location_id or conn.settings.default_location_id,

@@ -158,6 +158,15 @@ class TestOrderConfirmation(IntegrationTestCase):
 		message = queued[0].message
 		self.assertIn(f"{values.invoice_no}.pdf", message)
 		self.assertIn("Order confirmed: #1006", message)
+
+	def test_store_checkout_link_is_the_pay_now_button(self):
+		# Razorpay gave no link (as on App Store installs): the store's checkout pays.
+		url = "https://test-shop.myshopify.com/checkouts/c/abc123"
+		frappe.db.set_value("Field Order", self.order.name, "store_checkout_url", url)
+		send_order_confirmation(self.order.name)
+
+		message = self.queued()[0].message
+		self.assertIn(url, message)
 		self.assertIn("Confirmation Stores", message)
 
 	def test_payment_link_is_in_the_email(self):

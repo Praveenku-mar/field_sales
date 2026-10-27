@@ -18,6 +18,8 @@ class TestOrderPricing(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		# set_single_value does not validate; everything rolls back after each test.
 		frappe.db.set_single_value("Store Connection", {"platform": "Shopify", "enabled": 1, "store_url": SHOP})
+		# The site's live sell-from rows would need a default; these tests assume no locations.
+		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
 		self.product = frappe.get_doc(
 			{
 				"doctype": "Platform Product",

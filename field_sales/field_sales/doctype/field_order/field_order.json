@@ -428,6 +428,14 @@
    "no_copy": 1
   },
   {
+   "fieldname": "store_checkout_url",
+   "fieldtype": "Data",
+   "label": "Store Checkout URL",
+   "description": "The store's hosted checkout link for this order's draft, for the customer to pay it",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
    "fieldname": "col_break_invoice",
    "fieldtype": "Column Break"
   },

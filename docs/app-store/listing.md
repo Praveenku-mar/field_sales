@@ -42,11 +42,11 @@ Choose the closest match in the form; the category names in the form may differ.
 - wholesale orders (16)
 - visit tracking (14)
 
-## Integrations (1/6)
+## Integrations (0/6)
 
-- Razorpay
-
-Remove Razorpay if payment links are not offered to App Store merchants (Razorpay works for Indian businesses only).
+None. Payment links (Razorpay) are disabled automatically on App Store (OAuth-mode)
+installs — collecting payment off-platform is not allowed — so Razorpay is not listed
+as an integration. Direct installations (client credentials, WooCommerce) keep the feature.
 
 ## Links
 

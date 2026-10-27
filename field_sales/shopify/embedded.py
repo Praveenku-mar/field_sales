@@ -255,7 +255,7 @@ def _try_exchange(shop: str, id_token: str) -> None:
 	try:
 		decode(id_token, require_connected=False)
 		ensure_offline_token(shop, id_token)
-	except InvalidSessionToken, ConnectError:
+	except (InvalidSessionToken, ConnectError):
 		pass
 
 

@@ -34,6 +34,7 @@ from frappe.utils import (
 )
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
+from field_sales.shopify.config import OAUTH_MODE
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.money import site_currency
 
@@ -302,6 +303,21 @@ def _from_unix(ts) -> datetime | None:
 # ----------------------------------------------------------------------
 
 
+def payment_links_disabled_reason() -> str | None:
+	"""
+	Why payment links are unavailable on this site, or ``None`` when they are not.
+
+	Payment links collect money for store orders outside the store, which Shopify's App
+	Store rules do not allow, so they exist on every install except a Shopify App Store
+	one (Store Connection in OAuth mode). Direct installs (client credentials, or another
+	platform such as WooCommerce) keep them.
+	"""
+	settings = frappe.get_single("Store Connection")
+	if settings.platform == "Shopify" and settings.shopify_auth_mode == OAUTH_MODE:
+		return _("Payment links are not part of the Shopify App Store edition of Field Sales")
+	return None
+
+
 @frappe.whitelist(methods=["POST"])
 def create_link_for_order(field_order: str, replace: bool = False) -> dict:
 	"""
@@ -317,6 +333,9 @@ def create_link_for_order(field_order: str, replace: bool = False) -> dict:
 	doc = frappe.get_doc("Field Order", field_order, for_update=True)
 	doc.check_permission("write")
 
+	disabled = payment_links_disabled_reason()
+	if disabled:
+		frappe.throw(disabled, title=_("Payment link not created"))
 	settings = get_settings()
 	if not settings.enabled:
 		frappe.throw(_("Razorpay payment links are not enabled"))
@@ -351,6 +370,8 @@ def link_for_confirmation(doc) -> dict | None:
 
 	:return: ``{"url", "id", "expires_on"}`` or None
 	"""
+	if payment_links_disabled_reason() is not None:
+		return None
 	settings = get_settings()
 	if not settings.enabled or flt(doc.grand_total) <= 0 or doc.payment_status in ("Paid", "Partially Paid"):
 		return None
@@ -413,7 +434,10 @@ def _replace_link(doc, settings, notify: bool = True) -> dict:
 @frappe.whitelist(methods=["GET"])
 def get_payment_config() -> dict:
 	"""Whether payment links can be created; never returns the keys."""
-	return {"enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled")))}
+	return {
+		"enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
+		"available": payment_links_disabled_reason() is None,
+	}
 
 
 def _expired(doc) -> bool:

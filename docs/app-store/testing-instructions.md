@@ -33,7 +33,10 @@ GPS check-in needs location permission in the browser and works only on the visi
 | 8 | Set a product's stock to 0 in the store, order it in Field Sales, submit | Submission is refused with an out-of-stock message (live stock check) |
 | 9 | Sync Failures | Any failed sync shows the store's message; Retry sends it again |
 | 10 | Commission | The demo rep's commission entries and statements are listed |
-| 11 | Uninstall the app | Access is removed at once; the app no longer syncs; Shopify's shop/redact request later anonymises the data |
+| 11 | Open a synced (draft) order → Payment card | "Pay in Store Checkout" with Copy and WhatsApp; no Razorpay (payment happens in the store's checkout) |
+| 12 | Click "Pay in Store Checkout" and pay with the store's test payment | The store's checkout shows this order's items and total; after paying, the order is paid in Shopify and the Payment card turns Paid |
+| 13 | Resend the order confirmation email | The email's Pay Now button opens the store checkout |
+| 14 | Uninstall the app | Access is removed at once; the app no longer syncs; Shopify's shop/redact request later anonymises the data |
 
 Privacy webhooks (customers/data_request, customers/redact, shop/redact) are answered at
 `https://<site>/api/method/field_sales.shopify.webhooks.receive` with HMAC verification (401 on a

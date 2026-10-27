@@ -6,6 +6,7 @@
 from unittest.mock import patch
 
 import frappe
+from frappe.cache_manager import clear_defaults_cache
 from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
@@ -29,6 +30,12 @@ class TestRetailerCountry(IntegrationTestCase):
 		frappe.db.set_single_value(
 			"Store Connection", {"enabled": 0, "shop_country": None, "match_shop_settings": 0}
 		)
+		# Reads below must see the values set here, not an earlier test's cached ones.
+		frappe.db.value_cache.clear()
+		# The site's global "country" default (from System Settings) pre-fills new retailers
+		# inside insert(), before validate can apply the shop's country.
+		frappe.db.delete("DefaultValue", {"defkey": "country"})
+		clear_defaults_cache()
 
 	def tearDown(self):
 		frappe.db.after_rollback.reset()

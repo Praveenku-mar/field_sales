@@ -10,7 +10,7 @@ from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
-from field_sales.payments.razorpay import PAYMENT_FIELDS
+from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason
 from field_sales.permissions import hierarchy_filters
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS
 from field_sales.utils.phone import whatsapp_digits
@@ -492,8 +492,10 @@ def get_order_payment_info(field_order: str) -> dict:
 		"docstatus": doc.docstatus,
 		"grand_total": doc.grand_total,
 		"order_label": doc.store_order_name or doc.name,
+		"store_checkout_url": doc.store_checkout_url,
 		"retailer_name": doc.retailer_name,
 		"razorpay_enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
+		"payment_links_available": payment_links_disabled_reason() is None,
 		"can_create_link": bool(doc.has_permission("write")),
 		"whatsapp_number": whatsapp,
 	}

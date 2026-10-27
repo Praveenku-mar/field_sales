@@ -34,6 +34,8 @@ class TestServerFields(IntegrationTestCase):
 			"Store Connection",
 			{"platform": "Shopify", "enabled": 0, "store_url": SHOP, "default_location_id": "", "order_mode": "Draft"},
 		)
+		# The site's live sell-from rows would need a default; these tests assume no locations.
+		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
 		self.product = frappe.get_doc(
 			{
 				"doctype": "Platform Product",
@@ -202,13 +204,26 @@ class TestServerFields(IntegrationTestCase):
 		with (
 			patch(
 				"field_sales.connectors.shopify.ShopifyConnector.create_order",
-				return_value={"draft_id": "D42", "order_id": None, "order_name": "#D42"},
+				return_value={
+					"draft_id": "D42",
+					"order_id": None,
+					"order_name": "#D42",
+					"checkout_url": "https://test-shop.myshopify.com/checkouts/c/abc",
+				},
 			),
 			patch.object(frappe.db, "commit"),
 		):
 			push_order(self.order.name)
-		values = frappe.db.get_value("Field Order", self.order.name, ["external_draft_id", "sync_status", "platform"], as_dict=True)
-		self.assertEqual((values.external_draft_id, values.sync_status, values.platform), ("D42", "Synced", "Shopify"))
+		values = frappe.db.get_value(
+			"Field Order",
+			self.order.name,
+			["external_draft_id", "sync_status", "platform", "store_checkout_url"],
+			as_dict=True,
+		)
+		self.assertEqual(
+			(values.external_draft_id, values.sync_status, values.platform, values.store_checkout_url),
+			("D42", "Synced", "Shopify", "https://test-shop.myshopify.com/checkouts/c/abc"),
+		)
 
 	# -- Retailer ----------------------------------------------------------
 

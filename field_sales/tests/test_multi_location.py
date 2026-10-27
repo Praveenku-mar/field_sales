@@ -324,6 +324,8 @@ class TestMultiLocation(IntegrationTestCase):
 	def test_patch_is_idempotent_and_copies_stock(self):
 		frappe.db.delete("Store Location")
 		frappe.db.delete("Product Stock")
+		# Earlier runs' products linger on a shared site; keep only this test's (external 900).
+		frappe.db.delete("Platform Product", {"external_product_id": ("!=", "900")})
 		frappe.db.set_value("Platform Product", self.product.name, "stock_updated_at", "2026-10-01 10:00:00")
 		untracked = self.make_product("2", "5002", 0)
 		frappe.db.set_value("Platform Product", untracked.name, "track_inventory", 0)

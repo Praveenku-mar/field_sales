@@ -40,11 +40,15 @@ class TestWebhooks(IntegrationTestCase):
 				"enabled": 1,
 				"store_url": SHOP,
 				"shopify_api_version": "2026-10",
+				# In OAuth mode _client_secret() reads site_config, not this password.
+				"shopify_auth_mode": "Client Credentials",
 				"default_location_id": LOCATION,
 				"shopify_client_secret": "*" * len(SECRET),
 			},
 		)
 		set_encrypted_password("Store Connection", "Store Connection", SECRET, "shopify_client_secret")
+		# Earlier runs' (and the live store's) Sync Logs linger; tests assert on their own only.
+		frappe.db.delete("Sync Log")
 		self.conn = get_connector()
 
 		self.product = self.make_product("1", inventory_id=INVENTORY, qty=3)

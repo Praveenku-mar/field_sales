@@ -30,6 +30,10 @@ class TestRazorpayWebhook(IntegrationTestCase):
 
 	def setUp(self):
 		links.TestRazorpayLinks.setUp(self)
+		# Reconcile must see only this order; earlier runs' open links linger on the site.
+		frappe.db.set_value(
+			"Field Order", {"payment_status": "Link Sent", "name": ("!=", self.order.name)}, "payment_status", "Draft"
+		)
 		set_encrypted_password("Razorpay Settings", "Razorpay Settings", WEBHOOK_SECRET, "webhook_secret")
 		create_link_for_order(self.order.name)  # plink_1
 		self.paise = round(frappe.db.get_value("Field Order", self.order.name, "grand_total") * 100)

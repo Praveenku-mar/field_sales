@@ -82,7 +82,10 @@ class TestRazorpayLinks(IntegrationTestCase):
 			},
 		)
 		set_encrypted_password("Razorpay Settings", "Razorpay Settings", "s3cret", "key_secret")
-		frappe.db.set_single_value("Store Connection", {"platform": "Shopify", "enabled": 0})
+		# Links exist on direct installs; OAuth mode (the App Store) has them disabled.
+		frappe.db.set_single_value(
+			"Store Connection", {"platform": "Shopify", "enabled": 0, "shopify_auth_mode": "Client Credentials"}
+		)
 
 		product = frappe.get_doc(
 			{
@@ -428,9 +431,40 @@ class TestRazorpayLinks(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-	def test_payment_config_has_only_enabled(self):
+	def test_payment_config_has_only_flags(self):
 		frappe.set_user(self.rep_user)
 		try:
-			self.assertEqual(get_payment_config(), {"enabled": True})
+			self.assertEqual(get_payment_config(), {"enabled": True, "available": True})
 		finally:
 			frappe.set_user("Administrator")
+
+
+class TestPaymentLinkGate(IntegrationTestCase):
+	"""The App Store edition (Store Connection in OAuth mode) offers no payment links."""
+
+	def setUp(self):
+		TestRazorpayLinks.setUp(self)  # direct-install fixtures, client credentials mode
+		frappe.db.set_single_value("Store Connection", "shopify_auth_mode", "OAuth")
+
+	def _user(self, email, role):
+		user = frappe.get_doc({"doctype": "User", "email": email, "first_name": "T", "send_welcome_email": 0})
+		user.insert(ignore_permissions=True)
+		user.add_roles(role)
+		return user.name
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		frappe.db.after_rollback.reset()
+		frappe.db.rollback()
+
+	def test_create_link_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			create_link_for_order(self.order.name)
+
+	def test_confirmation_email_goes_without_a_link(self):
+		self.assertIsNone(link_for_confirmation(frappe.get_doc("Field Order", self.order.name)))
+
+	def test_config_reports_them_unavailable(self):
+		self.assertFalse(get_payment_config()["available"])
+		frappe.db.set_single_value("Store Connection", "shopify_auth_mode", "Client Credentials")
+		self.assertTrue(get_payment_config()["available"])

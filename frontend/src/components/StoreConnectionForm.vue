@@ -140,11 +140,11 @@
             label="Test Connection"
             icon-left="lucide-cable"
             :loading="testing"
-            :disabled="d.platform !== 'Shopify'"
+            :disabled="!LIVE_TEST_PLATFORMS.includes(d.platform)"
             @click="testConnection"
           />
-          <p v-if="d.platform && d.platform !== 'Shopify'" class="text-sm text-ink-gray-5">
-            Live calls support Shopify connections only (for now)
+          <p v-if="d.platform && !LIVE_TEST_PLATFORMS.includes(d.platform)" class="text-sm text-ink-gray-5">
+            Live calls support {{ LIVE_TEST_PLATFORMS.join(' and ') }} connections only (for now)
           </p>
           <p v-else-if="status" class="inline-flex items-center gap-1.5 text-sm">
             <span
@@ -473,6 +473,9 @@ const status = computed(() => {
 
 // The banner above the form; only set by a test on this visit (scopes are not stored).
 const testBanner = ref(null)
+
+// Platforms whose connectors implement a live test_connection call.
+const LIVE_TEST_PLATFORMS = ['Shopify', 'Odoo']
 
 const testing = ref(false)
 async function testConnection() {

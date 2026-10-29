@@ -13,11 +13,13 @@ import frappe
 from frappe import _
 
 from field_sales.connectors.base import BaseConnector, ConnectorError
+from field_sales.connectors.odoo import OdooConnector
 from field_sales.connectors.shopify import ShopifyConnector
 
-# WooCommerce / Odoo connectors register here when they are added.
+# WooCommerce connectors register here when they are added.
 CONNECTORS: dict[str, type[BaseConnector]] = {
 	"Shopify": ShopifyConnector,
+	"Odoo": OdooConnector,
 }
 
 __all__ = ["BaseConnector", "ConnectorError", "get_connector"]

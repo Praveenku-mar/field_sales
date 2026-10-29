@@ -43,7 +43,8 @@ const options = computed(() => [
     options: [
       canInstall.value && { label: 'Install app', icon: 'lucide-download', onClick: install },
       showIosHint.value && { label: 'Add to Home Screen', icon: 'lucide-download', onClick: () => (iosHintOpen.value = true) },
-      { label: 'Switch to Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = '/app') },
+      // A customer login is a website user: the desk would turn it away.
+      !session.isRetailer && { label: 'Switch to Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = '/app') },
       { label: 'Log out', icon: 'lucide-log-out', onClick: () => session.logout() },
     ].filter(Boolean),
   },

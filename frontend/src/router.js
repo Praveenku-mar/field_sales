@@ -1,14 +1,40 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { toast } from 'frappe-ui'
 import { useSessionStore } from '@/stores/session'
+import { APP_BASE } from '@/utils/base'
 
 // Sync Log, Reports and Store Connection are manager pages. The Sales Rep list is open to
 // reps too: the server limits it to themselves and their team.
 const MANAGERS = ['System Manager', 'Sales Manager']
 
-// meta.title: page title and last breadcrumb; meta.parent: breadcrumb parent route name.
+// The customer login: My Orders and its detail page are the only pages it may open.
+// Not a `roles` check: holding the Field Sales Retailer role is not the same as being
+// the retailer login (Administrator holds every role); the guard checks session.isRetailer.
+const RETAILER_ROUTES = ['MyOrders', 'MyOrder']
+
+// meta.title: page title and last breadcrumb; meta.parent: breadcrumb parent route name;
+// meta.public: no session needed (the login page itself).
 const routes = [
   { path: '/', redirect: { name: 'Dashboard' } },
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/pages/Login.vue'),
+    meta: { public: true, title: 'Log in' },
+  },
+  {
+    path: '/my-orders',
+    name: 'MyOrders',
+    component: () => import('@/pages/MyOrders.vue'),
+    meta: { title: 'My Orders', retailerOnly: true },
+  },
+  {
+    path: '/my-orders/:name',
+    name: 'MyOrder',
+    component: () => import('@/pages/MyOrderDetail.vue'),
+    props: true,
+    meta: { title: 'Order', parent: 'MyOrders', retailerOnly: true },
+  },
   {
     path: '/dashboard',
     name: 'Dashboard',
@@ -151,8 +177,9 @@ const routes = [
   },
 ]
 
-// Served at /fieldsales and its alias /fs (hooks.website_route_rules): keep whichever was opened.
-export const APP_BASE = /^\/fs(\/|$)/.test(window.location.pathname) ? '/fs' : '/fieldsales'
+// Served at /fieldsales and its alias /fs (hooks.website_route_rules): keep whichever
+// was opened (utils/base.js, re-exported for existing importers).
+export { APP_BASE }
 
 const router = createRouter({
   history: createWebHistory(APP_BASE),
@@ -160,8 +187,20 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // The login page loads without a session (guests reach it through the page gate).
+  if (to.meta.public) return true
+
   const session = useSessionStore()
   if (!(await session.load())) return false
+
+  // A customer login stays on My Orders; staff pages redirect it back.
+  if (session.isRetailer && !RETAILER_ROUTES.includes(to.name)) return { name: 'MyOrders' }
+  // And My Orders is the customer login's alone: a staff user (even one that also holds
+  // the Field Sales Retailer role, e.g. Administrator) has no retailer of its own.
+  if (to.meta.retailerOnly && !session.isRetailer) {
+    toast.error('You do not have access to ' + (to.meta.title || 'this page'))
+    return { name: 'Dashboard' }
+  }
 
   if (to.meta.roles && !session.hasRole(...to.meta.roles)) {
     toast.error('You do not have access to ' + (to.meta.title || 'this page'))

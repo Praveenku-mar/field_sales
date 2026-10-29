@@ -4,6 +4,8 @@
 """Whitelisted endpoints used by the Store Connection, Retailer, Visit and Field Order forms and the Platform Product view."""
 
 
+from urllib.parse import urlsplit
+
 import frappe
 from frappe import _
 from frappe.auth import MAX_PASSWORD_SIZE
@@ -11,12 +13,12 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.query_builder.functions import Count, Sum
 from frappe.rate_limiter import rate_limit
 from frappe.sessions import clear_sessions
-from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
+from frappe.utils import flt, formatdate, get_link_to_form, get_url, getdate, now_datetime, nowdate
 from frappe.utils.password import check_password
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
-from field_sales.permissions import get_allowed_reps, hierarchy_filters, is_admin
+from field_sales.permissions import RETAILER_ROLE, STAFF_ROLES, get_allowed_reps, hierarchy_filters, is_admin
 from field_sales.sync.customers import push_retailers
 from field_sales.sync.notify import MONITOR_ROLES
 from field_sales.sync.orders import enqueue_push_order
@@ -29,6 +31,10 @@ from field_sales.utils.limits import SALES_REPS, check_limit
 VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
 # Roles a user may hold for a manager to reset their password (the rest are automatic roles).
 REP_ONLY_ROLES = {"Field Sales Rep", "All", "Guest", "Desk User"}
+# May manage a retailer's login (the Login Access card); mirrors Retailer's LOGIN_EDIT_ROLES.
+LOGIN_ROLES = {"Sales Manager", "System Manager"}
+# A retailer login user holds the retailer role plus Frappe's automatic roles, nothing else.
+RETAILER_LOGIN_ROLES = {"Field Sales Retailer", "All", "Guest"}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -317,6 +323,217 @@ def _check_password_target(user: str) -> None:
 			_("Only a System Manager can change the password of a user with roles beyond Field Sales Rep"),
 			frappe.PermissionError,
 		)
+
+
+# ------------------------------------------------------------------ retailer logins
+
+
+def _check_login_manager() -> None:
+	"""The Login Access card is for managers; the Retailer doctype re-checks on save."""
+	if not LOGIN_ROLES & set(frappe.get_roles()) and frappe.session.user != "Administrator":
+		frappe.throw(_("Only a Sales Manager can manage a retailer's login"), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def get_retailer_login(retailer: str) -> dict:
+	"""
+	The login state for the Login Access card. Managers only (they cannot read User
+	rows in the desk, so this is the one place the enabled flag comes from).
+
+	:return: ``{"user", "enabled"}`` with ``user=None`` when the retailer has no login.
+	"""
+	_check_login_manager()
+	user = frappe.db.get_value("Retailer", retailer, "user")
+	if not user:
+		return {"user": None, "enabled": None}
+	return {"user": user, "enabled": bool(frappe.db.get_value("User", user, "enabled"))}
+
+
+def _check_retailer_login_user(user: str) -> None:
+	"""Only a retailer login may be managed here: never staff, never roles beyond the one."""
+	if user in ("Administrator", "Guest"):
+		frappe.throw(_("The account {0} cannot be a retailer login").format(user), frappe.PermissionError)
+	roles = set(frappe.get_roles(user))
+	if STAFF_ROLES & roles:
+		frappe.throw(_("{0} works in Field Sales and cannot be a retailer login").format(user))
+	if roles - RETAILER_LOGIN_ROLES:
+		frappe.throw(
+			_("{0} has roles beyond Field Sales Retailer and cannot be a retailer login").format(user),
+			frappe.PermissionError,
+		)
+
+
+@frappe.whitelist(methods=["POST"])
+def create_retailer_login(retailer: str, email: str, send_invite: int = 1) -> dict:
+	"""
+	Invite a retailer into the app's My Orders view, from its page's Login Access card.
+
+	Creates a Website User for ``email`` (or adopts an existing user who is no Field Sales
+	staff), gives it the Field Sales Retailer role and links it as Retailer.user. The invite
+	is one branded welcome email ("Welcome to <store>", template ``retailer_invite``) with
+	Frappe's one-time set-password link in it — not Frappe's own "Welcome to Frappe" mail.
+	It needs an outgoing email account, so it cannot silently never arrive.
+
+	:return: ``{"user", "user_created"}``
+	"""
+	_check_login_manager()
+	doc = frappe.get_doc("Retailer", retailer)
+	doc.check_permission("write")
+	if doc.user:
+		frappe.throw(
+			_("Customer {0} already has a login ({1})").format(retailer, doc.user), frappe.DuplicateEntryError
+		)
+
+	email = (email or "").strip().lower()
+	frappe.utils.validate_email_address(email, throw=True)
+	if frappe.db.exists("Sales Rep", email):
+		frappe.throw(_("{0} is a Sales Rep and cannot be a retailer login").format(email))
+	if frappe.db.exists("Retailer", {"user": email}):
+		frappe.throw(_("{0} is already another customer's login").format(email), frappe.DuplicateEntryError)
+
+	send_invite = frappe.utils.cint(send_invite)
+	if send_invite and not EmailAccount.find_default_outgoing():
+		frappe.throw(_("Outgoing email is not set up. Add one under Settings > Outgoing Email."))
+
+	if frappe.db.exists("User", email):
+		_check_retailer_login_user(email)
+		user_doc = frappe.get_doc("User", email)
+		changed = False
+		if not user_doc.enabled:
+			# A login removed earlier, invited again: bring the user back.
+			user_doc.enabled = 1
+			changed = True
+		if RETAILER_ROLE not in {row.role for row in user_doc.roles}:
+			user_doc.append("roles", {"role": RETAILER_ROLE})
+			changed = True
+		if changed:
+			# Managers cannot write User in the desk; the checks above stand in for that.
+			user_doc.save(ignore_permissions=True)
+		user_created = False
+	else:
+		full_name = (doc.owner_name or doc.retailer_name or "").strip()
+		first_name, _sep, last_name = full_name.partition(" ")
+		new_user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": email,
+				"first_name": first_name.strip() or email,
+				"last_name": last_name.strip() or None,
+				"mobile_no": doc.phone or None,
+				"user_type": "Website User",
+				# The invite below is this login's email; Frappe's own welcome mail is not sent.
+				"send_welcome_email": 0,
+				"roles": [{"role": RETAILER_ROLE}],
+			}
+		)
+		new_user.insert(ignore_permissions=True)
+		user_created = True
+
+	# Through the document, so Retailer's own checks run (one login per user, no staff
+	# users, email backfill) and a store push is queued when the store takes the email.
+	doc.user = email
+	doc.save()
+	if send_invite:
+		_send_retailer_invite(email, retailer)
+	return {"user": email, "user_created": user_created}
+
+
+def _store_display_name() -> str:
+	"""The customer-facing store name: the invoice company, the shop's own name, its domain, else the site."""
+	values = frappe.db.get_value(
+		"Store Connection", "Store Connection", ["company_name", "shop_name", "store_url"], as_dict=True
+	) or {}
+	if values.company_name:
+		return values.company_name
+	if values.shop_name:
+		return values.shop_name
+	if values.store_url:
+		domain = urlsplit(values.store_url).netloc
+		if domain:
+			return domain.split("@")[-1].split(":")[0]
+	return frappe.db.get_default("site_name") or frappe.local.site
+
+
+def _send_retailer_invite(user: str, retailer: str) -> None:
+	"""
+	The retailer invite: "Welcome to <store>" with Frappe's one-time set-password link
+	(`/update-password?key=…`, stored hashed on the User) so nothing but the greeting
+	differs from Frappe's own mail. The link is never kept here.
+	"""
+	link = frappe.get_doc("User", user)._reset_password(send_email=False)
+	store = _store_display_name()
+	frappe.sendmail(
+		recipients=[user],
+		subject=_("Welcome to {0}").format(store),
+		template="retailer_invite",
+		args={
+			"customer": frappe.db.get_value("Retailer", retailer, "retailer_name") or user,
+			"store_name": store,
+			"user": user,
+			"link": link,
+			"login_url": get_url("/fieldsales/login"),
+		},
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+@rate_limit(limit=10, seconds=60 * 60, user_based=True, ip_based=False)
+def send_retailer_password_reset(retailer: str, logout_all_sessions: int = 0) -> dict:
+	"""
+	Email a retailer login a one-time password reset link (Frappe's own
+	``/update-password`` flow), from the Login Access card.
+
+	Managers only, for users who pass ``_check_retailer_login_user``. The link itself
+	is never returned.
+
+	:param logout_all_sessions: Also sign the retailer out of every device now.
+	:return: ``{"email": user}``
+	"""
+	_check_login_manager()
+	user = frappe.db.get_value("Retailer", retailer, "user")
+	if not user:
+		frappe.throw(_("Customer {0} has no login").format(retailer))
+	_check_retailer_login_user(user)
+
+	user_doc = frappe.get_doc("User", user)
+	if not user_doc.enabled:
+		frappe.throw(_("User {0} is disabled. Remove the login and invite again.").format(user))
+	# The account Frappe will send through: enabled *and* default outgoing, or site config's mail_server.
+	if not EmailAccount.find_default_outgoing():
+		frappe.throw(_("Outgoing email is not set up. Add one under Settings > Outgoing Email."))
+
+	# Stores a hashed one-time key on the User and emails the link; the link is not kept here.
+	user_doc._reset_password(send_email=True)
+	if frappe.utils.cint(logout_all_sessions):
+		clear_sessions(user=user, force=True)
+	return {"email": user}
+
+
+@frappe.whitelist(methods=["POST"])
+def revoke_retailer_login(retailer: str) -> dict:
+	"""
+	Remove a retailer's login: disable its user (signed out everywhere) and clear
+	Retailer.user. The retailer record and its history stay untouched; inviting the
+	same email later adopts the user again and re-enables it.
+
+	:return: ``{"disabled": user}``
+	"""
+	_check_login_manager()
+	doc = frappe.get_doc("Retailer", retailer)
+	doc.check_permission("write")
+	user = doc.user
+	if not user:
+		frappe.throw(_("Customer {0} has no login").format(retailer))
+	_check_retailer_login_user(user)
+
+	user_doc = frappe.get_doc("User", user)
+	user_doc.enabled = 0
+	# Managers cannot write User in the desk; the checks above stand in for that.
+	user_doc.save(ignore_permissions=True)
+	clear_sessions(user=user, force=True)
+	doc.user = None
+	doc.save()
+	return {"disabled": user}
 
 
 @frappe.whitelist(methods=["POST"])

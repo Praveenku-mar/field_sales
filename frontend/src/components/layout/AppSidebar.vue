@@ -8,20 +8,34 @@
     />
 
     <div class="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-2">
-      <SidebarItem label="Search" icon="lucide-search" style="height: 2.5rem" @click="$emit('open-search')">
+      <!-- Staff tools: a customer login has no search or notifications. -->
+      <SidebarItem
+        v-if="!session.isRetailer"
+        label="Search"
+        icon="lucide-search"
+        style="height: 2.5rem"
+        @click="$emit('open-search')"
+      >
         <template #prefix><span class="lucide-search size-6 text-ink-gray-6" /></template>
         <template #suffix>
           <kbd class="mr-2 text-xs text-ink-gray-4">Ctrl K</kbd>
         </template>
       </SidebarItem>
-      <SidebarItem label="Notification" icon="lucide-bell" style="height: 2.5rem" :route="{ name: 'Notifications' }" :active="route.name === 'Notifications'">
+      <SidebarItem
+        v-if="!session.isRetailer"
+        label="Notification"
+        icon="lucide-bell"
+        style="height: 2.5rem"
+        :route="{ name: 'Notifications' }"
+        :active="route.name === 'Notifications'"
+      >
         <template #prefix><span class="lucide-bell size-6 text-ink-gray-6" /></template>
         <template v-if="counts.data?.unread_notifications" #suffix>
           <span class="mr-2 text-xs font-medium tabular-nums text-ink-red-5">{{ counts.data.unread_notifications }}</span>
         </template>
       </SidebarItem>
 
-      <div class="h-6 shrink-0" />
+      <div v-if="!session.isRetailer" class="h-6 shrink-0" />
 
       <SidebarItem
         v-for="item in navItems"
@@ -70,9 +84,10 @@ const route = useRoute()
 
 const navItems = computed(() => NAV_ITEMS.filter((item) => session.canSee(item)))
 
+// A customer login shows no counts (its nav has none), so it never fetches or polls them.
 const counts = createResource({
   url: 'field_sales.frontend_api.get_sidebar_counts',
-  auto: true,
+  auto: !session.isRetailer,
 })
 
 function countOf(item) {
@@ -89,7 +104,10 @@ const collapsed = ref(getPreference('fs:sidebar-collapsed') === '1')
 watch(collapsed, (v) => setPreference('fs:sidebar-collapsed', v ? '1' : '0'))
 
 // Counts change as people work; refresh them when moving between pages.
-watch(() => route.name, () => counts.reload())
+watch(
+  () => route.name,
+  () => !session.isRetailer && counts.reload(),
+)
 // The Notifications page announces read/unread changes made without leaving it.
 const reloadCounts = () => counts.reload()
 // There is no realtime connection, so poll while the tab is in view to pick up new notifications.
@@ -97,7 +115,7 @@ let poll = null
 onMounted(() => {
   window.addEventListener('fs:notifications-changed', reloadCounts)
   poll = setInterval(() => {
-    if (document.visibilityState === 'visible') counts.reload()
+    if (!session.isRetailer && document.visibilityState === 'visible') counts.reload()
   }, 60000)
 })
 onBeforeUnmount(() => {

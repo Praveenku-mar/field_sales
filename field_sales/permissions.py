@@ -12,6 +12,10 @@ Retailers are the exception: every rep can see every retailer (to plan a
 visit or take an order anywhere), but can edit only those of their hierarchy.
 Lists of retailers needing the rep's action use ``hierarchy_filters``.
 
+A retailer login (a user holding only the Field Sales Retailer role, linked
+by Retailer.user) sees its own retailer and that retailer's orders, read
+only, and nothing else.
+
 Wired up in hooks.py through ``permission_query_conditions`` (list views,
 reports, link search) and ``has_permission`` (opening / saving one record).
 """
@@ -35,6 +39,12 @@ REP_FIELD = {
 	"Sales Rep": "name",
 }
 
+# Roles that work the app (reps and managers). A retailer login holds none of these.
+STAFF_ROLES = {"System Manager", "Sales Manager", "Field Sales Rep"}
+
+# The single role of an invited retailer's login (Retailer.user links it back).
+RETAILER_ROLE = "Field Sales Retailer"
+
 
 def is_admin(user: str | None = None) -> bool:
 	user = user or frappe.session.user
@@ -44,6 +54,29 @@ def is_admin(user: str | None = None) -> bool:
 def get_own_rep(user: str | None = None) -> str | None:
 	"""The Sales Rep linked to this user (Sales Rep.user is unique)."""
 	return frappe.db.get_value("Sales Rep", {"user": user or frappe.session.user}, "name")
+
+
+def has_staff_role(user: str | None = None) -> bool:
+	"""Whether the user works the app (reps, managers, Administrator)."""
+	user = user or frappe.session.user
+	return user == "Administrator" or bool(STAFF_ROLES & set(frappe.get_roles(user)))
+
+
+def is_retailer_user(user: str | None = None) -> bool:
+	"""
+	A retailer login: holds the Field Sales Retailer role and no staff role.
+	Such a user's access is their own retailer's My Orders view, nothing else.
+	"""
+	user = user or frappe.session.user
+	if user in ("Administrator", "Guest"):
+		return False
+	roles = set(frappe.get_roles(user))
+	return RETAILER_ROLE in roles and not (STAFF_ROLES & roles)
+
+
+def get_own_retailer(user: str | None = None) -> str | None:
+	"""The Retailer this user logs in for (Retailer.user is unique)."""
+	return frappe.db.get_value("Retailer", {"user": user or frappe.session.user}, "name")
 
 
 def get_allowed_reps(user: str | None = None) -> list[str]:
@@ -113,6 +146,11 @@ def sales_rep_query(user: str | None = None) -> str:
 
 
 def field_order_query(user: str | None = None) -> str:
+	user = user or frappe.session.user
+	if not is_admin(user) and is_retailer_user(user):
+		# A retailer login lists its own retailer's orders only.
+		own = get_own_retailer(user)
+		return f"`tabField Order`.`retailer` = {frappe.db.escape(own)}" if own else "1=0"
 	return _query_conditions("Field Order", user)
 
 
@@ -125,6 +163,11 @@ def commission_statement_query(user: str | None = None) -> str:
 
 
 def retailer_query(user: str | None = None) -> str:
+	user = user or frappe.session.user
+	if not is_admin(user) and is_retailer_user(user):
+		# A retailer login sees its own retailer; the read-anything rule below is for staff.
+		own = get_own_retailer(user)
+		return f"`tabRetailer`.`name` = {frappe.db.escape(own)}" if own else "1=0"
 	# Every retailer is listed; role permissions still decide who may read at all.
 	return ""
 
@@ -154,6 +197,9 @@ def visit_has_permission(doc, ptype: str | None = None, user: str | None = None)
 
 
 def field_order_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	user = user or frappe.session.user
+	if not is_admin(user) and is_retailer_user(user):
+		return ptype in READ_ONLY_PTYPES and doc.retailer == get_own_retailer(user)
 	return _rep_in_allowed(doc.sales_rep, user)
 
 
@@ -166,6 +212,10 @@ def commission_statement_has_permission(doc, ptype: str | None = None, user: str
 
 
 def retailer_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	user = user or frappe.session.user
+	if not is_admin(user) and is_retailer_user(user):
+		# A retailer login reads its own retailer and never edits it from My Orders.
+		return ptype in READ_ONLY_PTYPES and doc.name == get_own_retailer(user)
 	# sales_rep is optional on Retailer. A rep may create one without it;
 	# Retailer.before_insert then assigns it to them.
 	if ptype == "create" and not doc.sales_rep:

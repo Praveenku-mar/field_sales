@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import nowdate
+from frappe.utils import add_days, nowdate
 
 
 class TestVisitNotification(IntegrationTestCase):
@@ -93,4 +93,29 @@ class TestVisitNotification(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 		self.assertEqual(len(self.logs(visit, self.other_user)), 1)
+		self.assertEqual(len(self.logs(visit, self.rep_user)), 1)
+
+	def test_manager_rescheduling_visit_notifies_rep(self):
+		visit = self.make_visit(self.rep, self.manager_user)
+		frappe.set_user(self.manager_user)
+		try:
+			visit.reload()
+			visit.visit_date = add_days(visit.visit_date, 1)
+			visit.save(ignore_permissions=True)
+		finally:
+			frappe.set_user("Administrator")
+		logs = self.logs(visit, self.rep_user)
+		self.assertEqual(len(logs), 2)
+		subjects = [frappe.db.get_value("Notification Log", name, "subject") for name in logs]
+		self.assertTrue(any("rescheduled" in s.lower() for s in subjects))
+
+	def test_rep_rescheduling_own_visit_is_not_notified(self):
+		visit = self.make_visit(self.rep, self.manager_user)
+		frappe.set_user(self.rep_user)
+		try:
+			visit.reload()
+			visit.visit_date = add_days(visit.visit_date, 1)
+			visit.save(ignore_permissions=True)
+		finally:
+			frappe.set_user("Administrator")
 		self.assertEqual(len(self.logs(visit, self.rep_user)), 1)

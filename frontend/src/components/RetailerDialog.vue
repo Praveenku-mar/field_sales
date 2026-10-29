@@ -1,48 +1,39 @@
 <template>
-  <Dialog v-model="open" :title="isEdit ? 'Edit Customer' : 'New Customer'" size="lg" @after-leave="resetForm">
-    <div class="space-y-6">
+  <Dialog v-model="open" :title="isEdit ? 'Edit Customer' : 'New Customer'" size="3xl" @after-leave="resetForm">
+    <!-- Screenshot style: no section headers, groups separated by whitespace. -->
+    <div class="space-y-12">
       <!-- Details -->
       <section>
-        <h3 class="text-base font-medium text-ink-gray-9">Details</h3>
-        <div class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
-          <TextInput v-model="form.retailer_name" label="Customer Name" required placeholder="Kovai Mart" />
+        <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-3">
+          <TextInput v-model="form.retailer_name" size="lg" label="Customer Name" required placeholder="Kovai Mart" />
           <TextInput
             v-model="form.phone"
+            size="lg"
             label="Phone"
             required
             type="tel"
             :placeholder="phoneHint.placeholder"
             :description="phoneHint.description"
           />
-          <TextInput v-model="form.owner_name" label="Owner Name" />
-          <TextInput v-model="form.email" label="Email" type="email" />
-          <Combobox
-            v-model="form.sales_rep"
-            :options="repOptions"
-            trigger="button"
-            label="Sales Rep"
-            placeholder="Select sales rep"
-            empty-text="No sales reps found"
-            description="Customers are visible through their Sales Rep"
-          />
-          <Select v-model="form.retailer_type" :options="RETAILER_TYPES" label="Customer Type" placeholder="Select type" />
+          <TextInput v-model="form.email" size="lg" label="Email" type="email" />
+          <TextInput v-model="form.owner_name" size="lg" label="Owner Name" />
+          <Select v-model="form.retailer_type" size="lg" :options="RETAILER_TYPES" label="Customer Type" placeholder="Select type" />
           <!-- Indian GST number: only for retailers in India -->
-          <TextInput v-if="isIndia" v-model="form.gstin" label="GSTIN" />
-          <Select v-model="form.status" :options="['Active', 'Inactive']" label="Status" />
+          <TextInput v-if="isIndia" v-model="form.gstin" size="lg" label="GSTIN" />
         </div>
       </section>
 
       <!-- Address & Location -->
-      <section class="border-t border-desk-border pt-6">
-        <h3 class="text-base font-medium text-ink-gray-9">Address & Location</h3>
-        <div class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
-          <TextInput v-model="form.address_line1" label="Address Line 1" required />
-          <TextInput v-model="form.address_line2" label="Address Line 2" />
-          <TextInput v-model="form.city" label="City" required />
-          <TextInput v-model="form.state" label="State" />
-          <TextInput v-model="form.pincode" label="Postal Code" />
+      <section>
+        <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-3">
+          <TextInput v-model="form.address_line1" size="lg" label="Address Line 1" required />
+          <TextInput v-model="form.address_line2" size="lg" label="Address Line 2" />
+          <TextInput v-model="form.city" size="lg" label="City" required />
+          <TextInput v-model="form.state" size="lg" label="State" />
+          <TextInput v-model="form.pincode" size="lg" label="Postal Code" />
           <Combobox
             v-model="form.country"
+            size="lg"
             :options="countryOptions"
             trigger="button"
             label="Country"
@@ -53,12 +44,13 @@
           <TextInput
             v-if="session.isManager"
             v-model="form.geofence_radius_m"
+            size="lg"
             label="Geofence Radius (m)"
             type="number"
             placeholder="50 (default)"
           />
-          <TextInput v-model="form.latitude" label="Latitude" type="number" description="-90 to 90" :disabled="locationLocked" />
-          <TextInput v-model="form.longitude" label="Longitude" type="number" description="-180 to 180" :disabled="locationLocked" />
+          <TextInput v-model="form.latitude" size="lg" label="Latitude" type="number" description="-90 to 90" :disabled="locationLocked" />
+          <TextInput v-model="form.longitude" size="lg" label="Longitude" type="number" description="-180 to 180" :disabled="locationLocked" />
         </div>
         <p v-if="locationLocked" class="mt-2 text-sm text-ink-gray-5">
           The location is set. Ask a Sales Manager to change it.
@@ -66,6 +58,7 @@
         <div v-else class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button
             variant="outline"
+            size="lg"
             label="Select Location"
             icon-left="lucide-map-pin-plus"
             @click="pickerOpen = true"
@@ -74,6 +67,7 @@
           <Button
             v-if="!embedded"
             variant="outline"
+            size="lg"
             label="Use My Location"
             icon-left="lucide-locate-fixed"
             :loading="locating"
@@ -84,12 +78,33 @@
           {{ embedded ? 'Pick on a map' : 'Pick on a map or capture your GPS position' }}; otherwise coordinates are set automatically at the first visit check-in.
         </p>
       </section>
+
+      <!-- Status & ownership: the closing two-column row. -->
+      <section>
+        <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
+          <Select v-model="form.status" size="lg" :options="['Active', 'Inactive']" label="Status" />
+          <Combobox
+            v-model="form.sales_rep"
+            size="lg"
+            :options="repOptions"
+            trigger="button"
+            label="Sales Rep"
+            placeholder="Select sales rep"
+            empty-text="No sales reps found"
+            description="Customers are visible through their Sales Rep"
+          />
+        </div>
+      </section>
     </div>
 
     <template #actions>
+      <!-- w-24: a fixed width so the actions don't shift when the label
+           changes (Create/Save) or turns into a spinner while saving. -->
       <div class="flex justify-end gap-2">
-        <Button label="Cancel" :disabled="busy" @click="open = false" />
+        <Button class="w-24" size="lg" label="Cancel" :disabled="busy" @click="open = false" />
         <Button
+          class="w-24"
+          size="lg"
           variant="solid"
           :label="isEdit ? 'Save' : 'Create'"
           :loading="busy"

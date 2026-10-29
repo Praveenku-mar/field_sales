@@ -15,7 +15,7 @@ from frappe.utils import cint, now_datetime
 
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
-from field_sales.sync.notify import notify_sync_result
+from field_sales.sync.notify import notify_customer_sync_failure, notify_sync_result
 
 # Retailer fields sent to the store; a change to any of them triggers a push.
 SYNCED_FIELDS = (
@@ -140,6 +140,8 @@ def _record_result(retailer_name: str, values: dict):
 	doc.flags.ignore_sync = True
 	doc.save(ignore_permissions=True)
 	notify_sync_result("retailer_synced", "Retailer", retailer_name, values.get("sync_status"))
+	if values.get("sync_status") == "Failed":
+		notify_customer_sync_failure(doc)
 
 
 def _elapsed_ms(start: float) -> int:

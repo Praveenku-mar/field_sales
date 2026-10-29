@@ -15,6 +15,7 @@ they hold the old values.
 from __future__ import annotations
 
 import frappe
+from frappe.sessions import clear_sessions
 from frappe.utils import add_days, cint, now_datetime
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
@@ -26,6 +27,13 @@ REDACTED_PHONE = "0000000000"  # Retailer.phone is mandatory and validated as a 
 def anonymise(retailers: list[str], orders: list[str]) -> dict:
 	"""Anonymise the given Retailers, their Visits and the given Field Orders."""
 	for name in retailers:
+		# The login user holds the person's email and keeps working after the retailer
+		# is redacted: disable it and drop the link. Left enabled, an anonymised
+		# retailer could still sign in and see its orders.
+		login = frappe.db.get_value("Retailer", name, "user")
+		if login and login not in ("Administrator", "Guest"):
+			frappe.db.set_value("User", login, "enabled", 0, update_modified=False)
+			clear_sessions(user=login, force=True)
 		frappe.db.set_value(
 			"Retailer",
 			name,
@@ -35,6 +43,7 @@ def anonymise(retailers: list[str], orders: list[str]) -> dict:
 				"phone": REDACTED_PHONE,
 				"email": None,
 				"gstin": None,
+				"user": None,
 				"address_line1": REDACTED,
 				"address_line2": None,
 				"city": REDACTED,

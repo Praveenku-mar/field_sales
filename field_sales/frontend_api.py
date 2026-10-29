@@ -11,7 +11,7 @@ from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason
-from field_sales.permissions import hierarchy_filters
+from field_sales.permissions import hierarchy_filters, is_retailer_user
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
@@ -115,13 +115,30 @@ def get_session() -> dict:
 	"""
 	The signed-in user, their app roles, their Sales Rep and the connected store.
 
-	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "sales_rep", "store", "commission_enabled"}``
+	A retailer login (Field Sales Retailer role only, linked by Retailer.user)
+	also gets ``is_retailer`` and its ``retailer``; an inactive or unlinked one
+	is refused here, so My Orders never loads for it.
+
+	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled"}``
 	"""
 	_check_access()
 	user = frappe.session.user
 	roles = [r for r in frappe.get_roles(user) if r in APP_ROLES]
 	if user == "Administrator" and "System Manager" not in roles:
 		roles.append("System Manager")
+
+	retailer = None
+	if is_retailer_user():
+		retailer = frappe.db.get_value(
+			"Retailer", {"user": user}, ["name", "retailer_name", "status"], as_dict=True
+		)
+		if not retailer:
+			frappe.throw(
+				_("Your login is not linked to a customer any more. Contact your sales rep."),
+				frappe.PermissionError,
+			)
+		if retailer.status == "Inactive":
+			frappe.throw(_("Your account is inactive. Contact your sales rep."), frappe.PermissionError)
 
 	info = frappe.db.get_value("User", user, ["full_name", "user_image"], as_dict=True) or {}
 	return {
@@ -131,6 +148,8 @@ def get_session() -> dict:
 		"roles": roles,
 		"is_admin": "System Manager" in roles,
 		"is_manager": bool({"System Manager", "Sales Manager"} & set(roles)),
+		"is_retailer": bool(retailer),
+		"retailer": retailer,
 		"sales_rep": frappe.db.get_value(
 			"Sales Rep", {"user": user}, ["name", "full_name", "territory", "reports_to"], as_dict=True
 		),

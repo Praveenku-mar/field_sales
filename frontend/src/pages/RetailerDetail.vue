@@ -64,6 +64,14 @@
             {{ d.sync_error }}
           </div>
         </SectionCard>
+
+        <!-- Managers only: invite the customer into the app's My Orders view. -->
+        <RetailerLoginCard
+          v-if="session.isManager"
+          :retailer="name"
+          :fallback-email="d.email || ''"
+          @updated="doc.reload()"
+        />
       </div>
     </div>
 
@@ -86,6 +94,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import RetailerDialog from '@/components/RetailerDialog.vue'
 import NewOrderDialog from '@/components/NewOrderDialog.vue'
+import RetailerLoginCard from '@/components/RetailerLoginCard.vue'
 import { useSessionStore } from '@/stores/session'
 import { callMethod } from '@/utils/api'
 import { daysAgo, formatCurrency, formatDate, formatDateTime, orderStatus, relativeDay, today } from '@/utils/format'

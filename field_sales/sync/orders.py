@@ -20,7 +20,7 @@ from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.sync.confirmation import enqueue_order_confirmation
 from field_sales.sync.customers import push_retailer
-from field_sales.sync.notify import notify_sync_result
+from field_sales.sync.notify import notify_order_sync_failure, notify_sync_result
 
 # The scheduler stops retrying an order after this many attempts; Retry Sync still works.
 MAX_AUTO_ATTEMPTS = 5
@@ -326,6 +326,8 @@ def _ensure_store_customer(retailer: str):
 def _notify(doc):
 	"""Tell an open Field Order form and the Sync Failures page to refresh."""
 	notify_sync_result("field_order_synced", "Field Order", doc.name, doc.sync_status)
+	if doc.sync_status == "Failed":
+		notify_order_sync_failure(doc)
 
 
 def _reset_before_save(doc):

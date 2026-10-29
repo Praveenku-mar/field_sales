@@ -2,17 +2,21 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { createResource } from 'frappe-ui'
 import { isEmbedded } from '@/shopify/embedded'
+import { APP_BASE } from '@/utils/base'
 
-// Roles that may open the app at all (checked again on the server).
-export const APP_ROLES = ['System Manager', 'Sales Manager', 'Field Sales Rep']
+// Roles that may open the app at all (checked again on the server). Field Sales
+// Retailer is the customer login: it reaches My Orders only (see the router guard).
+export const APP_ROLES = ['System Manager', 'Sales Manager', 'Field Sales Rep', 'Field Sales Retailer']
 
 export function redirectToLogin() {
   const target = window.location.pathname + window.location.search
-  window.location.href = `/login?redirect-to=${encodeURIComponent(target || window.default_route || '/fieldsales')}`
+  window.location.href = `${APP_BASE}/login?redirect-to=${encodeURIComponent(
+    target || window.default_route || APP_BASE,
+  )}`
 }
 
 /** Frappe sets this cookie on every response; "Guest" (or missing) means not signed in. */
-function cookieUser() {
+export function cookieUser() {
   const match = document.cookie.match(/(?:^|;\s*)user_id=([^;]*)/)
   const user = match ? decodeURIComponent(match[1]) : null
   return user && user !== 'Guest' ? user : null
@@ -41,6 +45,9 @@ export const useSessionStore = defineStore('session', () => {
   const store = computed(() => data.value.store || {})
   const isAdmin = computed(() => !!data.value.is_admin)
   const isManager = computed(() => !!data.value.is_manager)
+  // A customer login: sees My Orders only (the server scopes every list to its retailer).
+  const isRetailer = computed(() => !!data.value.is_retailer)
+  const retailer = computed(() => data.value.retailer || null)
   // Settings → Commission; off for companies that pay no commission (missing = on).
   const commissionEnabled = computed(() => data.value.commission_enabled !== false)
 
@@ -48,8 +55,11 @@ export const useSessionStore = defineStore('session', () => {
     return wanted.some((role) => roles.value.includes(role))
   }
 
-  /** Nav items, report links and routes: `roles` limits who sees them, `feature: 'commission'` hides them when it is off. */
+  /** Nav items, report links and routes: `roles` limits who sees them, `feature: 'commission'`
+   * hides them when it is off, `retailerOnly` shows them to a customer login alone — a role
+   * check is not enough there (e.g. Administrator holds every role). */
   function canSee(item) {
+    if (item.retailerOnly) return isRetailer.value
     if (item.roles && !hasRole(...item.roles)) return false
     if (item.feature === 'commission' && !commissionEnabled.value) return false
     return true
@@ -88,7 +98,7 @@ export const useSessionStore = defineStore('session', () => {
         embedded,
         title: noAccess ? 'No access to Field Sales' : 'Could not load Field Sales',
         message: noAccess
-          ? 'Your account needs the Field Sales Rep, Sales Manager or System Manager role.'
+          ? e?.messages?.[0] || 'Your account needs a Field Sales role.'
           : e?.messages?.[0] || e?.message || 'Unknown error',
       }
     }
@@ -107,7 +117,7 @@ export const useSessionStore = defineStore('session', () => {
     return createResource({ url: 'logout' })
       .fetch()
       .finally(() => {
-        window.location.href = '/login'
+        window.location.href = `${APP_BASE}/login`
       })
   }
 
@@ -122,6 +132,8 @@ export const useSessionStore = defineStore('session', () => {
     store,
     isAdmin,
     isManager,
+    isRetailer,
+    retailer,
     commissionEnabled,
     hasRole,
     canSee,

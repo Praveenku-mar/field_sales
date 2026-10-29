@@ -1,13 +1,18 @@
 // Sidebar navigation. An item has `route` (an SPA page) or `href` (a desk page).
 // `count` names a key returned by frontend_api.get_sidebar_counts; `roles` hides the item
 // from everyone else, `feature: 'commission'` hides it when commission is off (session.canSee;
-// the router and the server check again).
+// the router and the server check again). `retailerOnly` is for the customer login alone:
+// a role check would leak it (Administrator holds every role).
 export const MANAGERS = ['System Manager', 'Sales Manager']
 
+// Staff pages: everyone who works the app. A customer login (Field Sales Retailer)
+// holds none of these roles and gets the customer items below instead.
+export const STAFF = ['System Manager', 'Sales Manager', 'Field Sales Rep']
+
 export const NAV_ITEMS = [
-  { label: 'Dashboard', route: 'Dashboard', icon: 'lucide-layout-dashboard' },
-  { label: 'Customers', route: 'Retailers', icon: 'lucide-store', count: 'retailers' },
-  { label: 'Visits', route: 'Visits', icon: 'lucide-map-pin-check' },
+  { label: 'Dashboard', route: 'Dashboard', icon: 'lucide-layout-dashboard', roles: STAFF },
+  { label: 'Customers', route: 'Retailers', icon: 'lucide-store', count: 'retailers', roles: STAFF },
+  { label: 'Visits', route: 'Visits', icon: 'lucide-map-pin-check', roles: STAFF },
   {
     label: 'Orders',
     route: 'Orders',
@@ -15,24 +20,28 @@ export const NAV_ITEMS = [
     count: 'failed_orders',
     countTheme: 'red',
     countTooltip: 'Orders that failed to sync',
+    roles: STAFF,
   },
-  { label: 'Products', route: 'Products', icon: 'lucide-package' },
+  { label: 'Products', route: 'Products', icon: 'lucide-package', roles: STAFF },
   // Everyone: a rep sees themselves and their team (Sales Rep permission_query_conditions).
-  { label: 'Sales Reps', route: 'SalesReps', icon: 'lucide-user-round' },
+  { label: 'Sales Reps', route: 'SalesReps', icon: 'lucide-user-round', roles: STAFF },
   // Everyone: a rep sees their own commission; managers also see the team and statements.
-  { label: 'Commission', route: 'Commission', icon: 'lucide-wallet', feature: 'commission' },
+  { label: 'Commission', route: 'Commission', icon: 'lucide-wallet', feature: 'commission', roles: STAFF },
   { label: 'Reports', route: 'Reports', icon: 'lucide-chart-column', roles: MANAGERS },
   { label: 'Sync Log', route: 'SyncLogs', icon: 'lucide-scroll-text', roles: MANAGERS },
   { label: 'Sync Failures', route: 'SyncFailures', icon: 'lucide-triangle-alert', roles: MANAGERS },
   { label: 'Settings', route: 'Settings', icon: 'lucide-settings', roles: MANAGERS },
+  // The customer login: its own orders, read only.
+  { label: 'My Orders', route: 'MyOrders', icon: 'lucide-shopping-cart', retailerOnly: true },
 ]
 
 // The bottom tab bar on phones (< 768px), where the sidebar is hidden.
 export const TAB_ITEMS = [
-  { label: 'Dashboard', route: 'Dashboard', icon: 'lucide-layout-dashboard' },
-  { label: 'Visits', route: 'Visits', icon: 'lucide-map-pin-check' },
-  { label: 'Orders', route: 'Orders', icon: 'lucide-shopping-cart' },
-  { label: 'Customers', route: 'Retailers', icon: 'lucide-store' },
+  { label: 'Dashboard', route: 'Dashboard', icon: 'lucide-layout-dashboard', roles: STAFF },
+  { label: 'Visits', route: 'Visits', icon: 'lucide-map-pin-check', roles: STAFF },
+  { label: 'Orders', route: 'Orders', icon: 'lucide-shopping-cart', roles: STAFF },
+  { label: 'Customers', route: 'Retailers', icon: 'lucide-store', roles: STAFF },
+  { label: 'My Orders', route: 'MyOrders', icon: 'lucide-shopping-cart', retailerOnly: true },
 ]
 
 // Listed on the Reports page.

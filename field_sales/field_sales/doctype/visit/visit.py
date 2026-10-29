@@ -7,7 +7,7 @@ import frappe
 from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
 from frappe.model.document import Document
-from frappe.utils import flt, formatdate, get_datetime, get_fullname
+from frappe.utils import flt, formatdate, get_datetime, get_fullname, getdate
 
 from field_sales.utils.geo import DEFAULT_GEOFENCE_RADIUS_M, has_coords, haversine_m
 
@@ -32,10 +32,14 @@ class Visit(Document):
 	def on_update(self):
 		self._update_retailer_last_visit()
 		before = self.get_doc_before_save()
-		if before and before.sales_rep != self.sales_rep:
+		if not before:
+			return
+		if before.sales_rep != self.sales_rep:
 			self._notify_rep()
+		elif before.visit_date and self.visit_date and getdate(before.visit_date) != getdate(self.visit_date):
+			self._notify_rep(rescheduled=True)
 
-	def _notify_rep(self):
+	def _notify_rep(self, rescheduled: bool = False):
 		"""
 		Send the assigned rep a system notification for this visit. Nothing goes
 		out when the rep has no user or is the one making the change; dedupe
@@ -46,12 +50,20 @@ class Visit(Document):
 		if not user or user == frappe.session.user:
 			return
 
-		subject = _("New visit: {0}, {1} on {2} — assigned by {3}").format(
-			f"<b>{frappe.utils.escape_html(self.retailer_name or self.retailer)}</b>",
-			frappe.utils.escape_html(self.city or ""),
-			formatdate(self.visit_date),
-			frappe.utils.escape_html(get_fullname(frappe.session.user)),
-		)
+		if rescheduled:
+			subject = _("Visit rescheduled: {0}, {1} to {2} — rescheduled by {3}").format(
+				f"<b>{frappe.utils.escape_html(self.retailer_name or self.retailer)}</b>",
+				frappe.utils.escape_html(self.city or ""),
+				formatdate(self.visit_date),
+				frappe.utils.escape_html(get_fullname(frappe.session.user)),
+			)
+		else:
+			subject = _("New visit: {0}, {1} on {2} — assigned by {3}").format(
+				f"<b>{frappe.utils.escape_html(self.retailer_name or self.retailer)}</b>",
+				frappe.utils.escape_html(self.city or ""),
+				formatdate(self.visit_date),
+				frappe.utils.escape_html(get_fullname(frappe.session.user)),
+			)
 		enqueue_create_notification(
 			[user],
 			{
@@ -62,7 +74,7 @@ class Visit(Document):
 				"subject": subject,
 				"email_content": subject,
 			},
-			dedupe_on=["document_type", "document_name"],
+			dedupe_on=["document_type", "document_name", "subject"],
 		)
 
 	def _guard_check_in_fields(self):

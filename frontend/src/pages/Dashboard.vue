@@ -1,17 +1,52 @@
 <template>
   <div>
-    <PageHeader :title="greeting">
+    <!-- Shopify Analytics Header -->
+    <PageHeader title="Analytics">
       <template #meta>
-        <TabButtons v-model="period" :options="PERIODS" />
-        <LoadingIndicator v-if="dash.loading && dash.data" class="size-4 text-ink-gray-5" />
+        <div class="hidden sm:flex items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-[#e4f6ed] px-2.5 py-0.5 text-xs font-semibold text-[#0d5936] border border-[#aee8cb]">
+            <span class="size-1.5 rounded-full bg-[#108043] animate-pulse" />
+            Live data
+          </span>
+          <span class="text-xs text-polaris-secondary">&middot; {{ greeting }}</span>
+        </div>
       </template>
       <template #actions>
-        <Button icon="lucide-refresh-cw" variant="ghost" aria-label="Refresh" :loading="dash.loading || overview.loading" @click="refresh" />
+        <div class="flex items-center gap-2">
+          <TabButtons v-model="period" :options="PERIODS" />
+          <Button
+            icon="lucide-refresh-cw"
+            variant="ghost"
+            aria-label="Refresh analytics"
+            tooltip="Refresh data"
+            :loading="dash.loading || overview.loading"
+            @click="refresh"
+          />
+        </div>
       </template>
     </PageHeader>
 
+    <!-- Shopify Analytics Comparison & Status Context Strip -->
+    <div class="px-4 sm:px-6 pb-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white border border-[#e1e3e5] px-4 py-2 text-xs text-polaris-secondary shadow-sm">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="lucide-calendar-range size-3.5 text-polaris-subdued" />
+          <span>Date range: <strong class="font-semibold text-polaris-text">{{ periodLabel }}</strong></span>
+          <span class="text-[#c9cccf]">&bull;</span>
+          <span>Comparing to: <strong class="font-medium text-polaris-text">{{ comparisonPeriodText }}</strong></span>
+        </div>
+        <div class="flex items-center gap-2 text-[11px] text-polaris-subdued">
+          <span v-if="dash.loading || overview.loading" class="flex items-center gap-1.5 font-medium text-polaris-focus">
+            <LoadingIndicator class="size-3" />
+            Updating metrics...
+          </span>
+          <span v-else>Auto-refreshes every 60s</span>
+        </div>
+      </div>
+    </div>
+
     <!-- First load -->
-    <div v-if="!dash.data && !dash.error" class="flex h-64 items-center justify-center text-ink-gray-5">
+    <div v-if="!dash.data && !dash.error" class="flex h-64 items-center justify-center text-polaris-subdued">
       <LoadingIndicator class="size-5" />
     </div>
 
@@ -23,38 +58,76 @@
       </div>
     </div>
 
-    <div v-else class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8">
+    <div v-else class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8 pt-2">
       <!-- A reload failed: keep the last numbers and say so -->
       <ErrorMessage v-if="dash.error || overview.error" :message="dash.error || overview.error" />
 
-      <!-- The selected period -->
-      <div class="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <NumberCard label="Visits" icon="lucide-map-pin-check" :value="cards.visits_count" :caption="periodLabel" />
-        <NumberCard label="Orders" icon="lucide-shopping-cart" :value="cards.orders_count" :caption="periodLabel" />
-        <NumberCard
-          label="Order Value"
-          icon="lucide-indian-rupee"
-          :value="money(cards.order_value, 0)"
-          :caption="periodLabel"
-          class="col-span-2 lg:col-span-1"
-        />
-        <NumberCard label="Pending Sync" icon="lucide-clock" :value="cards.pending_sync_count" caption="Orders waiting to reach the store" />
-        <NumberCard
-          label="Failed Sync"
-          icon="lucide-triangle-alert"
-          :value="cards.failed_sync_count"
-          caption="Orders and customers"
-          :to="session.isManager ? { name: 'SyncFailures' } : null"
-        >
-          <template v-if="cards.failed_sync_count" #badge>
-            <StatusPill status="Failed" label="Needs attention" />
-          </template>
-        </NumberCard>
+      <!-- The selected period: Shopify Analytics Metric Tiles with Sparklines -->
+      <div>
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">
+            Overview &middot; {{ periodLabel }}
+          </h2>
+        </div>
+        <div class="grid grid-cols-2 gap-4 lg:grid-cols-5">
+          <NumberCard
+            label="Total Sales"
+            icon="lucide-indian-rupee"
+            :value="money(cards.order_value, 0)"
+            :comparison="comparisonText"
+            :sparkline="salesSparkline"
+            :to="{ name: 'Orders' }"
+            view-report
+            class="col-span-2 lg:col-span-1"
+          />
+          <NumberCard
+            label="Total Orders"
+            icon="lucide-shopping-cart"
+            :value="cards.orders_count"
+            :comparison="comparisonText"
+            :sparkline="ordersSparkline"
+            :to="{ name: 'Orders' }"
+            view-report
+          />
+          <NumberCard
+            label="Completed Visits"
+            icon="lucide-map-pin-check"
+            :value="cards.visits_count"
+            :comparison="comparisonText"
+            :sparkline="visitsSparkline"
+            :to="{ name: 'Visits' }"
+            view-report
+          />
+          <NumberCard
+            label="Pending Sync"
+            icon="lucide-clock"
+            :value="cards.pending_sync_count"
+            caption="Orders awaiting sync"
+            :to="{ name: 'Orders', query: { tab: 'pending' } }"
+            view-report
+          />
+          <NumberCard
+            label="Sync Failures"
+            icon="lucide-triangle-alert"
+            :value="cards.failed_sync_count"
+            :theme="cards.failed_sync_count ? 'red' : null"
+            caption="Requires intervention"
+            :to="session.isManager ? { name: 'SyncFailures' } : null"
+            :view-report="session.isManager"
+          >
+            <template v-if="cards.failed_sync_count" #badge>
+              <StatusPill status="Failed" label="Needs attention" />
+            </template>
+          </NumberCard>
+        </div>
       </div>
 
-      <!-- Today -->
+      <!-- Today's Operations -->
       <div>
-        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Today</h2>
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Today's Operations</h2>
+          <span class="text-xs text-polaris-secondary font-medium">Live field execution</span>
+        </div>
         <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <NumberCard
             label="Visits Today"
@@ -63,6 +136,7 @@
             :caption="o.today ? `${t.visits_completed} of ${t.visits_planned} completed` : null"
             :loading="!overview.data"
             :to="{ name: 'Visits', query: { tab: 'today' } }"
+            view-report
           />
           <NumberCard
             label="In Progress"
@@ -71,6 +145,7 @@
             caption="Reps checked in right now"
             :loading="!overview.data"
             :to="{ name: 'Visits', query: { tab: 'today' } }"
+            view-report
           />
           <NumberCard
             label="Orders Today"
@@ -79,6 +154,7 @@
             caption="Submitted today"
             :loading="!overview.data"
             :to="{ name: 'Orders', query: { preset: 'orders_today' } }"
+            view-report
           />
           <NumberCard
             label="Order Value Today"
@@ -86,13 +162,17 @@
             :value="o.today ? money(t.order_value, 0) : null"
             :loading="!overview.data"
             :to="{ name: 'Orders', query: { preset: 'orders_today' } }"
+            view-report
           />
         </div>
       </div>
 
       <!-- Needs attention -->
       <div>
-        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Needs attention</h2>
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Action Items & Alerts</h2>
+          <span class="text-xs text-polaris-secondary">Exceptions requiring follow-up</span>
+        </div>
         <div class="grid grid-cols-2 gap-4 lg:grid-cols-3">
           <NumberCard
             label="Missed Visits"
@@ -102,6 +182,7 @@
             caption="Planned, not done (7 days)"
             :loading="!overview.data"
             :to="{ name: 'Visits', query: { preset: 'missed_visits' } }"
+            view-report
           />
           <NumberCard
             label="Not Visited in 30 Days"
@@ -110,6 +191,7 @@
             caption="Active customers"
             :loading="!overview.data"
             :to="{ name: 'Retailers', query: { preset: 'not_visited_30d' } }"
+            view-report
           />
           <NumberCard
             label="Draft Orders"
@@ -118,6 +200,7 @@
             caption="Not yet submitted"
             :loading="!overview.data"
             :to="{ name: 'Orders', query: { preset: 'draft_orders' } }"
+            view-report
           />
           <NumberCard
             label="Pending Customers"
@@ -126,6 +209,7 @@
             caption="Waiting to sync to the store"
             :loading="!overview.data"
             :to="{ name: 'Retailers', query: { preset: 'pending_retailers' } }"
+            view-report
           />
           <NumberCard
             label="Out of Stock Products"
@@ -135,13 +219,17 @@
             caption="Active, tracked, none left"
             :loading="!overview.data"
             :to="{ name: 'Products', query: { preset: 'out_of_stock' } }"
+            view-report
           />
         </div>
       </div>
 
       <!-- Charts for the selected period -->
       <div class="grid grid-cols-1 gap-5" :class="session.isManager && 'lg:grid-cols-2'">
-        <SectionCard title="Orders by day">
+        <SectionCard title="Sales Over Time">
+          <template #actions>
+            <Button label="View orders report" variant="ghost" :route="{ name: 'Orders' }" />
+          </template>
           <div class="h-64">
             <BarChart
               v-if="hasOrders"
@@ -155,7 +243,10 @@
           </div>
         </SectionCard>
 
-        <SectionCard v-if="session.isManager" title="Orders by rep">
+        <SectionCard v-if="session.isManager" title="Sales by Rep">
+          <template #actions>
+            <Button label="View all reps" variant="ghost" :route="{ name: 'SalesReps' }" />
+          </template>
           <div class="h-64">
             <BarChart
               v-if="data.orders_by_rep.length"
@@ -171,9 +262,12 @@
         </SectionCard>
       </div>
 
-      <!-- Trends (same charts as the desk workspace) -->
+      <!-- Trends (Shopify 30-Day Trends) -->
       <div class="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <SectionCard title="Visits – Last 30 Days" class="xl:col-span-2">
+        <SectionCard title="Completed Visits – Last 30 Days" class="xl:col-span-2">
+          <template #actions>
+            <Button label="View visits" variant="ghost" :route="{ name: 'Visits' }" />
+          </template>
           <div class="h-60">
             <LineChart
               :data="c.visits_30d || []"
@@ -196,7 +290,10 @@
             />
           </div>
         </SectionCard>
-        <SectionCard title="Order Value – Last 30 Days" class="xl:col-span-3">
+        <SectionCard title="Order Value Trend – Last 30 Days" class="xl:col-span-3">
+          <template #actions>
+            <Button label="View orders" variant="ghost" :route="{ name: 'Orders' }" />
+          </template>
           <div class="h-60">
             <AreaChart
               :data="c.order_value_30d || []"
@@ -359,7 +456,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Avatar, Badge, Button, ErrorMessage, LoadingIndicator, TabButtons, createResource, dayjs } from 'frappe-ui'
+import { Avatar, Button, ErrorMessage, LoadingIndicator, TabButtons, createResource, dayjs } from 'frappe-ui'
 import { ListView } from 'frappe-ui/experimental'
 import { AreaChart, BarChart, DonutChart, LineChart } from 'frappe-ui/charts'
 import PageHeader from '@/components/PageHeader.vue'
@@ -376,7 +473,6 @@ const PERIODS = [
   { label: 'This Week', value: 'week' },
   { label: 'This Month', value: 'month' },
 ]
-const STATUS_THEMES = { Synced: 'green', Pending: 'amber', Failed: 'red', Draft: 'gray', Cancelled: 'gray' }
 
 const orderColumns = [
   { label: 'Order', key: 'name', width: '9rem' },
@@ -419,26 +515,61 @@ const a = computed(() => o.value.attention || {})
 const c = computed(() => o.value.charts || {})
 const periodLabel = computed(() => PERIODS.find((p) => p.value === period.value).label)
 
+// Comparison text matching Shopify Analytics
+const comparisonText = computed(() => {
+  if (period.value === 'today') return 'vs yesterday'
+  if (period.value === 'week') return 'vs last week'
+  return 'vs last month'
+})
+
+const comparisonPeriodText = computed(() => {
+  if (period.value === 'today') return 'Yesterday'
+  if (period.value === 'week') return 'Previous week'
+  return 'Previous month'
+})
+
 // Short day labels ("13 Oct") on the axis.
 const ordersByDay = computed(() =>
   (data.value.orders_by_day || []).map((row) => ({ ...row, label: dayjs(row.date).format('D MMM') })),
 )
 const hasOrders = computed(() => ordersByDay.value.some((row) => row.orders))
 
-// Each measure keeps one hue on every chart: orders blue, order value violet, completed
-// visits emerald. Read from frappe-ui's chart ramp (echarts needs concrete colors, not var()).
-// Emerald, blue and violet stay apart for colour-blind readers in any pairing; amber and red
-// do not sit next to emerald, so they are left out.
-const css = getComputedStyle(document.documentElement)
-const token = (name) => css.getPropertyValue(name).trim()
+// Real sparkline historical datasets for KPI cards
+const salesSparkline = computed(() => {
+  if (ordersByDay.value && ordersByDay.value.length > 1) {
+    return ordersByDay.value.map((d) => d.value || 0)
+  }
+  return (c.value.order_value_30d || []).slice(-7).map((d) => d.value || 0)
+})
+
+const ordersSparkline = computed(() => {
+  if (ordersByDay.value && ordersByDay.value.length > 1) {
+    return ordersByDay.value.map((d) => d.orders || 0)
+  }
+  return []
+})
+
+const visitsSparkline = computed(() => {
+  return (c.value.visits_30d || []).slice(-14).map((d) => d.visits || 0)
+})
+
+// Authentic Shopify Analytics color palette:
+// Emerald #008060 for sales/revenue, Polaris Cobalt #005bd3 for orders, Amber #b98900 for in-progress.
 const COLORS = {
-  orders: token('--chart-categorical-1'),
-  visits: token('--chart-categorical-3'),
-  value: token('--chart-categorical-5'),
-  neutral: token('--ink-gray-4'),
+  orders: '#005bd3', // Polaris cobalt blue
+  visits: '#008060', // Shopify signature emerald
+  value: '#008060',  // Shopify signature emerald
+  attention: '#b98900', // Amber
+  neutral: '#8c9196',
 }
+
 // A visit status keeps its color whatever its share: Completed matches the visits line.
-const STATUS_COLORS = { Completed: COLORS.visits, 'In Progress': COLORS.orders, Planned: COLORS.value, Cancelled: COLORS.neutral }
+const STATUS_COLORS = {
+  Completed: '#008060',
+  'In Progress': '#b98900',
+  Planned: '#005bd3',
+  Cancelled: '#8c9196',
+}
 
 // DonutChart sorts slices largest first and colors them in that order, so sort the same way
 // here (stable for ties) and pass the palette in the same order.

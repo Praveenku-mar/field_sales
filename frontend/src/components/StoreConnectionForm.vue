@@ -56,7 +56,7 @@
             label="Shop Domain"
             placeholder="kovai-mart.myshopify.com"
             required
-            description="Shopify: kovai-mart.myshopify.com · WooCommerce: https://shop.com · Odoo: https://company.odoo.com"
+            description="Shopify: kovai-mart.myshopify.com"
           />
           <Checkbox
             v-model="d.enabled"
@@ -104,36 +104,6 @@
           <Select v-model="d.shopify_api_version" :options="apiVersions" label="API Version" />
         </div>
 
-        <!-- WooCommerce -->
-        <div v-else-if="d.platform === 'WooCommerce'" class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
-          <TextInput v-model="d.woo_consumer_key" label="Consumer Key" required />
-          <TextInput
-            v-model="d.woo_consumer_secret"
-            :type="secretsShown.woo_consumer_secret ? 'text' : 'password'"
-            label="Consumer Secret"
-            required
-            description="Stored encrypted — the masked value is kept unless you type a new secret"
-          >
-            <template #suffix><SecretToggle field="woo_consumer_secret" /></template>
-          </TextInput>
-          <TextInput v-model="d.woo_api_version" label="API Version" placeholder="wc/v3" />
-        </div>
-
-        <!-- Odoo -->
-        <div v-else-if="d.platform === 'Odoo'" class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
-          <TextInput v-model="d.odoo_database" label="Database" required />
-          <TextInput v-model="d.odoo_username" label="Username" required />
-          <TextInput
-            v-model="d.odoo_api_key"
-            :type="secretsShown.odoo_api_key ? 'text' : 'password'"
-            label="API Key"
-            required
-            description="Stored encrypted — the masked value is kept unless you type a new key"
-          >
-            <template #suffix><SecretToggle field="odoo_api_key" /></template>
-          </TextInput>
-        </div>
-
         <div class="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button
             variant="outline"
@@ -157,19 +127,12 @@
         <h3 class="text-base font-medium text-ink-gray-9">Defaults</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <Select
-            v-if="d.platform === 'Shopify'"
             :model-value="d.default_location_id"
             :options="locationOptions"
             label="Default Location"
             required
             description="Stock is checked against this Shopify location unless an order picks another"
             @update:model-value="setLocation"
-          />
-          <TextInput
-            v-else
-            v-model="d.default_location_id"
-            label="Default Location ID"
-            description="Odoo warehouse ID; leave blank for WooCommerce"
           />
           <TextInput :model-value="d.default_location_name" label="Default Location Name" disabled />
           <Select v-model="d.order_mode" :options="ORDER_MODES" label="Create Shopify Order As" />
@@ -311,7 +274,7 @@ const SecretToggle = defineComponent({
   },
 })
 
-const PLATFORMS = ['Shopify', 'WooCommerce', 'Odoo'].map((v) => ({ label: v, value: v }))
+const PLATFORMS = [{ label: 'Shopify', value: 'Shopify' }]
 const ORDER_MODES = [
   { label: 'Draft Order', value: 'Draft' },
   { label: 'Confirmed Order', value: 'Confirmed' },

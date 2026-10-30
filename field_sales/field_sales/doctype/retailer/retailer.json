@@ -236,7 +236,7 @@
    "fieldname": "platform",
    "fieldtype": "Select",
    "label": "Platform",
-   "options": "\nShopify\nWooCommerce\nOdoo"
+   "options": "\nShopify"
   },
   {
    "fieldname": "external_customer_id",

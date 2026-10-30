@@ -18,9 +18,8 @@ class StoreConnection(Document):
 		self._clear_token_on_credential_change()
 		self._validate_locations()
 		# Read here: after the save the field only holds the masked value.
-		self.flags.secret_entered = any(
-			bool(self.get(f)) and not self.is_dummy_password(self.get(f))
-			for f in ("shopify_client_secret", "woo_consumer_secret", "odoo_api_key")
+		self.flags.secret_entered = bool(self.shopify_client_secret) and not self.is_dummy_password(
+			self.shopify_client_secret
 		)
 
 	def on_update(self):
@@ -35,21 +34,12 @@ class StoreConnection(Document):
 
 		Never runs inline, so wrong credentials can't block or fail the save.
 		"""
-		if not (self.enabled and self.platform in CONNECTORS and self.match_shop_settings):
+		if not (self.enabled and self.platform == "Shopify" and self.match_shop_settings):
 			return
 		changed = (
 			any(
 				self.has_value_changed(f)
-				for f in (
-					"enabled",
-					"platform",
-					"store_url",
-					"shopify_client_id",
-					"woo_consumer_key",
-					"odoo_database",
-					"odoo_username",
-					"match_shop_settings",
-				)
+				for f in ("enabled", "store_url", "shopify_client_id", "match_shop_settings")
 			)
 			or self.flags.secret_entered
 			or not self.shop_currency

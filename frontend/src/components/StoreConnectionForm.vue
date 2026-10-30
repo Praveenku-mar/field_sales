@@ -140,13 +140,10 @@
             label="Test Connection"
             icon-left="lucide-cable"
             :loading="testing"
-            :disabled="d.platform !== 'Shopify'"
+            :disabled="!d.platform"
             @click="testConnection"
           />
-          <p v-if="d.platform && d.platform !== 'Shopify'" class="text-sm text-ink-gray-5">
-            Live calls support Shopify connections only (for now)
-          </p>
-          <p v-else-if="status" class="inline-flex items-center gap-1.5 text-sm">
+          <p v-if="status" class="inline-flex items-center gap-1.5 text-sm">
             <span
               :class="[status.ok ? 'lucide-circle-check text-ink-green-7' : 'lucide-circle-x text-ink-red-5', 'size-4 shrink-0']"
             />

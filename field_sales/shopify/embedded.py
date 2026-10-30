@@ -211,6 +211,12 @@ def page_context() -> dict | None:
 	request = getattr(frappe, "request", None)
 	if not request:
 		return None
+
+	# An external store (e.g. WooCommerce) framing the same page: allow its origin (cookie app).
+	settings = frappe.get_single("Store Connection")
+	if settings.platform != "Shopify" and settings.enabled and settings.store_url:
+		frappe.local.external_frame_store = (settings.store_url or "").rstrip("/")
+
 	args = request.args
 	shop = (args.get("shop") or "").strip().lower()
 	host = (args.get("host") or "").strip()
@@ -266,10 +272,14 @@ def after_request(response=None, request=None):
 	Other responses are left alone.
 	"""
 	shop = getattr(frappe.local, "shopify_frame_shop", None)
-	if not shop or response is None:
-		return
-	response.headers["Content-Security-Policy"] = f"frame-ancestors https://{shop} https://admin.shopify.com;"
-	response.headers.pop("X-Frame-Options", None)
+	if shop and response is not None:
+		response.headers["Content-Security-Policy"] = f"frame-ancestors https://{shop} https://admin.shopify.com;"
+		response.headers.pop("X-Frame-Options", None)
+
+	store = getattr(frappe.local, "external_frame_store", None)
+	if store and response is not None:
+		response.headers["Content-Security-Policy"] = f"frame-ancestors {store};"
+		response.headers.pop("X-Frame-Options", None)
 
 
 # ----------------------------------------------------------------------

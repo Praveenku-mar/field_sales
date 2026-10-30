@@ -2,7 +2,7 @@
   <!-- Phones have no sidebar: search and the user menu live here. Desktop
        shows no top bar — each page's heading already names it, so a duplicate
        title strip would only repeat it. -->
-  <header class="flex h-topbar shrink-0 items-center gap-3 border-b border-outline-gray-2 bg-surface-base px-4 md:hidden">
+  <header class="flex h-topbar shrink-0 items-center justify-between border-b border-[#e1e3e5] bg-white px-4 md:hidden">
     <Button
       v-if="!session.isRetailer"
       variant="ghost"

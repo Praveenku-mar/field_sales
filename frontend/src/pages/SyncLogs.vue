@@ -2,13 +2,21 @@
   <!-- Full height: the table fills what is left and scrolls inside its card -->
   <div class="flex h-full flex-col">
     <PageHeader title="Sync Log" />
-    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
       <ListFilters v-model="model" search-placeholder="Search record, error, endpoint" :tabs="tabs" :fields="fields">
-        <div v-if="reference" class="flex items-center gap-1.5 rounded-full bg-surface-gray-3 py-1 pl-3 pr-1.5 text-sm text-ink-gray-8">
-          <span class="lucide-filter size-3.5 text-ink-gray-5" />
-          <span>Showing: <b class="font-medium">{{ reference }}</b></span>
-          <button class="flex size-5 items-center justify-center rounded-full hover:bg-surface-gray-4" title="Show all" @click="clearReference">
-            <span class="lucide-x size-3.5" />
+        <div
+          v-if="reference"
+          class="inline-flex items-center gap-1.5 rounded-full bg-[#f1f2f4] border border-[#e1e3e5] py-1 pl-2.5 pr-1.5 text-xs text-polaris-text shadow-sm"
+        >
+          <span class="lucide-filter size-3.5 text-polaris-secondary" />
+          <span>Showing: <strong class="font-semibold text-polaris-text">{{ reference }}</strong></span>
+          <button
+            type="button"
+            class="flex size-4.5 items-center justify-center rounded-full text-polaris-secondary transition-colors hover:bg-[#e1e3e5] hover:text-polaris-text"
+            title="Clear filter"
+            @click="clearReference"
+          >
+            <span class="lucide-x size-3" />
           </button>
         </div>
       </ListFilters>
@@ -25,25 +33,25 @@
         @load-more="list.next()"
       >
         <template #cell-creation="{ value }">
-          <div class="whitespace-nowrap text-ink-gray-9">{{ relativeDay(value) }}, {{ formatTime(value) }}</div>
-          <div class="text-xs text-ink-gray-5">{{ formatDate(value) }}</div>
+          <div class="whitespace-nowrap font-medium text-polaris-text">{{ relativeDay(value) }}, {{ formatTime(value) }}</div>
+          <div class="text-xs text-polaris-secondary">{{ formatDate(value) }}</div>
         </template>
         <template #cell-operation="{ row }">
-          <div class="text-ink-gray-9">{{ row.operation }}</div>
-          <div class="text-xs text-ink-gray-5">{{ row.platform }}</div>
+          <div class="font-medium text-polaris-text">{{ row.operation }}</div>
+          <div class="text-xs text-polaris-secondary">{{ row.platform }}</div>
         </template>
         <template #cell-reference_name="{ row }">
           <template v-if="row.reference_name">
-            <div class="text-ink-gray-9">{{ row.reference_name }}</div>
-            <div class="text-xs text-ink-gray-5">{{ row.reference_doctype }}</div>
+            <div class="font-medium text-polaris-text">{{ row.reference_name }}</div>
+            <div class="text-xs text-polaris-secondary">{{ row.reference_doctype }}</div>
           </template>
-          <span v-else class="text-ink-gray-4">—</span>
+          <span v-else class="text-polaris-subdued">—</span>
         </template>
         <template #cell-error_message="{ row }">
-          <div v-if="row.error_message || row.error_code" class="line-clamp-2 max-w-md text-ink-red-6">
+          <div v-if="row.error_message || row.error_code" class="line-clamp-2 max-w-md text-polaris-critical">
             <span v-if="row.error_code" class="font-mono text-xs">{{ row.error_code }} </span>{{ row.error_message }}
           </div>
-          <span v-else class="text-ink-gray-4">—</span>
+          <span v-else class="text-polaris-subdued">—</span>
         </template>
         <template #cell-status="{ value }"><StatusPill :status="value" /></template>
       </DataTable>

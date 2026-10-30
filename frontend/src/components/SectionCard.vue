@@ -1,10 +1,13 @@
 <template>
-  <section class="fs-card">
-    <header v-if="title || $slots.actions" class="flex items-center justify-between gap-2 border-b border-desk-border px-4 py-2.5">
-      <h2 class="text-base font-medium text-ink-gray-9">{{ title }}</h2>
-      <div class="flex items-center gap-2"><slot name="actions" /></div>
+  <section class="fs-card overflow-hidden">
+    <header
+      v-if="title || $slots.actions"
+      class="flex items-center justify-between gap-3 border-b border-[#f1f2f4] px-4 sm:px-5 py-3"
+    >
+      <h2 class="text-sm font-semibold text-polaris-text">{{ title }}</h2>
+      <div v-if="$slots.actions" class="flex items-center gap-2"><slot name="actions" /></div>
     </header>
-    <div :class="flush ? '' : 'p-4'"><slot /></div>
+    <div :class="flush ? '' : 'p-4 sm:p-5'"><slot /></div>
   </section>
 </template>
 

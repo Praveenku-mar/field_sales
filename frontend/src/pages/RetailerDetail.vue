@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader :title="d.retailer_name || name" :status="d.name ? statusLabel : null">
-      <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
+      <template #meta><span class="text-polaris-secondary">{{ name }}</span></template>
       <template #actions>
         <Button
           v-if="session.isManager"
@@ -17,9 +17,9 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Customer not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Customer not found" :description="errorText" /></div></div>
 
-    <div v-else class="grid grid-cols-1 gap-5 px-5 pb-6 xl:grid-cols-3">
+    <div v-else class="grid grid-cols-1 gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-3">
       <div class="space-y-5 xl:col-span-2">
         <SectionCard title="Details">
           <InfoGrid :items="details" :columns="3" />
@@ -45,12 +45,12 @@
       <div class="space-y-5">
         <SectionCard title="Last 30 Days">
           <div class="grid grid-cols-3 gap-3 text-center">
-            <div><div class="text-xl font-semibold tabular-nums">{{ summary.data?.visits_30d ?? '—' }}</div><div class="text-xs text-ink-gray-5">Visits</div></div>
-            <div><div class="text-xl font-semibold tabular-nums">{{ summary.data?.orders_30d ?? '—' }}</div><div class="text-xs text-ink-gray-5">Orders</div></div>
-            <div><div class="truncate text-xl font-semibold tabular-nums">{{ summary.data ? formatCurrency(summary.data.value_30d, undefined, 0) : '—' }}</div><div class="text-xs text-ink-gray-5">Value</div></div>
+            <div><div class="text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ summary.data?.visits_30d ?? '—' }}</div><div class="text-xs text-polaris-secondary">Visits</div></div>
+            <div><div class="text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ summary.data?.orders_30d ?? '—' }}</div><div class="text-xs text-polaris-secondary">Orders</div></div>
+            <div><div class="truncate text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ summary.data ? formatCurrency(summary.data.value_30d, undefined, 0) : '—' }}</div><div class="text-xs text-polaris-secondary">Value</div></div>
           </div>
-          <div class="mt-4 border-t border-desk-border pt-3 text-sm">
-            <span class="text-ink-gray-5">Last visit: </span>
+          <div class="mt-4 border-t border-[#f1f2f4] pt-3 text-sm">
+            <span class="text-polaris-secondary">Last visit: </span>
             <span :class="lastVisitClass">{{ d.last_visit ? `${relativeDay(d.last_visit)} (${formatDate(d.last_visit)})` : 'Never' }}</span>
           </div>
         </SectionCard>

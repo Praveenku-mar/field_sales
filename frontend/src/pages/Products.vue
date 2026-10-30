@@ -16,7 +16,7 @@
         />
       </template>
     </PageHeader>
-    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
       <ListFilters v-model="model" search-placeholder="Search title, SKU or barcode" :tabs="tabs">
         <template #search-actions>
           <!-- No camera inside Shopify admin (iframe) -->
@@ -38,18 +38,18 @@
       >
         <template #cell-product_title="{ row }">
           <div class="flex items-center gap-3">
-            <img v-if="row.image" :src="row.image" class="size-8 shrink-0 rounded-3 border border-desk-border object-cover" />
-            <div v-else class="flex size-8 shrink-0 items-center justify-center rounded-3 bg-surface-gray-2">
-              <span class="lucide-package size-4 text-ink-gray-4" />
+            <img v-if="row.image" :src="row.image" class="size-8.5 shrink-0 rounded-lg border border-[#e1e3e5] object-cover" />
+            <div v-else class="flex size-8.5 shrink-0 items-center justify-center rounded-lg bg-[#f1f2f4] border border-[#e1e3e5]">
+              <span class="lucide-package size-4 text-polaris-subdued" />
             </div>
             <div class="min-w-0">
-              <div class="truncate font-medium text-ink-gray-9">{{ row.product_title }}</div>
-              <div class="truncate text-xs text-ink-gray-5">{{ row.variant_title || row.collection || '—' }}</div>
+              <div class="truncate font-medium text-polaris-text">{{ row.product_title }}</div>
+              <div class="truncate text-xs text-polaris-secondary">{{ row.variant_title || row.collection || '—' }}</div>
             </div>
           </div>
         </template>
         <template #cell-available_qty="{ row }">
-          <span v-if="!row.track_inventory" class="text-ink-gray-4">Not tracked</span>
+          <span v-if="!row.track_inventory" class="text-polaris-subdued">Not tracked</span>
           <span v-else :class="stockClass(row.available_qty)">{{ formatNumber(row.available_qty) }}</span>
         </template>
         <template #cell-status="{ value }"><StatusPill :status="value === 'Active' ? 'Active' : value" /></template>
@@ -130,7 +130,11 @@ async function onScanned(code) {
 }
 
 function stockClass(qty) {
-  return qty <= 0 ? 'font-medium text-ink-red-5' : qty <= LOW_STOCK ? 'text-ink-amber-7' : 'text-ink-green-7'
+  return qty <= 0
+    ? 'font-semibold text-polaris-critical'
+    : qty <= LOW_STOCK
+      ? 'font-medium text-polaris-attention'
+      : 'font-medium text-polaris-success'
 }
 
 // ---------------------------------------------------------------- sync

@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader :title="d.full_name || name" :status="d.name ? (d.active ? 'Active' : 'Inactive') : null">
-      <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
+      <template #meta><span class="text-polaris-secondary">{{ name }}</span></template>
       <template #actions>
         <Dropdown v-if="d.name && moreActions.length" :options="moreActions" align="end">
           <Button variant="ghost" icon="lucide-ellipsis" aria-label="More actions" />
@@ -17,9 +17,9 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Sales rep not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Sales rep not found" :description="errorText" /></div></div>
 
-    <div v-else class="grid grid-cols-1 items-start gap-4 px-5 pb-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div v-else class="grid grid-cols-1 items-start gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div class="space-y-4">
         <SectionCard title="Details">
           <InfoGrid :items="details" :columns="3" />
@@ -28,8 +28,8 @@
         <SectionCard v-if="team.data?.length" :title="`Team (${team.data.length})`" flush>
           <DataTable :columns="teamColumns" :rows="team.data" :row-route="(r) => ({ name: 'SalesRep', params: { name: r.name } })">
             <template #cell-full_name="{ row }">
-              <div class="font-medium text-ink-gray-9">{{ row.full_name }}</div>
-              <div class="text-xs text-ink-gray-5">{{ row.name }}</div>
+              <div class="font-medium text-polaris-text">{{ row.full_name }}</div>
+              <div class="text-xs text-polaris-secondary">{{ row.name }}</div>
             </template>
             <template #cell-achievement="{ row }"><Achievement :pct="teamStats.data?.[row.name]?.achievement_pct ?? null" /></template>
             <template #cell-active="{ row }"><StatusPill :status="row.active ? 'Active' : 'Inactive'" /></template>

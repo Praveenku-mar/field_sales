@@ -16,14 +16,14 @@
     </div>
 
     <!-- Nothing to show: the first load failed -->
-    <div v-else-if="!dash.data" class="px-5 pb-6">
+    <div v-else-if="!dash.data" class="px-4 sm:px-6 pb-6">
       <div class="fs-card flex flex-col items-center gap-3 p-8">
         <ErrorMessage :message="dash.error" />
         <Button label="Retry" icon-left="lucide-refresh-cw" @click="refresh" />
       </div>
     </div>
 
-    <div v-else class="space-y-5 px-5 pb-6">
+    <div v-else class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8">
       <!-- A reload failed: keep the last numbers and say so -->
       <ErrorMessage v-if="dash.error || overview.error" :message="dash.error || overview.error" />
 
@@ -47,14 +47,14 @@
           :to="session.isManager ? { name: 'SyncFailures' } : null"
         >
           <template v-if="cards.failed_sync_count" #badge>
-            <Badge theme="red" label="Needs attention" />
+            <StatusPill status="Failed" label="Needs attention" />
           </template>
         </NumberCard>
       </div>
 
       <!-- Today -->
       <div>
-        <h2 class="mb-2 text-sm font-medium text-ink-gray-6">Today</h2>
+        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Today</h2>
         <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <NumberCard
             label="Visits Today"
@@ -92,7 +92,7 @@
 
       <!-- Needs attention -->
       <div>
-        <h2 class="mb-2 text-sm font-medium text-ink-gray-6">Needs attention</h2>
+        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Needs attention</h2>
         <div class="grid grid-cols-2 gap-4 lg:grid-cols-3">
           <NumberCard
             label="Missed Visits"
@@ -226,9 +226,9 @@
             }"
           >
             <template #cell="{ column, row, item }">
-              <Badge v-if="column.key === 'sync_status'" :theme="STATUS_THEMES[orderStatus(row)] || 'gray'" :label="orderStatus(row)" />
-              <span v-else-if="column.key === 'grand_total'" class="tabular-nums">{{ money(item) }}</span>
-              <span v-else-if="column.key === 'modified'" class="text-ink-gray-5" :title="formatDateTime(item)">{{ fromNow(item) }}</span>
+              <StatusPill v-if="column.key === 'sync_status'" :status="orderStatus(row)" />
+              <span v-else-if="column.key === 'grand_total'" class="tabular-nums font-medium text-polaris-text">{{ money(item) }}</span>
+              <span v-else-if="column.key === 'modified'" class="text-polaris-secondary" :title="formatDateTime(item)">{{ fromNow(item) }}</span>
               <span v-else class="truncate">{{ item }}</span>
             </template>
           </ListView>
@@ -253,9 +253,9 @@
             <template #cell="{ column, row, item }">
               <div v-if="column.key === 'rep_name'" class="flex min-w-0 items-center gap-2">
                 <Avatar :label="item || row.sales_rep" size="sm" />
-                <span class="truncate">{{ item || row.sales_rep }}</span>
+                <span class="truncate font-medium text-polaris-text">{{ item || row.sales_rep }}</span>
               </div>
-              <span v-else-if="column.key === 'check_in_time'" class="text-ink-gray-5" :title="formatDateTime(item)">{{ fromNow(item) }}</span>
+              <span v-else-if="column.key === 'check_in_time'" class="text-polaris-secondary" :title="formatDateTime(item)">{{ fromNow(item) }}</span>
               <span v-else class="truncate">{{ item }}</span>
             </template>
           </ListView>
@@ -266,13 +266,13 @@
           <template #actions>
             <Button label="All visits" variant="ghost" :route="{ name: 'Visits', query: { tab: 'today' } }" />
           </template>
-          <ul v-if="o.visits_today?.length" class="divide-y divide-desk-border">
+          <ul v-if="o.visits_today?.length" class="divide-y divide-[#f1f2f4]">
             <li v-for="v in o.visits_today" :key="v.name">
-              <RouterLink :to="{ name: 'Visit', params: { name: v.name } }" class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-gray-1">
-                <span class="lucide-map-pin size-4 shrink-0 text-ink-gray-4" />
+              <RouterLink :to="{ name: 'Visit', params: { name: v.name } }" class="flex items-center gap-3 px-4 py-3 transition-colors duration-100 hover:bg-[#f9fafb]">
+                <span class="lucide-map-pin size-4 shrink-0 text-polaris-subdued" />
                 <div class="min-w-0 flex-1">
-                  <div class="truncate font-medium text-ink-gray-9">{{ v.retailer_name }}</div>
-                  <div class="truncate text-xs text-ink-gray-5">
+                  <div class="truncate font-medium text-polaris-text">{{ v.retailer_name }}</div>
+                  <div class="truncate text-xs text-polaris-secondary">
                     {{ [v.sales_rep_name, v.city].filter(Boolean).join(' · ') }}
                     <template v-if="v.check_in_time"> · in at {{ formatTime(v.check_in_time) }}</template>
                   </div>
@@ -288,15 +288,15 @@
           <template #actions>
             <Button v-if="session.isManager" label="All failures" variant="ghost" :route="{ name: 'SyncFailures' }" />
           </template>
-          <ul v-if="o.failures?.length" class="divide-y divide-desk-border">
+          <ul v-if="o.failures?.length" class="divide-y divide-[#f1f2f4]">
             <li v-for="f in o.failures" :key="f.type + f.name">
-              <RouterLink :to="failureRoute(f)" class="flex items-start gap-3 px-4 py-2.5 hover:bg-surface-gray-1">
-                <span :class="[f.type === 'Order' ? 'lucide-shopping-cart' : 'lucide-store', 'mt-0.5 size-4 shrink-0 text-ink-red-5']" />
+              <RouterLink :to="failureRoute(f)" class="flex items-start gap-3 px-4 py-3 transition-colors duration-100 hover:bg-[#f9fafb]">
+                <span :class="[f.type === 'Order' ? 'lucide-shopping-cart' : 'lucide-store', 'mt-0.5 size-4 shrink-0 text-polaris-critical']" />
                 <div class="min-w-0 flex-1">
-                  <div class="truncate font-medium text-ink-gray-9">{{ f.title || f.name }}</div>
-                  <div class="truncate text-xs text-ink-red-5">{{ f.sync_error || 'Sync failed' }}</div>
+                  <div class="truncate font-medium text-polaris-text">{{ f.title || f.name }}</div>
+                  <div class="truncate text-xs text-polaris-critical">{{ f.sync_error || 'Sync failed' }}</div>
                 </div>
-                <span class="text-xs text-ink-gray-5">{{ f.type === "Retailer" ? "Customer" : f.type }}</span>
+                <span class="text-xs text-polaris-secondary">{{ f.type === "Retailer" ? "Customer" : f.type }}</span>
               </RouterLink>
             </li>
           </ul>
@@ -307,15 +307,15 @@
           <template #actions>
             <Button label="All drafts" variant="ghost" :route="{ name: 'Orders', query: { tab: 'draft' } }" />
           </template>
-          <ul v-if="o.draft_orders?.length" class="divide-y divide-desk-border">
+          <ul v-if="o.draft_orders?.length" class="divide-y divide-[#f1f2f4]">
             <li v-for="d in o.draft_orders" :key="d.name">
-              <RouterLink :to="{ name: 'Order', params: { name: d.name } }" class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-gray-1">
-                <span class="lucide-file-pen size-4 shrink-0 text-ink-gray-4" />
+              <RouterLink :to="{ name: 'Order', params: { name: d.name } }" class="flex items-center gap-3 px-4 py-3 transition-colors duration-100 hover:bg-[#f9fafb]">
+                <span class="lucide-file-pen size-4 shrink-0 text-polaris-subdued" />
                 <div class="min-w-0 flex-1">
-                  <div class="truncate font-medium text-ink-gray-9">{{ d.retailer_name }}</div>
-                  <div class="truncate text-xs text-ink-gray-5">{{ d.name }} · {{ formatDate(d.order_date) }}</div>
+                  <div class="truncate font-medium text-polaris-text">{{ d.retailer_name }}</div>
+                  <div class="truncate text-xs text-polaris-secondary">{{ d.name }} · {{ formatDate(d.order_date) }}</div>
                 </div>
-                <span class="tabular-nums text-ink-gray-8">{{ money(d.grand_total) }}</span>
+                <span class="tabular-nums font-medium text-polaris-text">{{ money(d.grand_total) }}</span>
               </RouterLink>
             </li>
           </ul>
@@ -326,26 +326,26 @@
       <!-- Team (managers) -->
       <SectionCard v-if="o.team?.length" title="Team this month" flush>
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[36rem] text-left">
+          <table class="w-full min-w-[36rem] text-left border-collapse">
             <thead>
-              <tr class="border-b border-desk-border text-xs text-ink-gray-5">
-                <th class="px-4 py-2 font-medium">Sales Rep</th>
-                <th class="px-4 py-2 text-right font-medium">Visits</th>
-                <th class="px-4 py-2 text-right font-medium">Orders</th>
-                <th class="px-4 py-2 text-right font-medium">Order Value</th>
-                <th class="w-56 px-4 py-2 font-medium">Target</th>
+              <tr class="border-b border-[#e1e3e5] bg-[#fafafa] text-xs font-semibold uppercase tracking-wider text-polaris-secondary">
+                <th class="px-4 py-3 font-semibold">Sales Rep</th>
+                <th class="px-4 py-3 text-right font-semibold">Visits</th>
+                <th class="px-4 py-3 text-right font-semibold">Orders</th>
+                <th class="px-4 py-3 text-right font-semibold">Order Value</th>
+                <th class="w-56 px-4 py-3 font-semibold">Target</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in o.team" :key="r.sales_rep" class="border-b border-desk-border last:border-0">
-                <td class="px-4 py-2.5">
-                  <div class="font-medium text-ink-gray-9">{{ r.sales_rep_name || r.sales_rep }}</div>
-                  <div class="text-xs text-ink-gray-5">{{ r.territory || '—' }}</div>
+              <tr v-for="r in o.team" :key="r.sales_rep" class="border-b border-[#f1f2f4] transition-colors duration-100 last:border-0 hover:bg-[#f9fafb]">
+                <td class="px-4 py-3 text-sm">
+                  <div class="font-medium text-polaris-text">{{ r.sales_rep_name || r.sales_rep }}</div>
+                  <div class="text-xs text-polaris-secondary">{{ r.territory || '—' }}</div>
                 </td>
-                <td class="px-4 py-2.5 text-right tabular-nums">{{ r.completed_visits }}</td>
-                <td class="px-4 py-2.5 text-right tabular-nums">{{ r.orders }}</td>
-                <td class="px-4 py-2.5 text-right tabular-nums">{{ money(r.order_value, 0) }}</td>
-                <td class="px-4 py-2.5">
+                <td class="px-4 py-3 text-right tabular-nums text-sm font-medium text-polaris-text">{{ r.completed_visits }}</td>
+                <td class="px-4 py-3 text-right tabular-nums text-sm font-medium text-polaris-text">{{ r.orders }}</td>
+                <td class="px-4 py-3 text-right tabular-nums text-sm font-medium text-polaris-text">{{ money(r.order_value, 0) }}</td>
+                <td class="px-4 py-3 text-sm">
                   <Achievement :pct="r.achievement_pct" />
                 </td>
               </tr>

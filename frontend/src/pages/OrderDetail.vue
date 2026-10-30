@@ -20,14 +20,14 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Order not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Order not found" :description="errorText" /></div></div>
 
-    <div v-else-if="!form" class="flex justify-center py-16 text-ink-gray-5"><LoadingIndicator class="size-5" /></div>
+    <div v-else-if="!form" class="flex justify-center py-16 text-polaris-secondary"><LoadingIndicator class="size-5" /></div>
 
-    <div v-else class="grid grid-cols-1 items-start gap-4 px-5 pb-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div v-else class="grid grid-cols-1 items-start gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-[minmax(0,1fr)_340px]">
       <!-- Order -->
       <div class="fs-card">
-        <div class="grid grid-cols-1 gap-4 border-b border-desk-border p-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="grid grid-cols-1 gap-4 border-b border-[#f1f2f4] p-4 sm:p-5 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Customer" required>
             <LinkField
               v-if="editable"

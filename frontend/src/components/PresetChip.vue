@@ -1,9 +1,17 @@
 <template>
-  <div v-if="label" class="flex items-center gap-1.5 rounded-full bg-surface-gray-3 py-1 pl-3 pr-1.5 text-sm text-ink-gray-8">
-    <span class="lucide-filter size-3.5 text-ink-gray-5" />
-    <span>Showing: <b class="font-medium">{{ label }}</b></span>
-    <button class="flex size-5 items-center justify-center rounded-full hover:bg-surface-gray-4" title="Show all" @click="clear">
-      <span class="lucide-x size-3.5" />
+  <div
+    v-if="label"
+    class="inline-flex items-center gap-1.5 rounded-full bg-[#f1f2f4] border border-[#e1e3e5] py-1 pl-2.5 pr-1.5 text-xs text-polaris-text shadow-sm"
+  >
+    <span class="lucide-filter size-3.5 text-polaris-secondary" />
+    <span>Showing: <strong class="font-semibold text-polaris-text">{{ label }}</strong></span>
+    <button
+      type="button"
+      class="flex size-4.5 items-center justify-center rounded-full text-polaris-secondary transition-colors hover:bg-[#e1e3e5] hover:text-polaris-text"
+      title="Clear filter preset"
+      @click="clear"
+    >
+      <span class="lucide-x size-3" />
     </button>
   </div>
 </template>

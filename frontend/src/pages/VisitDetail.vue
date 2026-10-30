@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader :title="d.retailer_name || name" :status="d.status">
-      <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
+      <template #meta><span class="text-polaris-secondary">{{ name }}</span></template>
       <template #actions>
         <Button
           v-if="session.isManager"
@@ -26,9 +26,9 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Visit not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Visit not found" :description="errorText" /></div></div>
 
-    <div v-else class="grid grid-cols-1 gap-5 px-5 pb-6 xl:grid-cols-3">
+    <div v-else class="grid grid-cols-1 gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-3">
       <div class="space-y-5 xl:col-span-2">
         <div v-if="banner" class="rounded-4 px-4 py-3" :class="banner.class">{{ banner.text }}</div>
 

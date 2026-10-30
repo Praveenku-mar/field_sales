@@ -6,9 +6,9 @@
         <Button v-if="pageTab === 'visits'" label="New Visit" icon-left="lucide-plus" variant="solid" @click="newVisitOpen = true" />
       </template>
     </PageHeader>
-    <div v-if="session.isManager" class="shrink-0 px-5 pb-3"><TabButtons v-model="pageTab" :options="pageTabs" /></div>
+    <div v-if="session.isManager" class="shrink-0 px-4 sm:px-6 pb-3"><TabButtons v-model="pageTab" :options="pageTabs" /></div>
     <VisitImport v-if="pageTab === 'import'" />
-    <div v-show="pageTab === 'visits'" class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div v-show="pageTab === 'visits'" class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
       <ListFilters v-model="model" search-placeholder="Search customer" :tabs="tabs" :fields="fields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
@@ -25,13 +25,13 @@
         @load-more="list.next()"
       >
         <template #cell-retailer_name="{ row }">
-          <div class="font-medium text-ink-gray-9">{{ row.retailer_name }}</div>
-          <div class="text-xs text-ink-gray-5">{{ [row.name, row.city].filter(Boolean).join(' · ') }}</div>
+          <div class="font-medium text-polaris-text">{{ row.retailer_name }}</div>
+          <div class="text-xs text-polaris-secondary">{{ [row.name, row.city].filter(Boolean).join(' · ') }}</div>
         </template>
         <template #cell-status="{ value }"><StatusPill :status="value" /></template>
         <template #cell-within_geofence="{ row }">
-          <span v-if="!row.check_in_time" class="text-ink-gray-4">—</span>
-          <span v-else :class="row.within_geofence ? 'text-ink-green-7' : 'text-ink-amber-7'">
+          <span v-if="!row.check_in_time" class="text-polaris-subdued">—</span>
+          <span v-else :class="row.within_geofence ? 'font-medium text-polaris-success' : 'font-medium text-polaris-attention'">
             {{ row.within_geofence ? 'Inside' : `${Math.round(row.distance_from_retailer_m || 0)} m away` }}
           </span>
         </template>

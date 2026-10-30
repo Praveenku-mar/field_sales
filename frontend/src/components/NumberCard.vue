@@ -2,22 +2,27 @@
   <component
     :is="to ? 'RouterLink' : 'div'"
     :to="to"
-    class="fs-card block p-4"
-    :class="to && 'transition-colors hover:border-outline-gray-3'"
+    class="fs-card block p-4 sm:p-5"
+    :class="to && 'fs-card-hover group cursor-pointer'"
   >
-    <div class="flex items-center justify-between text-ink-gray-5">
-      <span class="truncate">{{ label }}</span>
-      <span v-if="icon" :class="[icon, 'size-4']" />
+    <div class="flex items-center justify-between text-polaris-secondary">
+      <span class="truncate text-xs font-semibold uppercase tracking-wider">{{ label }}</span>
+      <span v-if="icon" :class="[icon, 'size-4 text-polaris-subdued transition-colors group-hover:text-polaris-text']" />
     </div>
-    <div class="mt-2 flex items-baseline gap-2">
-      <span v-if="loading" class="h-7 w-16 animate-pulse rounded-3 bg-surface-gray-2" />
-      <span v-else class="text-2xl font-semibold tabular-nums" :class="valueClass">{{ formatted }}</span>
-      <span v-if="delta != null && !loading" class="text-xs font-medium" :class="delta >= 0 ? 'text-ink-green-7' : 'text-ink-red-5'">
-        {{ delta >= 0 ? '▲' : '▼' }} {{ Math.abs(delta).toFixed(1) }}%
+    <div class="mt-2.5 flex items-baseline gap-2.5">
+      <span v-if="loading" class="h-8 w-20 animate-pulse rounded bg-[#ebebeb]" />
+      <span v-else class="text-2xl sm:text-3xl font-bold tracking-tight tabular-nums" :class="valueClass">{{ formatted }}</span>
+      <span
+        v-if="delta != null && !loading"
+        class="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold"
+        :class="delta >= 0 ? 'bg-[#e4f6ed] text-[#0d5936]' : 'bg-[#fde8e8] text-[#9b1c1c]'"
+      >
+        <span>{{ delta >= 0 ? '↑' : '↓' }}</span>
+        <span>{{ Math.abs(delta).toFixed(1) }}%</span>
       </span>
       <slot v-if="!loading" name="badge" />
     </div>
-    <div v-if="caption" class="mt-1 truncate text-xs text-ink-gray-5">{{ caption }}</div>
+    <div v-if="caption" class="mt-1.5 truncate text-xs text-polaris-secondary">{{ caption }}</div>
   </component>
 </template>
 
@@ -49,5 +54,9 @@ const formatted = computed(() => {
   return new Intl.NumberFormat(undefined, options).format(props.value)
 })
 
-const valueClass = computed(() => ({ red: 'text-ink-red-5', green: 'text-ink-green-7' })[props.theme] || 'text-ink-gray-9')
+const valueClass = computed(() => {
+  if (props.theme === 'red') return 'text-polaris-critical'
+  if (props.theme === 'green') return 'text-polaris-success'
+  return 'text-polaris-text'
+})
 </script>

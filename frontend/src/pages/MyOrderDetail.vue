@@ -12,7 +12,7 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5">
+    <div v-if="doc.get.error" class="px-4 sm:px-6">
       <div class="fs-card">
         <EmptyState
           icon="lucide-circle-alert"
@@ -22,7 +22,7 @@
       </div>
     </div>
 
-    <div v-else class="grid grid-cols-1 gap-5 px-5 pb-6 xl:grid-cols-3">
+    <div v-else class="grid grid-cols-1 gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-3">
       <div class="space-y-5 xl:col-span-2">
         <SectionCard title="Details">
           <InfoGrid :items="details" :columns="3" />
@@ -37,8 +37,8 @@
             empty-title="No items"
           >
             <template #cell-product="{ row }">
-              <div class="font-medium text-ink-gray-9">{{ row.product_title }}</div>
-              <div v-if="row.variant_title" class="text-xs text-ink-gray-5">{{ row.variant_title }}</div>
+              <div class="font-medium text-polaris-text">{{ row.product_title }}</div>
+              <div v-if="row.variant_title" class="text-xs text-polaris-secondary">{{ row.variant_title }}</div>
             </template>
           </DataTable>
         </SectionCard>

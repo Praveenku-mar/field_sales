@@ -2,31 +2,31 @@
   <div>
     <PageHeader :title="d.product_title || name" :status="d.status || null">
       <template #meta>
-        <span v-if="d.variant_title" class="text-ink-gray-5">{{ d.variant_title }}</span>
+        <span v-if="d.variant_title" class="text-polaris-secondary">{{ d.variant_title }}</span>
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Product not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Product not found" :description="errorText" /></div></div>
 
-    <div v-else class="grid grid-cols-1 gap-5 px-5 pb-6 xl:grid-cols-3">
+    <div v-else class="grid grid-cols-1 gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-3">
       <div class="space-y-5 xl:col-span-2">
         <SectionCard>
-          <div class="flex gap-5">
-            <img v-if="d.image" :src="d.image" :alt="d.product_title" class="size-36 shrink-0 rounded-4 border border-desk-border object-cover" />
-            <div v-else class="flex size-36 shrink-0 items-center justify-center rounded-4 bg-surface-gray-2">
-              <span class="lucide-package size-10 text-ink-gray-4" />
+          <div class="flex flex-col sm:flex-row gap-5">
+            <img v-if="d.image" :src="d.image" :alt="d.product_title" class="size-36 shrink-0 rounded-xl border border-[#e1e3e5] object-cover bg-white" />
+            <div v-else class="flex size-36 shrink-0 items-center justify-center rounded-xl bg-[#f1f2f4] border border-[#e1e3e5]">
+              <span class="lucide-package size-10 text-polaris-subdued" />
             </div>
             <div class="min-w-0 flex-1 space-y-4">
               <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span class="text-2xl font-semibold tabular-nums text-ink-gray-9">{{ formatCurrency(d.price) }}</span>
-                <span v-if="d.compare_at_price > d.price" class="text-ink-gray-5 line-through">{{ formatCurrency(d.compare_at_price) }}</span>
-                <span v-if="discount" class="text-sm font-medium text-ink-green-7">{{ discount }}% off</span>
+                <span class="text-2xl sm:text-3xl font-bold tracking-tight tabular-nums text-polaris-text">{{ formatCurrency(d.price) }}</span>
+                <span v-if="d.compare_at_price > d.price" class="text-polaris-subdued line-through">{{ formatCurrency(d.compare_at_price) }}</span>
+                <span v-if="discount" class="text-sm font-semibold text-polaris-success">{{ discount }}% off</span>
               </div>
               <div class="flex items-center gap-2">
-                <span class="text-ink-gray-5">Stock:</span>
-                <span v-if="!d.track_inventory" class="text-ink-gray-7">Not tracked (always available)</span>
+                <span class="text-polaris-secondary">Stock:</span>
+                <span v-if="!d.track_inventory" class="text-polaris-secondary">Not tracked (always available)</span>
                 <template v-else>
-                  <span class="font-medium tabular-nums" :class="stock.class">{{ formatNumber(d.available_qty) }}</span>
+                  <span class="font-semibold tabular-nums" :class="stock.class">{{ formatNumber(d.available_qty) }}</span>
                   <StatusPill :status="stock.status" :label="stock.label" />
                 </template>
               </div>

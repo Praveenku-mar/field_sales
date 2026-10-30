@@ -6,7 +6,7 @@
         <Button label="New Order" icon-left="lucide-plus" variant="solid" @click="newOrderOpen = true" />
       </template>
     </PageHeader>
-    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
       <ListFilters v-model="model" search-placeholder="Search order or retailer" :tabs="tabs" :fields="filterFields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
@@ -23,8 +23,8 @@
         @load-more="list.next()"
       >
         <template #cell-name="{ row }">
-          <div class="font-medium text-ink-gray-9">{{ row.retailer_name }}</div>
-          <div class="text-xs text-ink-gray-5">{{ row.name }}</div>
+          <div class="font-medium text-polaris-text">{{ row.retailer_name }}</div>
+          <div class="text-xs text-polaris-secondary">{{ row.name }}</div>
         </template>
         <template #cell-sync_status="{ row }">
           <Tooltip :text="row.sync_error" :disabled="!row.sync_error">
@@ -33,7 +33,7 @@
         </template>
         <template #cell-payment_status="{ row }">
           <StatusPill v-if="row.docstatus === 1 && row.payment_status" :status="row.payment_status" />
-          <span v-else class="text-ink-gray-4">—</span>
+          <span v-else class="text-polaris-subdued">—</span>
         </template>
       </DataTable>
     </div>

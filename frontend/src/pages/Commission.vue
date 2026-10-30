@@ -11,7 +11,7 @@
     </PageHeader>
 
     <div
-      class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5"
+      class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6"
       :class="tab === 'mine' && 'overflow-y-auto xl:overflow-hidden'"
     >
       <div class="shrink-0"><TabButtons v-model="tab" :options="tabs" /></div>
@@ -25,11 +25,11 @@
           <NumberCard label="Net" :value="money(summary.data?.net)" :loading="!summary.data" theme="green" />
         </div>
 
-        <div v-if="gap" class="fs-card flex shrink-0 items-center gap-2 px-4 py-3 text-ink-gray-8">
-          <span class="lucide-trending-up size-4 text-ink-gray-6" />
+        <div v-if="gap" class="fs-card flex shrink-0 items-center gap-2.5 px-4 py-3 text-polaris-text bg-[#f9fafb]">
+          <span class="lucide-trending-up size-4 text-polaris-success" />
           <span>
-            <span class="font-medium">{{ formatCurrency(gap.amount, currency, 0) }}</span> more sales this month reaches the
-            <span class="font-medium">{{ gap.rate }}%</span> slab
+            <span class="font-semibold">{{ formatCurrency(gap.amount, currency, 0) }}</span> more sales this month reaches the
+            <span class="font-semibold">{{ gap.rate }}%</span> slab
           </span>
         </div>
 

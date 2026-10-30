@@ -3,14 +3,14 @@
        customer's My Orders login. The APIs check the manager role again on the server. -->
   <SectionCard title="Login Access">
     <template #actions>
-      <span v-if="loginData.user" class="flex items-center gap-1.5 text-xs text-ink-gray-5">
+      <span v-if="loginData.user" class="flex items-center gap-1.5 text-xs text-polaris-secondary">
         <span class="lucide-user-round-check size-3.5" />
         {{ loginData.enabled ? 'Enabled' : 'Disabled' }}
       </span>
     </template>
 
-    <div v-if="!loginData.user && !login.loading" class="space-y-3">
-      <p class="text-sm text-ink-gray-6">
+    <div v-if="!loginData.user && !login.loading" class="space-y-3.5">
+      <p class="text-sm text-polaris-secondary">
         Give this customer a sign-in to see their own orders in the app.
       </p>
       <TextInput
@@ -23,7 +23,7 @@
       <div>
         <Checkbox v-model="sendInvite" label="Email an invite to set a password" />
       </div>
-      <div>
+      <div class="pt-1">
         <Button
           variant="solid"
           label="Send Invite"
@@ -37,11 +37,11 @@
 
     <div v-else-if="loginData.user" class="space-y-1">
       <div class="flex items-center justify-between gap-3">
-        <span class="min-w-0 truncate text-ink-gray-8">{{ loginData.user }}</span>
+        <span class="min-w-0 truncate font-medium text-polaris-text">{{ loginData.user }}</span>
         <span class="shrink-0"><StatusPill :status="loginData.enabled ? 'Active' : 'Inactive'" /></span>
       </div>
-      <p class="pt-1 text-xs text-ink-gray-5">Signs in at {{ appLoginUrl }} to see this customer's orders.</p>
-      <div class="flex flex-wrap gap-2 pt-3">
+      <p class="pt-1 text-xs text-polaris-secondary">Signs in at {{ appLoginUrl }} to see this customer's orders.</p>
+      <div class="flex flex-wrap gap-2 pt-2">
         <Button label="Send reset link" size="sm" icon-left="lucide-key-round" :loading="resetting" @click="sendReset" />
         <Button label="Remove access" size="sm" icon-left="lucide-user-round-x" @click="confirmOpen = true" />
       </div>

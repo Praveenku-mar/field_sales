@@ -1,10 +1,13 @@
 <template>
   <Dialog v-model="open" title="Assign commission plan" size="md">
     <form id="assign-plan" class="space-y-4" @submit.prevent="save">
-      <p class="text-sm text-ink-gray-6">
-        Commission plan for <span class="font-medium text-ink-gray-9">{{ rep?.full_name || rep?.sales_rep }}</span>
+      <p class="text-sm text-polaris-secondary">
+        Commission plan for <span class="font-medium text-polaris-text">{{ rep?.full_name || rep?.sales_rep }}</span>
       </p>
-      <div v-if="error" class="rounded-4 bg-surface-red-2 px-3 py-2 text-sm text-ink-red-7" role="alert">{{ error }}</div>
+      <div v-if="error" class="flex items-center gap-2 rounded-lg border border-[#fed3d1] bg-[#fff4f4] px-4 py-3 text-sm text-[#d72c0d]" role="alert">
+        <span class="lucide-circle-alert size-4 shrink-0 text-[#d72c0d]" />
+        <span>{{ error }}</span>
+      </div>
       <FormControl v-model="form.commission_plan" type="select" label="Plan" :options="planOptions" />
       <Switch v-model="form.commission_active" label="Commission Active" />
     </form>

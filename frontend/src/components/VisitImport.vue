@@ -1,22 +1,22 @@
 <template>
-  <div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 pb-5">
+  <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 sm:px-6 pb-6 sm:pb-8">
     <!-- Result of a finished import -->
     <SectionCard v-if="result" title="Import finished">
       <div class="space-y-4">
-        <div class="text-sm text-ink-gray-8">
-          <span class="font-medium text-ink-green-7">{{ result.created.length }} visit{{ result.created.length === 1 ? '' : 's' }} created</span>
-          <span v-if="result.skipped.length">, <span class="font-medium text-ink-red-7">{{ result.skipped.length }} skipped</span></span>
+        <div class="text-sm text-polaris-text">
+          <span class="font-semibold text-polaris-success">{{ result.created.length }} visit{{ result.created.length === 1 ? '' : 's' }} created</span>
+          <span v-if="result.skipped.length">, <span class="font-semibold text-polaris-critical">{{ result.skipped.length }} skipped</span></span>
         </div>
-        <ul v-if="result.created.length" class="divide-y divide-outline-gray-1 rounded-4 border border-outline-gray-2">
-          <li v-for="v in result.created" :key="v.name" class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm">
-            <RouterLink :to="{ name: 'Visit', params: { name: v.name } }" class="font-medium text-ink-blue-6 hover:underline">{{ v.name }}</RouterLink>
-            <span class="min-w-0 truncate text-ink-gray-7">{{ v.retailer_name }} · {{ formatDate(v.visit_date) }}</span>
-            <span class="text-xs text-ink-gray-5">Row {{ v.row }}</span>
+        <ul v-if="result.created.length" class="divide-y divide-[#f1f2f4] rounded-xl border border-[#e1e3e5]">
+          <li v-for="v in result.created" :key="v.name" class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3.5 py-2.5 text-sm">
+            <RouterLink :to="{ name: 'Visit', params: { name: v.name } }" class="font-medium text-polaris-focus hover:underline">{{ v.name }}</RouterLink>
+            <span class="min-w-0 truncate text-polaris-secondary">{{ v.retailer_name }} · {{ formatDate(v.visit_date) }}</span>
+            <span class="text-xs text-polaris-subdued">Row {{ v.row }}</span>
           </li>
         </ul>
-        <ul v-if="result.skipped.length" class="divide-y divide-outline-gray-1 rounded-4 border border-outline-red-2">
-          <li v-for="s in result.skipped" :key="s.row" class="px-3 py-2 text-sm text-ink-red-7">
-            <span class="font-medium">Row {{ s.row }}:</span> {{ s.error }}
+        <ul v-if="result.skipped.length" class="divide-y divide-[#fde8e8] rounded-xl border border-[#f8b4b4]">
+          <li v-for="s in result.skipped" :key="s.row" class="px-3.5 py-2.5 text-sm text-[#9b1c1c]">
+            <span class="font-semibold">Row {{ s.row }}:</span> {{ s.error }}
           </li>
         </ul>
         <Button label="Import another file" icon-left="lucide-rotate-ccw" @click="reset" />
@@ -26,7 +26,7 @@
     <template v-else>
       <SectionCard title="1. Download the template">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p class="text-sm text-ink-gray-6">
+          <p class="text-sm text-polaris-secondary">
             Fill in one visit per row. The Lists sheet shows the sales reps, customers and purposes you can use.
           </p>
           <Button class="shrink-0" label="Download Template" icon-left="lucide-download" @click="downloadTemplate" />
@@ -35,7 +35,7 @@
 
       <SectionCard title="2. Upload your file">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p class="min-w-0 truncate text-sm text-ink-gray-6">{{ fileName || 'An .xlsx or .csv file, up to 500 rows.' }}</p>
+          <p class="min-w-0 truncate text-sm text-polaris-secondary">{{ fileName || 'An .xlsx or .csv file, up to 500 rows.' }}</p>
           <FileUploader file-types=".xlsx,.csv" :private="true" @success="onUploaded">
             <template #default="{ openFileSelector, uploading, progress, error }">
               <div class="flex shrink-0 flex-col items-start gap-1 sm:items-end">
@@ -45,19 +45,19 @@
                   :loading="uploading || previewing"
                   @click="openFileSelector"
                 />
-                <span v-if="error" class="text-xs text-ink-red-7">{{ error }}</span>
+                <span v-if="error" class="text-xs text-polaris-critical">{{ error }}</span>
               </div>
             </template>
           </FileUploader>
         </div>
-        <div v-if="loadError" class="mt-3 rounded-4 bg-surface-red-2 px-3 py-2 text-sm text-ink-red-7" role="alert">{{ loadError }}</div>
+        <div v-if="loadError" class="mt-3 rounded-xl border border-[#f8b4b4] bg-[#fde8e8] px-3.5 py-2.5 text-sm text-[#9b1c1c]" role="alert">{{ loadError }}</div>
       </SectionCard>
 
       <SectionCard v-if="preview" title="3. Check and create" flush>
-        <div class="flex flex-col gap-3 border-b border-desk-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex flex-col gap-3 border-b border-[#f1f2f4] px-4 sm:px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div class="text-sm">
-            <span class="font-medium text-ink-green-7">{{ preview.ready }} ready</span>,
-            <span :class="preview.errors ? 'font-medium text-ink-red-7' : 'text-ink-gray-6'">{{ preview.errors }} with errors</span>
+            <span class="font-semibold text-polaris-success">{{ preview.ready }} ready</span>,
+            <span :class="preview.errors ? 'font-semibold text-polaris-critical' : 'text-polaris-secondary'">{{ preview.errors }} with errors</span>
           </div>
           <Button variant="solid" :label="`Create ${preview.ready} visits`" :disabled="!preview.ready" @click="confirmOpen = true" />
         </div>

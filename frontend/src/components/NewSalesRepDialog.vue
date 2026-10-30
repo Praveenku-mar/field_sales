@@ -2,7 +2,7 @@
   <Dialog v-model="open" title="New Sales Rep" size="lg" @after-leave="resetForm">
     <div class="space-y-6">
       <section>
-        <h3 class="text-base font-medium text-ink-gray-9">Details</h3>
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Details</h3>
         <div class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
           <div>
             <TextInput

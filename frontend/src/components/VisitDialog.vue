@@ -2,7 +2,7 @@
   <Dialog v-model="open" :title="isEdit ? 'Edit Visit' : 'New Visit'" size="lg" @after-leave="resetForm">
     <div class="space-y-6">
       <section>
-        <h3 class="text-base font-medium text-ink-gray-9">Visit Details</h3>
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Visit Details</h3>
         <div class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
           <Combobox
             v-model="form.retailer"
@@ -28,17 +28,17 @@
           <DatePicker v-model="form.visit_date" label="Visit Date" required />
           <Select v-model="form.visit_purpose" :options="PURPOSES" label="Visit Purpose" placeholder="Select purpose" />
         </div>
-        <p v-if="started" class="mt-3 text-sm text-ink-gray-5">
+        <p v-if="started" class="mt-3 text-sm text-polaris-secondary">
           The customer and sales rep can no longer be changed: the visit has started and its check-in was measured against them.
         </p>
       </section>
 
-      <section class="border-t border-desk-border pt-6">
-        <h3 class="text-base font-medium text-ink-gray-9">Notes</h3>
+      <section class="border-t border-[#f1f2f4] pt-5">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Notes</h3>
         <div class="mt-4">
           <Textarea v-model="form.notes" placeholder="Anything the rep should know before the visit" :rows="3" />
         </div>
-        <p v-if="!isEdit" class="mt-4 text-sm text-ink-gray-5">
+        <p v-if="!isEdit" class="mt-4 text-sm text-polaris-secondary">
           The visit is planned; check in from the visit page when the rep reaches the customer.
         </p>
       </section>

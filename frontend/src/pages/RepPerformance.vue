@@ -2,7 +2,7 @@
   <div>
     <PageHeader title="Rep Performance">
       <template #meta>
-        <LoadingIndicator v-if="report.loading && report.data" class="size-4 text-ink-gray-5" />
+        <LoadingIndicator v-if="report.loading && report.data" class="size-4 text-polaris-subdued" />
       </template>
       <template #actions>
         <Button label="Export" icon-left="lucide-download" :disabled="!rows.length" @click="exportCsv" />
@@ -10,9 +10,9 @@
       </template>
     </PageHeader>
 
-    <div class="space-y-5 px-5 pb-6">
-      <!-- Filters: the same ones as the desk report -->
-      <div class="fs-card flex flex-wrap items-end gap-3 p-4">
+    <div class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8">
+      <!-- Filters: Polaris control card -->
+      <div class="fs-card flex flex-wrap items-end gap-3 p-4 sm:p-5">
         <div class="w-36">
           <FormControl v-model="filters.from_date" type="date" label="From Date" />
         </div>
@@ -57,7 +57,7 @@
         <template v-if="summary.length">
           <NumberCard v-for="card in summary" :key="card.label" :label="card.label" :value="card.value" :caption="card.caption">
             <template v-if="card.change" #badge>
-              <Badge :theme="card.theme" :label="card.change" />
+              <StatusPill :status="card.theme === 'green' ? 'Success' : 'Pending'" :label="card.change" />
             </template>
           </NumberCard>
         </template>
@@ -87,18 +87,18 @@
         </div>
       </SectionCard>
 
-      <!-- Table -->
+      <!-- Table: Shopify Polaris IndexTable -->
       <div class="fs-card overflow-hidden">
         <div class="overflow-x-auto">
-          <table class="w-full text-left">
+          <table class="w-full text-left border-collapse">
             <thead>
-              <tr class="border-b border-desk-border bg-surface-gray-1 text-ink-gray-5">
+              <tr class="border-b border-[#e1e3e5] bg-[#fafafa] text-[#616161]">
                 <th
                   v-for="(col, i) in columns"
                   :key="col.fieldname"
                   scope="col"
-                  class="whitespace-nowrap px-3 py-2 text-xs font-medium"
-                  :class="[isNumeric(col) && 'text-right', i === 0 && 'sticky left-0 z-20 min-w-56 border-r border-desk-border bg-surface-gray-1']"
+                  class="whitespace-nowrap px-3.5 py-3 text-xs font-semibold uppercase tracking-wider"
+                  :class="[isNumeric(col) && 'text-right', i === 0 && 'sticky left-0 z-20 min-w-56 border-r border-[#e1e3e5] bg-[#fafafa]']"
                 >
                   {{ col.label }}
                 </th>
@@ -106,29 +106,29 @@
             </thead>
             <tbody>
               <template v-if="report.loading && !rows.length">
-                <tr v-for="i in 5" :key="'s' + i" class="border-b border-desk-border last:border-0">
-                  <td v-for="col in columns.slice(0, 8)" :key="col.fieldname" class="px-3 py-3">
-                    <div class="h-3 w-3/4 animate-pulse rounded-3 bg-surface-gray-2" />
+                <tr v-for="i in 5" :key="'s' + i" class="border-b border-[#f1f2f4] last:border-0">
+                  <td v-for="col in columns.slice(0, 8)" :key="col.fieldname" class="px-3.5 py-3">
+                    <div class="h-3.5 w-3/4 animate-pulse rounded bg-[#ebebeb]" />
                   </td>
                 </tr>
               </template>
               <tr
                 v-for="row in visibleRows"
                 :key="row.group_key"
-                class="group border-b border-desk-border last:border-0 hover:bg-surface-gray-1"
+                class="group border-b border-[#f1f2f4] last:border-0 transition-colors duration-100 hover:bg-[#f9fafb]"
               >
                 <template v-for="(col, i) in columns" :key="col.fieldname">
                   <!-- First column: tree toggle, then the rep / group -->
                   <th
                     v-if="i === 0"
                     scope="row"
-                    class="sticky left-0 z-10 whitespace-nowrap border-r border-desk-border bg-surface-base px-3 py-2 font-normal group-hover:bg-surface-gray-1"
+                    class="sticky left-0 z-10 whitespace-nowrap border-r border-[#f1f2f4] bg-white px-3.5 py-2.5 font-normal group-hover:bg-[#f9fafb]"
                   >
                     <div class="flex items-center gap-1" :style="{ paddingLeft: (row.indent || 0) * 1.25 + 'rem' }">
                       <button
                         v-if="row.is_team"
                         type="button"
-                        class="flex size-5 items-center justify-center rounded-3 text-ink-gray-5 hover:bg-surface-gray-3 focus-visible:bg-surface-gray-3 focus-visible:outline-none"
+                        class="flex size-5 items-center justify-center rounded text-polaris-secondary hover:bg-[#ebebeb] focus-visible:outline-none"
                         :aria-expanded="!collapsed.has(row.group_key)"
                         :aria-label="(collapsed.has(row.group_key) ? 'Expand ' : 'Collapse ') + row.group"
                         @click="toggle(row.group_key)"
@@ -139,16 +139,16 @@
                       <RouterLink
                         v-if="row.sales_rep"
                         :to="{ name: 'SalesRep', params: { name: row.sales_rep } }"
-                        class="text-ink-gray-9 hover:underline"
+                        class="font-medium text-polaris-text hover:underline"
                       >
                         {{ row.group }}
                       </RouterLink>
-                      <span v-else :class="row.is_team ? 'font-semibold text-ink-gray-9' : 'text-ink-gray-8'">{{ row.group }}</span>
+                      <span v-else :class="row.is_team ? 'font-semibold text-polaris-text' : 'text-polaris-text'">{{ row.group }}</span>
                     </div>
                   </th>
                   <td
                     v-else
-                    class="whitespace-nowrap px-3 py-2"
+                    class="whitespace-nowrap px-3.5 py-2.5 text-sm text-polaris-text"
                     :class="[isNumeric(col) && 'text-right tabular-nums', cellClass(col.fieldname, row)]"
                   >
                     {{ formatCell(col, row) }}
@@ -165,11 +165,11 @@
           title="No data"
           description="No sales reps match these filters."
         />
-        <div v-if="rows.length" class="flex items-center justify-between border-t border-desk-border px-4 py-2 text-xs text-ink-gray-5">
-          <span>{{ rows.length }} {{ rows.length === 1 ? 'row' : 'rows' }}</span>
+        <div v-if="rows.length" class="flex items-center justify-between border-t border-[#e1e3e5] bg-[#fafafa] px-4 py-2.5 text-xs text-polaris-secondary">
+          <span class="font-medium">{{ rows.length }} {{ rows.length === 1 ? 'row' : 'rows' }}</span>
           <span v-if="isTree" class="flex gap-3">
-            <button type="button" class="hover:text-ink-gray-8" @click="collapsed = new Set()">Expand all</button>
-            <button type="button" class="hover:text-ink-gray-8" @click="collapseAll">Collapse all</button>
+            <button type="button" class="font-medium text-polaris-secondary hover:text-polaris-text transition-colors" @click="collapsed = new Set()">Expand all</button>
+            <button type="button" class="font-medium text-polaris-secondary hover:text-polaris-text transition-colors" @click="collapseAll">Collapse all</button>
           </span>
         </div>
       </div>
@@ -185,6 +185,7 @@ import { BarChart, LineChart } from 'frappe-ui/charts'
 import PageHeader from '@/components/PageHeader.vue'
 import NumberCard from '@/components/NumberCard.vue'
 import SectionCard from '@/components/SectionCard.vue'
+import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { formatCurrency, formatNumber } from '@/utils/format'
 

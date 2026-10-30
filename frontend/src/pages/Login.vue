@@ -1,22 +1,22 @@
 <template>
   <!-- Guests land here (the page gate redirects them); staff sign in on the same form. -->
-  <div class="flex min-h-screen items-center justify-center bg-desk-bg p-5">
-    <div class="fs-card w-full max-w-sm p-6">
+  <div class="flex min-h-screen items-center justify-center bg-desk-bg p-4 sm:p-6">
+    <div class="fs-card w-full max-w-sm p-6 sm:p-8">
       <div class="flex flex-col items-center gap-2 text-center">
         <!-- Runtime URL (Frappe serves it from the app's public dir), not a bundled asset. -->
-        <img :src="LOGO" alt="" class="h-9 w-9" />
-        <h1 class="text-xl font-semibold text-ink-gray-9">Field Sales</h1>
-        <p class="text-sm text-ink-gray-6">Sign in to continue</p>
+        <img :src="LOGO" alt="" class="h-10 w-10" />
+        <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-polaris-text">Field Sales</h1>
+        <p class="text-sm text-polaris-secondary">Sign in to your account</p>
       </div>
 
       <!-- A session already exists (e.g. an expired-app bounce): offer to keep it. -->
       <div
         v-if="signedInAs"
-        class="mt-5 flex items-center gap-2 rounded-4 bg-surface-gray-1 px-3 py-2.5 text-sm text-ink-gray-7"
+        class="mt-5 flex items-center gap-2 rounded-xl border border-[#e1e3e5] bg-[#f9fafb] px-3.5 py-2.5 text-sm text-polaris-text"
       >
-        <span class="lucide-user-round size-4 shrink-0 text-ink-gray-5" />
+        <span class="lucide-user-round size-4 shrink-0 text-polaris-secondary" />
         <span class="min-w-0 flex-1 truncate">Signed in as {{ signedInAs }}</span>
-        <a :href="continueHref" class="shrink-0 text-sm text-ink-blue-6 hover:underline">Continue</a>
+        <a :href="continueHref" class="shrink-0 text-sm font-semibold text-polaris-focus hover:underline">Continue</a>
       </div>
 
       <form class="mt-5 space-y-4" @submit.prevent="submit">
@@ -37,15 +37,15 @@
         />
         <p
           v-if="error"
-          class="flex items-start gap-2 rounded-4 bg-surface-red-1 px-3 py-2.5 text-sm text-ink-red-5"
+          class="flex items-start gap-2 rounded-xl border border-[#f8b4b4] bg-[#fde8e8] px-3.5 py-2.5 text-sm text-[#9b1c1c]"
           aria-live="polite"
         >
-          <span class="lucide-circle-alert mt-px size-4 shrink-0" />{{ error }}
+          <span class="lucide-circle-alert mt-0.5 size-4 shrink-0" />{{ error }}
         </p>
         <Button type="submit" class="w-full" variant="solid" label="Log in" :loading="submitting" />
         <button
           type="button"
-          class="block w-full text-center text-sm text-ink-gray-6 hover:text-ink-gray-8 hover:underline"
+          class="block w-full text-center text-sm font-medium text-polaris-focus hover:underline"
           @click="forgotOpen = true"
         >
           Forgot password?

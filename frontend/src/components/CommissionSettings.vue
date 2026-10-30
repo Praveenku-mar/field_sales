@@ -7,9 +7,9 @@
     <EmptyState icon="lucide-circle-alert" title="Could not load commission settings" :description="errorText" />
   </div>
 
-  <div v-else class="fs-card">
-    <section class="p-8">
-      <h3 class="text-base font-medium text-ink-gray-9">Commission</h3>
+  <div v-else class="fs-card overflow-hidden">
+    <section class="p-6 sm:p-8">
+      <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Commission</h3>
       <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
         <Checkbox
           v-model="d.enable_commission"

@@ -1,7 +1,7 @@
 <template>
   <Dialog v-model="open" title="Select Location" size="lg" @after-leave="teardown">
     <div class="space-y-3">
-      <p class="text-sm text-ink-gray-5">Search for the shop, or tap the map / drag the pin to its location.</p>
+      <p class="text-sm text-polaris-secondary">Search for the shop, or tap the map / drag the pin to its location.</p>
       <div class="flex gap-2">
         <TextInput
           v-model="query"
@@ -9,36 +9,36 @@
           class="flex-1"
           @keyup.enter="runSearch"
         >
-          <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+          <template #prefix><span class="lucide-search size-4 text-polaris-secondary" /></template>
         </TextInput>
         <Button label="Search" icon-left="lucide-search" :loading="searching" @click="runSearch" />
       </div>
       <ul
         v-if="results.length"
-        class="max-h-32 divide-y divide-outline-gray-1 overflow-y-auto rounded-4 border border-outline-gray-2"
+        class="max-h-32 divide-y divide-[#f1f2f4] overflow-y-auto rounded-lg border border-[#e1e3e5]"
       >
         <li
           v-for="r in results"
           :key="r.place_id"
-          class="flex cursor-pointer items-start gap-2 px-3 py-2 text-sm hover:bg-surface-gray-1"
+          class="flex cursor-pointer items-start gap-2 px-3 py-2 text-sm hover:bg-[#f9fafb]"
           @click="chooseResult(r)"
         >
-          <span class="lucide-map-pin mt-0.5 size-4 shrink-0 text-ink-gray-4" />
+          <span class="lucide-map-pin mt-0.5 size-4 shrink-0 text-polaris-secondary" />
           <span class="min-w-0">
-            <span class="block truncate font-medium text-ink-gray-9">{{ r.name || r.display_name.split(",")[0] }}</span>
-            <span class="block truncate text-xs text-ink-gray-5">{{ r.display_name }}</span>
+            <span class="block truncate font-medium text-polaris-text">{{ r.name || r.display_name.split(",")[0] }}</span>
+            <span class="block truncate text-xs text-polaris-secondary">{{ r.display_name }}</span>
           </span>
         </li>
       </ul>
-      <div ref="mapEl" class="h-96 overflow-hidden rounded-4 border border-desk-border" />
+      <div ref="mapEl" class="h-96 overflow-hidden rounded-lg border border-[#e1e3e5]" />
       <div class="flex items-center justify-between text-sm">
-        <span class="tabular-nums text-ink-gray-6">{{ picked ? `${picked.latitude}, ${picked.longitude}` : 'No location picked yet' }}</span>
+        <span class="tabular-nums text-polaris-text font-medium">{{ picked ? `${picked.latitude}, ${picked.longitude}` : 'No location picked yet' }}</span>
         <a
           v-if="picked"
           :href="osmLink"
           target="_blank"
           rel="noopener"
-          class="text-ink-gray-5 hover:underline"
+          class="text-polaris-blue hover:underline font-medium"
         >Open in OpenStreetMap ↗</a>
       </div>
     </div>

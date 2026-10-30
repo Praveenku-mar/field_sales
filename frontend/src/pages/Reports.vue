@@ -1,20 +1,20 @@
 <template>
   <div>
     <PageHeader title="Reports" />
-    <div class="px-5 pb-6">
+    <div class="px-4 sm:px-6 pb-6 sm:pb-8">
       <SectionCard flush>
-        <ul v-if="reports.length" class="divide-y divide-outline-gray-2">
+        <ul v-if="reports.length" class="divide-y divide-[#f1f2f4]">
           <li v-for="report in reports" :key="report.label">
             <RouterLink
               :to="report.route"
-              class="flex items-center gap-3 px-4 py-3 hover:bg-surface-gray-2 focus:outline-none focus-visible:bg-surface-gray-2"
+              class="flex items-center gap-3 px-4 sm:px-5 py-3.5 transition-colors duration-100 hover:bg-[#f9fafb] focus:outline-none"
             >
-              <span :class="report.icon" class="size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
+              <span :class="report.icon" class="size-4 shrink-0 text-polaris-secondary" aria-hidden="true" />
               <span class="min-w-0 flex-1">
-                <span class="block font-medium text-ink-gray-9">{{ report.label }}</span>
-                <span class="block truncate text-ink-gray-5">{{ report.description }}</span>
+                <span class="block font-medium text-polaris-text">{{ report.label }}</span>
+                <span class="block truncate text-xs text-polaris-secondary">{{ report.description }}</span>
               </span>
-              <span class="lucide-chevron-right size-4 shrink-0 text-ink-gray-4" aria-hidden="true" />
+              <span class="lucide-chevron-right size-4 shrink-0 text-polaris-subdued" aria-hidden="true" />
             </RouterLink>
           </li>
         </ul>

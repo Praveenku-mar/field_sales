@@ -1,10 +1,11 @@
 <template>
   <Dialog v-model="open" :title="isEdit ? 'Edit Customer' : 'New Customer'" size="3xl" @after-leave="resetForm">
     <!-- Screenshot style: no section headers, groups separated by whitespace. -->
-    <div class="space-y-12">
+    <div class="space-y-8">
       <!-- Details -->
       <section>
-        <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-3">
+        <h3 class="mb-4 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Customer Details</h3>
+        <div class="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-3">
           <TextInput v-model="form.retailer_name" size="lg" label="Customer Name" required placeholder="Kovai Mart" />
           <TextInput
             v-model="form.phone"
@@ -24,8 +25,9 @@
       </section>
 
       <!-- Address & Location -->
-      <section>
-        <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-3">
+      <section class="border-t border-[#f1f2f4] pt-6">
+        <h3 class="mb-4 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Address & Location</h3>
+        <div class="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-3">
           <TextInput v-model="form.address_line1" size="lg" label="Address Line 1" required />
           <TextInput v-model="form.address_line2" size="lg" label="Address Line 2" />
           <TextInput v-model="form.city" size="lg" label="City" required />
@@ -52,7 +54,7 @@
           <TextInput v-model="form.latitude" size="lg" label="Latitude" type="number" description="-90 to 90" :disabled="locationLocked" />
           <TextInput v-model="form.longitude" size="lg" label="Longitude" type="number" description="-180 to 180" :disabled="locationLocked" />
         </div>
-        <p v-if="locationLocked" class="mt-2 text-sm text-ink-gray-5">
+        <p v-if="locationLocked" class="mt-2 text-sm text-polaris-secondary">
           The location is set. Ask a Sales Manager to change it.
         </p>
         <div v-else class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -74,14 +76,15 @@
             @click="useMyLocation"
           />
         </div>
-        <p v-if="!locationLocked" class="mt-2 text-sm text-ink-gray-5">
+        <p v-if="!locationLocked" class="mt-2 text-sm text-polaris-secondary">
           {{ embedded ? 'Pick on a map' : 'Pick on a map or capture your GPS position' }}; otherwise coordinates are set automatically at the first visit check-in.
         </p>
       </section>
 
       <!-- Status & ownership: the closing two-column row. -->
-      <section>
-        <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
+      <section class="border-t border-[#f1f2f4] pt-6">
+        <h3 class="mb-4 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Status & Assignment</h3>
+        <div class="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2">
           <Select v-model="form.status" size="lg" :options="['Active', 'Inactive']" label="Status" />
           <Combobox
             v-model="form.sales_rep"

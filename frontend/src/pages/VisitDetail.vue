@@ -63,15 +63,15 @@
 
       <div class="space-y-5">
         <SectionCard title="Time on Site">
-          <div class="text-3xl font-semibold tabular-nums text-ink-gray-9">{{ onSite }}</div>
-          <div class="mt-1 text-xs text-ink-gray-5">
+          <div class="text-3xl font-bold tracking-tight tabular-nums text-polaris-text">{{ onSite }}</div>
+          <div class="mt-1 text-xs text-polaris-secondary">
             {{ d.check_in_time ? `In ${formatTime(d.check_in_time)}` : 'Not checked in' }}
             <template v-if="d.check_out_time"> · Out {{ formatTime(d.check_out_time) }}</template>
           </div>
         </SectionCard>
         <SectionCard title="Notes & Outcome">
           <InfoGrid :items="outcome" :columns="1" />
-          <p v-if="d.notes" class="mt-3 whitespace-pre-line text-ink-gray-8">{{ d.notes }}</p>
+          <p v-if="d.notes" class="mt-3 whitespace-pre-line text-polaris-text">{{ d.notes }}</p>
         </SectionCard>
       </div>
     </div>
@@ -179,14 +179,14 @@ const banner = computed(() => {
   if (d.value.status === 'Planned' && d.value.visit_date < today()) {
     return {
       text: `Planned for ${formatDate(d.value.visit_date)} and not checked in. Check-in is closed; a manager can move the visit to today.`,
-      class: 'bg-surface-amber-1 text-ink-amber-7',
+      class: 'border border-[#fbd88e] bg-[#fef3d6] text-[#744210]',
     }
   }
   if (d.value.status === 'Planned' && isOwnVisit.value && d.value.visit_date > today()) {
-    return { text: `Check-in opens on ${formatDate(d.value.visit_date)}.`, class: 'bg-surface-gray-2 text-ink-gray-7' }
+    return { text: `Check-in opens on ${formatDate(d.value.visit_date)}.`, class: 'border border-[#e1e3e5] bg-[#f1f2f4] text-[#616161]' }
   }
   if (d.value.check_in_time && !d.value.within_geofence) {
-    return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the customer.`, class: 'bg-surface-amber-1 text-ink-amber-7' }
+    return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the customer.`, class: 'border border-[#fbd88e] bg-[#fef3d6] text-[#744210]' }
   }
   return null
 })

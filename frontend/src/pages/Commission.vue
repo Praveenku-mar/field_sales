@@ -76,13 +76,13 @@
             </DataTable>
 
           <SectionCard title="Top Products" class="xl:min-h-0 xl:overflow-y-auto">
-            <ul v-if="summary.data?.top_products?.length" class="divide-y divide-outline-gray-1">
+            <ul v-if="summary.data?.top_products?.length" class="divide-y divide-[#f1f2f4]">
               <li v-for="p in summary.data.top_products" :key="p.product" class="flex items-center justify-between gap-3 py-2">
-                <span class="truncate text-ink-gray-8">{{ p.title || p.product }}</span>
-                <span class="tabular-nums text-ink-gray-9">{{ money(p.commission) }}</span>
+                <span class="truncate text-sm text-polaris-text">{{ p.title || p.product }}</span>
+                <span class="tabular-nums font-medium text-polaris-text">{{ money(p.commission) }}</span>
               </li>
             </ul>
-            <div v-else class="py-4 text-center text-ink-gray-5">No products yet</div>
+            <div v-else class="py-4 text-center text-xs text-polaris-secondary">No products yet</div>
           </SectionCard>
         </div>
       </template>

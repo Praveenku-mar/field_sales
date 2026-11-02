@@ -51,21 +51,21 @@
       <div class="space-y-5">
         <!-- Payment: read-only for the customer; links open where the money is taken. -->
         <div v-if="d.docstatus === 1" class="fs-card">
-          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-            <span class="lucide-credit-card size-4 text-ink-gray-7" />
-            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Payment</h2>
+          <div class="flex items-center gap-2 border-b border-[#f1f2f4] px-4 py-3">
+            <span class="lucide-credit-card size-4 text-polaris-secondary" />
+            <h2 class="flex-1 text-sm font-semibold text-polaris-text">Payment</h2>
             <StatusPill :status="pay.payment_status || 'Unpaid'" />
           </div>
-          <dl class="divide-y divide-outline-gray-1 px-4">
+          <dl class="divide-y divide-[#f1f2f4] px-4">
             <div v-for="item in paymentRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
-              <dd class="min-w-0 truncate text-right text-ink-gray-8">
+              <dt class="shrink-0 text-xs text-polaris-secondary">{{ item.label }}</dt>
+              <dd class="min-w-0 truncate text-right text-sm text-polaris-text">
                 <a
                   v-if="item.href"
                   :href="item.href"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline"
+                  class="inline-flex items-center gap-1 font-medium text-polaris-focus hover:underline"
                 >
                   {{ item.value }}<span class="lucide-external-link size-3.5" />
                 </a>

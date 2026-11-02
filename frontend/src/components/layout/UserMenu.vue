@@ -1,7 +1,7 @@
 <template>
   <!-- The signed-in user, with Switch to Desk and Log out. Sidebar footer on desktop;
        `collapsed` (sidebar collapsed, or the phone top bar) shows the avatar only. -->
-  <Dropdown :options="options" side="top" align="start" :match-trigger-width="!collapsed">
+  <Dropdown :options="options" :side="side" align="start" :match-trigger-width="!collapsed">
     <button
       type="button"
       class="flex h-9 items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-[#f1f2f4] focus:outline-none focus-visible:ring-2 focus-visible:ring-polaris-focus"
@@ -31,6 +31,7 @@ import { useSessionStore } from '@/stores/session'
 
 defineProps({
   collapsed: { type: Boolean, default: false },
+  side: { type: String, default: 'top' },
 })
 
 const session = useSessionStore()

@@ -51,28 +51,28 @@
 
       <div class="space-y-4">
         <div class="fs-card">
-          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-            <span class="lucide-chart-column size-4 text-ink-gray-7" />
-            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">This Month</h2>
-            <span class="text-ink-gray-5">{{ monthLabel }}</span>
+          <div class="flex items-center gap-2 border-b border-[#f1f2f4] px-4 py-3">
+            <span class="lucide-chart-column size-4 text-polaris-secondary" />
+            <h2 class="flex-1 text-sm font-semibold text-polaris-text">This Month</h2>
+            <span class="text-xs text-polaris-secondary">{{ monthLabel }}</span>
           </div>
           <div v-if="month.loading && !month.data" class="flex justify-center py-8"><LoadingIndicator class="size-4" /></div>
-          <div v-else-if="!m" class="px-4 py-6 text-center text-ink-gray-5">No activity this month</div>
+          <div v-else-if="!m" class="px-4 py-6 text-center text-polaris-secondary">No activity this month</div>
           <template v-else>
             <div class="space-y-2 px-4 py-3">
               <div class="flex items-baseline justify-between">
-                <span class="text-2xl font-semibold tabular-nums text-ink-gray-9">{{ formatCurrency(m.order_value, undefined, 0) }}</span>
-                <span v-if="m.period_target" class="text-ink-gray-5">of {{ formatCurrency(m.period_target, undefined, 0) }}</span>
+                <span class="text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ formatCurrency(m.order_value, undefined, 0) }}</span>
+                <span v-if="m.period_target" class="text-xs text-polaris-secondary">of {{ formatCurrency(m.period_target, undefined, 0) }}</span>
               </div>
               <Achievement :pct="m.achievement_pct" />
-              <p v-if="m.period_target" class="text-xs text-ink-gray-5">
+              <p v-if="m.period_target" class="text-xs text-polaris-secondary">
                 Target to date, pro-rated from {{ formatCurrency(m.monthly_target, undefined, 0) }} a month
               </p>
             </div>
-            <dl class="divide-y divide-outline-gray-1 border-t border-desk-border px-4">
+            <dl class="divide-y divide-[#f1f2f4] border-t border-[#f1f2f4] px-4">
               <div v-for="item in monthRows" :key="item.label" class="flex items-center justify-between py-2.5">
-                <dt class="text-ink-gray-6">{{ item.label }}</dt>
-                <dd class="tabular-nums" :class="item.alert ? 'font-medium text-ink-red-6' : 'text-ink-gray-8'">{{ item.value }}</dd>
+                <dt class="text-xs text-polaris-secondary">{{ item.label }}</dt>
+                <dd class="tabular-nums" :class="item.alert ? 'font-medium text-polaris-critical' : 'text-sm text-polaris-text'">{{ item.value }}</dd>
               </div>
             </dl>
           </template>
@@ -82,8 +82,8 @@
 
         <SectionCard title="Customers">
           <div class="flex items-baseline justify-between">
-            <span class="text-2xl font-semibold tabular-nums text-ink-gray-9">{{ retailerCount.data ?? '—' }}</span>
-            <span class="text-ink-gray-5">active customers assigned</span>
+            <span class="text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ retailerCount.data ?? '—' }}</span>
+            <span class="text-xs text-polaris-secondary">active customers assigned</span>
           </div>
         </SectionCard>
       </div>

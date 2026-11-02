@@ -46,7 +46,7 @@
         <SectionCard v-if="activity.data?.variants?.length" :title="`Other Variants (${activity.data.variants.length})`" flush>
           <DataTable :columns="variantColumns" :rows="activity.data.variants" :row-route="(r) => ({ name: 'Product', params: { name: r.name } })">
             <template #cell-available_qty="{ row }">
-              <span v-if="!row.track_inventory" class="text-ink-gray-4">Not tracked</span>
+              <span v-if="!row.track_inventory" class="text-polaris-subdued">Not tracked</span>
               <span v-else :class="stockOf(row).class">{{ formatNumber(row.available_qty) }}</span>
             </template>
           </DataTable>
@@ -69,14 +69,14 @@
       <div class="space-y-5">
         <SectionCard title="Last 30 Days">
           <div class="grid grid-cols-3 gap-3 text-center">
-            <div><div class="text-xl font-semibold tabular-nums">{{ activity.data?.orders_30d ?? '—' }}</div><div class="text-xs text-ink-gray-5">Orders</div></div>
-            <div><div class="text-xl font-semibold tabular-nums">{{ activity.data ? formatNumber(activity.data.units_30d) : '—' }}</div><div class="text-xs text-ink-gray-5">Units</div></div>
-            <div><div class="truncate text-xl font-semibold tabular-nums">{{ activity.data ? formatCurrency(activity.data.value_30d, undefined, 0) : '—' }}</div><div class="text-xs text-ink-gray-5">Value</div></div>
+            <div><div class="text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ activity.data?.orders_30d ?? '—' }}</div><div class="text-xs text-polaris-secondary">Orders</div></div>
+            <div><div class="text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ activity.data ? formatNumber(activity.data.units_30d) : '—' }}</div><div class="text-xs text-polaris-secondary">Units</div></div>
+            <div><div class="truncate text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ activity.data ? formatCurrency(activity.data.value_30d, undefined, 0) : '—' }}</div><div class="text-xs text-polaris-secondary">Value</div></div>
           </div>
-          <p class="mt-3 text-xs text-ink-gray-5">Submitted orders you can see.</p>
+          <p class="mt-3 text-xs text-polaris-secondary">Submitted orders you can see.</p>
         </SectionCard>
 
-        <SectionCard title="Store Link">
+        <SectionCard title="Shopify Product Details">
           <InfoGrid :items="storeInfo" :columns="1" />
         </SectionCard>
       </div>
@@ -122,9 +122,9 @@ const locationStock = createListResource({
 
 function stockOf(row) {
   const qty = row.available_qty || 0
-  if (qty <= 0) return { status: 'Failed', label: 'Out of Stock', class: 'text-ink-red-5' }
-  if (qty <= LOW_STOCK) return { status: 'Pending', label: 'Low Stock', class: 'text-ink-amber-7' }
-  return { status: 'Synced', label: 'In Stock', class: 'text-ink-green-7' }
+  if (qty <= 0) return { status: 'Failed', label: 'Out of Stock', class: 'font-medium text-polaris-critical' }
+  if (qty <= LOW_STOCK) return { status: 'Pending', label: 'Low Stock', class: 'font-medium text-polaris-attention' }
+  return { status: 'Synced', label: 'In Stock', class: 'font-medium text-polaris-success' }
 }
 const stock = computed(() => stockOf(d.value))
 

@@ -989,3 +989,42 @@ def _is_rep_or_their_manager(sales_rep: str) -> bool:
 	return is_admin() or bool(
 		VISIT_MANAGER_ROLES & set(frappe.get_roles()) and sales_rep in get_allowed_reps()
 	)
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def mobile_login(usr: str, pwd: str) -> dict:
+	"""
+	Mobile & Web App Authentication endpoint.
+	Validates credentials, verifies Field Sales app access, and returns API credentials.
+	"""
+	from frappe.core.doctype.user.user import generate_keys
+	from frappe.utils.password import check_password
+
+	if not usr or not pwd:
+		frappe.throw(_("Username and password are required"), frappe.AuthenticationError)
+
+	try:
+		user_name = check_password(usr.strip(), pwd)
+	except Exception:
+		frappe.throw(_("Invalid login credentials"), frappe.AuthenticationError)
+
+	user = frappe.get_doc("User", user_name)
+	if not user.enabled:
+		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
+
+	api_key = user.api_key
+	api_secret = user.get_password("api_secret")
+	if not api_key or not api_secret:
+		keys = generate_keys(user.name)
+		api_key = keys["api_key"]
+		api_secret = keys["api_secret"]
+		frappe.db.commit()
+
+	return {
+		"message": "Logged In",
+		"user": user.name,
+		"full_name": user.full_name,
+		"api_key": api_key,
+		"api_secret": api_secret,
+	}
+

@@ -2,28 +2,16 @@
   <Sidebar v-model:collapsed="collapsed" width="240px" class="border-r border-[#e1e3e5] bg-white">
     <SidebarHeader
       title="Field Sales"
-      :subtitle="session.store.name || 'No store connected'"
+      :subtitle="storeSubtitle"
       logo="/assets/field_sales/images/logo.svg"
       class="px-2"
     />
 
     <div class="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pb-2">
-      <!-- Staff tools: a customer login has no search or notifications. -->
+      <!-- Staff tools: a customer login has no notifications. -->
       <SidebarItem
         v-if="!session.isRetailer"
-        label="Search"
-        icon="lucide-search"
-        style="height: 2.25rem"
-        @click="$emit('open-search')"
-      >
-        <template #prefix><span class="lucide-search size-5 text-polaris-secondary" /></template>
-        <template #suffix>
-          <kbd class="mr-2 rounded border border-[#e1e3e5] bg-[#f1f2f4] px-1.5 py-0.5 text-[11px] font-medium text-polaris-subdued">Ctrl K</kbd>
-        </template>
-      </SidebarItem>
-      <SidebarItem
-        v-if="!session.isRetailer"
-        label="Notification"
+        label="Notifications"
         icon="lucide-bell"
         style="height: 2.25rem"
         :route="{ name: 'Notifications' }"
@@ -83,6 +71,13 @@ defineEmits(['open-search'])
 
 const session = useSessionStore()
 const route = useRoute()
+
+const storeSubtitle = computed(() => {
+  if (session.store?.name) {
+    return session.store.name.includes('.') ? session.store.name : `${session.store.name}.myshopify.com`
+  }
+  return 'Shopify Field Sales'
+})
 
 const navItems = computed(() => NAV_ITEMS.filter((item) => session.canSee(item)))
 

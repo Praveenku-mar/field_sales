@@ -12,7 +12,7 @@
         </div>
       </template>
       <template #actions>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <TabButtons v-model="period" :options="PERIODS" />
           <Button
             icon="lucide-refresh-cw"
@@ -26,12 +26,44 @@
       </template>
     </PageHeader>
 
+    <!-- Custom Date Range Picker Bar -->
+    <div v-if="period === 'custom'" class="px-4 sm:px-6 pb-2">
+      <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white border border-[#e1e3e5] px-4 py-3 shadow-sm">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <span class="lucide-calendar-range size-4 text-polaris-subdued shrink-0" />
+          <span class="text-xs font-medium text-polaris-secondary">Custom range:</span>
+          <div class="w-36">
+            <FormControl v-model="customFrom" type="date" placeholder="From Date" size="sm" />
+          </div>
+          <span class="text-xs text-polaris-subdued">to</span>
+          <div class="w-36">
+            <FormControl v-model="customTo" type="date" placeholder="To Date" size="sm" />
+          </div>
+          <Button
+            label="Apply"
+            variant="solid"
+            size="sm"
+            :disabled="!customFrom || !customTo"
+            :loading="dash.loading"
+            @click="applyCustomRange"
+          />
+          <span v-if="customError" class="text-xs text-polaris-critical font-medium">{{ customError }}</span>
+        </div>
+        <div class="text-[11px] text-polaris-subdued">
+          <span>Max 365 days</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Shopify Analytics Comparison & Status Context Strip -->
     <div class="px-4 sm:px-6 pb-2">
       <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white border border-[#e1e3e5] px-4 py-2 text-xs text-polaris-secondary shadow-sm">
         <div class="flex flex-wrap items-center gap-2">
           <span class="lucide-calendar-range size-3.5 text-polaris-subdued" />
-          <span>Date range: <strong class="font-semibold text-polaris-text">{{ periodLabel }}</strong></span>
+          <span>
+            Date range: <strong class="font-semibold text-polaris-text">{{ periodLabel }}</strong>
+            <span v-if="formattedRange" class="ml-1 text-polaris-secondary">({{ formattedRange }})</span>
+          </span>
           <span class="text-[#c9cccf]">&bull;</span>
           <span>Comparing to: <strong class="font-medium text-polaris-text">{{ comparisonPeriodText }}</strong></span>
         </div>
@@ -456,7 +488,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Avatar, Button, ErrorMessage, LoadingIndicator, TabButtons, createResource, dayjs } from 'frappe-ui'
+import { Avatar, Button, ErrorMessage, FormControl, LoadingIndicator, TabButtons, createResource, dayjs } from 'frappe-ui'
 import { ListView } from 'frappe-ui/experimental'
 import { AreaChart, BarChart, DonutChart, LineChart } from 'frappe-ui/charts'
 import PageHeader from '@/components/PageHeader.vue'
@@ -472,6 +504,8 @@ const PERIODS = [
   { label: 'Today', value: 'today' },
   { label: 'This Week', value: 'week' },
   { label: 'This Month', value: 'month' },
+  { label: 'Last Month', value: 'last_month' },
+  { label: 'Custom', value: 'custom' },
 ]
 
 const orderColumns = [
@@ -489,14 +523,47 @@ const visitColumns = [
 
 const session = useSessionStore()
 const period = ref('today')
+const customFrom = ref(dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD'))
+const customTo = ref(dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD'))
+const customError = ref('')
 
 // The selected period: top cards, the two bar charts, recent orders and active visits.
 const dash = createResource({
   url: 'field_sales.api.dashboard.get_dashboard',
-  makeParams: () => ({ period: period.value }),
+  makeParams: () => {
+    const params = { period: period.value }
+    if (period.value === 'custom') {
+      params.from_date = customFrom.value
+      params.to_date = customTo.value
+    }
+    return params
+  },
   auto: true,
 })
-watch(period, () => dash.reload())
+
+watch(period, (newPeriod) => {
+  customError.value = ''
+  if (newPeriod === 'custom') {
+    if (customFrom.value && customTo.value) {
+      dash.reload()
+    }
+  } else {
+    dash.reload()
+  }
+})
+
+function applyCustomRange() {
+  if (!customFrom.value || !customTo.value) {
+    customError.value = 'Please select both start and end dates.'
+    return
+  }
+  if (dayjs(customFrom.value).isAfter(dayjs(customTo.value))) {
+    customError.value = 'Start date cannot be after end date.'
+    return
+  }
+  customError.value = ''
+  dash.reload()
+}
 
 // Not tied to the period: today's cards, needs attention, 30-day trends, today's visits,
 // sync failures, draft orders and the team table.
@@ -513,19 +580,37 @@ const o = computed(() => overview.data || {})
 const t = computed(() => o.value.today || {})
 const a = computed(() => o.value.attention || {})
 const c = computed(() => o.value.charts || {})
-const periodLabel = computed(() => PERIODS.find((p) => p.value === period.value).label)
+const periodLabel = computed(() => {
+  if (period.value === 'custom') return 'Custom Range'
+  const match = PERIODS.find((p) => p.value === period.value)
+  return match ? match.label : period.value
+})
+
+const formattedRange = computed(() => {
+  if (data.value.from_date && data.value.to_date) {
+    if (data.value.from_date === data.value.to_date) {
+      return formatDate(data.value.from_date)
+    }
+    return `${formatDate(data.value.from_date)} – ${formatDate(data.value.to_date)}`
+  }
+  return ''
+})
 
 // Comparison text matching Shopify Analytics
 const comparisonText = computed(() => {
   if (period.value === 'today') return 'vs yesterday'
   if (period.value === 'week') return 'vs last week'
-  return 'vs last month'
+  if (period.value === 'month') return 'vs last month'
+  if (period.value === 'last_month') return 'vs previous month'
+  return 'vs previous period'
 })
 
 const comparisonPeriodText = computed(() => {
   if (period.value === 'today') return 'Yesterday'
   if (period.value === 'week') return 'Previous week'
-  return 'Previous month'
+  if (period.value === 'month') return 'Previous month'
+  if (period.value === 'last_month') return 'Month before last'
+  return 'Previous period'
 })
 
 // Short day labels ("13 Oct") on the axis.

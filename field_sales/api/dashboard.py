@@ -14,16 +14,20 @@ from frappe.utils import add_days, date_diff, flt, get_first_day, get_first_day_
 from field_sales.frontend_api import get_attention_presets
 from field_sales.www.fieldsales import has_app_access
 
-PERIODS = ("today", "week", "month")
+PERIODS = ("today", "week", "month", "last_month", "custom")
 MANAGER_ROLES = {"System Manager", "Sales Manager"}
 TOP_REPS = 10
 RECENT_ORDERS = 10
 
 
 @frappe.whitelist()
-def get_dashboard(period: str = "today") -> dict:
+def get_dashboard(
+	period: str = "today",
+	from_date: str | None = None,
+	to_date: str | None = None,
+) -> dict:
 	"""
-	Cards, charts and lists for ``period`` ("today", "week" or "month", up to today).
+	Cards, charts and lists for ``period`` ("today", "week", "month", "last_month", or "custom").
 
 	Pending and failed sync counts are the current backlog, not limited to the period.
 
@@ -35,13 +39,30 @@ def get_dashboard(period: str = "today") -> dict:
 	if period not in PERIODS:
 		frappe.throw(_("Period must be one of: {0}").format(", ".join(PERIODS)))
 
-	to_date = getdate(nowdate())
-	from_date = {
-		"today": to_date,
-		"week": get_first_day_of_week(to_date),
-		"month": get_first_day(to_date),
-	}[period]
-	in_period = ("between", [from_date, to_date])
+	today = getdate(nowdate())
+	if period == "today":
+		from_d = to_d = today
+	elif period == "week":
+		from_d = getdate(get_first_day_of_week(today))
+		to_d = today
+	elif period == "month":
+		from_d = getdate(get_first_day(today))
+		to_d = today
+	elif period == "last_month":
+		first_this_month = getdate(get_first_day(today))
+		to_d = getdate(add_days(first_this_month, -1))
+		from_d = getdate(get_first_day(to_d))
+	elif period == "custom":
+		if not from_date or not to_date:
+			frappe.throw(_("Both from_date and to_date are required for a custom date range"))
+		from_d = getdate(from_date)
+		to_d = getdate(to_date)
+		if from_d > to_d:
+			from_d, to_d = to_d, from_d
+		if date_diff(to_d, from_d) > 366:
+			frappe.throw(_("Date range cannot exceed 366 days"))
+
+	in_period = ("between", [from_d, to_d])
 	submitted = {"docstatus": 1, "order_date": in_period}
 
 	totals = frappe.get_list(
@@ -53,8 +74,8 @@ def get_dashboard(period: str = "today") -> dict:
 
 	return {
 		"period": period,
-		"from_date": str(from_date),
-		"to_date": str(to_date),
+		"from_date": str(from_d),
+		"to_date": str(to_d),
 		"cards": {
 			# Visits that happened: checked in (in progress or completed), not merely planned.
 			"visits_count": _count("Visit", {"visit_date": in_period, "status": ("in", ["In Progress", "Completed"])}),
@@ -67,7 +88,7 @@ def get_dashboard(period: str = "today") -> dict:
 			),
 		},
 		"orders_by_rep": _orders_by_rep(submitted),
-		"orders_by_day": _orders_by_day(submitted, from_date, to_date),
+		"orders_by_day": _orders_by_day(submitted, from_d, to_d),
 		"recent_orders": frappe.get_list(
 			"Field Order",
 			fields=["name", "retailer_name", "grand_total", "sync_status", "docstatus", "modified"],

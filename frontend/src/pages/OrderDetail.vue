@@ -72,10 +72,10 @@
         </div>
 
         <!-- Items -->
-        <div class="space-y-3 border-b border-desk-border p-5">
+        <div class="space-y-3 border-b border-[#f1f2f4] p-4 sm:p-5">
           <div class="flex items-center gap-2">
-            <h2 class="text-base font-semibold text-ink-gray-9">Items</h2>
-            <span class="text-ink-gray-5">{{ form.items.length }}</span>
+            <h2 class="text-sm font-semibold text-polaris-text">Items</h2>
+            <span class="rounded-full bg-[#f1f2f4] px-2 py-0.5 text-xs font-medium text-polaris-secondary">{{ form.items.length }}</span>
             <Button
               v-if="editable && selected.size"
               class="ml-auto"
@@ -95,37 +95,37 @@
                 ref="quickSearchEl"
                 v-model="quickQuery"
                 class="flex-1"
-                placeholder="Search a product to add — name, SKU or barcode"
+                placeholder="Search a product to add — title, SKU or barcode"
                 @keydown.enter.prevent="quickRows.length && quickAdd(quickRows[0])"
                 @blur="quickOpen = false"
                 @focus="quickSearch.data && (quickOpen = true)"
               >
-                <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+                <template #prefix><span class="lucide-search size-4 text-polaris-subdued" /></template>
               </TextInput>
               <!-- No camera inside Shopify admin (iframe) -->
-          <Button v-if="!embedded" icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
+              <Button v-if="!embedded" icon="lucide-scan-barcode" tooltip="Scan barcode" aria-label="Scan barcode" @click="scanOpen = true" />
             </div>
             <ul
               v-if="quickOpen && (quickSearch.loading || quickRows.length)"
-              class="mt-1 max-h-72 overflow-y-auto rounded-4 border border-outline-gray-2 bg-surface-base py-1"
+              class="mt-1 max-h-72 overflow-y-auto rounded-lg border border-[#e1e3e5] bg-white py-1 shadow-polaris"
             >
-              <li v-if="quickSearch.loading" class="flex justify-center px-3 py-3"><LoadingIndicator class="size-4 text-ink-gray-5" /></li>
+              <li v-if="quickSearch.loading" class="flex justify-center px-3 py-3"><LoadingIndicator class="size-4 text-polaris-subdued" /></li>
               <li
                 v-for="p in quickRows"
                 :key="p.name"
-                class="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-surface-gray-1"
+                class="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-[#f9fafb]"
                 @mousedown.prevent="quickAdd(p)"
                 @mouseenter="quickActive = p.name"
                 @mouseleave="quickActive = null"
-                :class="quickActive === p.name && 'bg-surface-gray-1'"
+                :class="quickActive === p.name && 'bg-[#f9fafb]'"
               >
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-ink-gray-9">{{ productLabel(p) }}</span>
-                  <span class="block truncate font-mono text-xs text-ink-gray-5">{{ p.sku || p.name }}</span>
+                  <span class="block truncate font-medium text-polaris-text">{{ productLabel(p) }}</span>
+                  <span class="block truncate font-mono text-xs text-polaris-secondary">{{ p.sku || p.name }}</span>
                 </span>
                 <span class="shrink-0 text-right">
-                  <span class="block tabular-nums">{{ formatCurrency(p.price) }}</span>
-                  <span class="block text-xs" :class="p.track_inventory && (listedQty(p) ?? 1) <= 0 ? 'text-ink-red-5' : 'text-ink-gray-5'">
+                  <span class="block font-medium tabular-nums text-polaris-text">{{ formatCurrency(p.price) }}</span>
+                  <span class="block text-xs" :class="p.track_inventory && (listedQty(p) ?? 1) <= 0 ? 'text-[#9b1c1c] font-medium' : 'text-polaris-secondary'">
                     {{ stockText(p, 'in stock', 'not tracked') }}
                   </span>
                 </span>
@@ -133,20 +133,20 @@
             </ul>
           </div>
 
-          <div v-if="warningRows.length" class="flex items-start gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
-            <span class="lucide-triangle-alert mt-px size-4 shrink-0" />
+          <div v-if="warningRows.length" class="flex items-start gap-2.5 rounded-lg bg-[#fde8e8] border border-[#f8b4b4] px-3.5 py-2.5 text-xs text-[#9b1c1c]">
+            <span class="lucide-triangle-alert mt-0.5 size-4 shrink-0" />
             <span>
-              <b>{{ warningRows.length }} {{ warningRows.length === 1 ? 'item exceeds' : 'items exceed' }} available stock</b>
+              <b class="font-semibold">{{ warningRows.length }} {{ warningRows.length === 1 ? 'item exceeds' : 'items exceed' }} available stock</b>
               <template v-if="syncInfo.data?.location_name"> at {{ syncInfo.data.location_name }}</template>.
               {{ editable ? 'Reduce the quantity or split the order before submitting.' : 'Cancel the order and amend it with lower quantities.' }}
             </span>
           </div>
 
-          <div class="overflow-x-auto rounded-4 border border-outline-gray-2">
-            <table class="w-full min-w-[720px] border-collapse text-left">
-              <thead class="bg-surface-gray-1 text-ink-gray-5">
+          <div class="overflow-x-auto rounded-lg border border-[#e1e3e5]">
+            <table class="w-full min-w-[720px] border-collapse text-left text-sm">
+              <thead class="bg-[#fafafa] text-xs font-semibold uppercase tracking-wider text-polaris-secondary border-b border-[#e1e3e5]">
                 <tr>
-                  <th class="w-10 border-b border-outline-gray-2 px-3 py-2">
+                  <th class="w-10 px-3 py-2.5">
                     <Checkbox
                       v-if="editable"
                       :model-value="allSelected"
@@ -165,13 +165,13 @@
               </thead>
               <tbody>
                 <tr v-if="!form.items.length">
-                  <td colspan="7" class="px-3 py-6 text-center text-ink-gray-5">No items yet</td>
+                  <td colspan="7" class="px-3 py-6 text-center text-polaris-secondary">No items yet</td>
                 </tr>
                 <tr
                   v-for="row in form.items"
                   :key="row._key"
-                  class="border-b border-outline-gray-2 last:border-b-0"
-                  :class="isShort(row) ? 'bg-surface-red-1' : 'hover:bg-surface-gray-1'"
+                  class="border-b border-[#f1f2f4] last:border-b-0"
+                  :class="isShort(row) ? 'bg-[#fde8e8]' : 'hover:bg-[#f9fafb]'"
                 >
                   <td class="px-3 py-1.5">
                     <Checkbox
@@ -198,26 +198,26 @@
                       placeholder="Select product"
                       @select="(p) => setProduct(row, p)"
                     />
-                    <div v-else class="text-ink-gray-9">{{ productLabel(row) }}</div>
-                    <div v-if="isShort(row)" class="mt-0.5 flex items-center gap-1 text-xs text-ink-red-6">
+                    <div v-else class="text-polaris-text font-medium">{{ productLabel(row) }}</div>
+                    <div v-if="isShort(row)" class="mt-0.5 flex items-center gap-1 text-xs text-polaris-critical">
                       <span class="lucide-triangle-alert size-3" />
                       Exceeds stock — only {{ formatNumber(row.available_qty) }} available
                     </div>
-                    <div v-if="editable && priceChange(row) != null" class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-amber-7">
+                    <div v-if="editable && priceChange(row) != null" class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-polaris-attention">
                       <span class="flex items-center gap-1">
                         <span class="lucide-tag size-3" />
                         Price changed: {{ formatCurrency(row.rate) }} → {{ formatCurrency(priceChange(row)) }}
                       </span>
                       <!-- For a rep the server sets a changed rate to the product's current price: the same thing. -->
-                      <button type="button" class="font-medium text-ink-gray-9 underline underline-offset-2" @click="applyNewPrice(row)">
+                      <button type="button" class="font-medium text-polaris-text underline underline-offset-2" @click="applyNewPrice(row)">
                         Apply new price
                       </button>
                     </div>
                   </td>
-                  <td class="cell font-mono text-xs text-ink-gray-6">{{ row.sku || '—' }}</td>
+                  <td class="cell font-mono text-xs text-polaris-secondary">{{ row.sku || '—' }}</td>
                   <td class="cell text-right tabular-nums">
                     <Tooltip :text="tracks(row) ? null : 'Stock is not tracked for this product'" :disabled="tracks(row)">
-                      <span :class="!tracks(row) && 'text-ink-gray-4'">{{ tracks(row) ? formatNumber(row.available_qty) : '—' }}</span>
+                      <span :class="!tracks(row) && 'text-polaris-subdued'">{{ tracks(row) ? formatNumber(row.available_qty) : '—' }}</span>
                     </Tooltip>
                   </td>
                   <td class="cell p-0 text-right" :class="isShort(row) && 'outline outline-1 -outline-offset-1 outline-[--ink-red-5]'">
@@ -258,19 +258,19 @@
         </div>
 
         <!-- Totals -->
-        <div class="p-5">
-          <h2 class="mb-3 text-base font-semibold text-ink-gray-9">Totals</h2>
+        <div class="p-4 sm:p-5">
+          <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Totals</h2>
           <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
             <Field label="Total Quantity">
-              <div class="flex h-7 items-center rounded-4 bg-surface-gray-2 px-2 tabular-nums text-ink-gray-8">
+              <div class="flex h-8 items-center rounded-lg bg-[#f1f2f4] px-3 tabular-nums text-xs font-semibold text-polaris-text">
                 {{ formatNumber(totals.qty, 3) }}
               </div>
             </Field>
-            <dl class="space-y-2.5">
-              <div class="flex justify-between"><dt class="text-ink-gray-6">Net Total</dt><dd class="tabular-nums">{{ formatCurrency(totals.net) }}</dd></div>
-              <div class="flex justify-between"><dt class="text-ink-gray-6">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums">{{ formatCurrency(totals.tax) }}</dd></div>
+            <dl class="space-y-2.5 text-xs">
+              <div class="flex justify-between"><dt class="text-polaris-secondary">Net Total</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.net) }}</dd></div>
+              <div class="flex justify-between"><dt class="text-polaris-secondary">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.tax) }}</dd></div>
               <div v-if="editable" class="flex items-start justify-between gap-3">
-                <dt class="pt-1 text-ink-gray-6">Discount %</dt>
+                <dt class="pt-1 text-polaris-secondary">Discount %</dt>
                 <dd class="text-right">
                   <div class="flex items-center justify-end gap-3">
                     <TextInput
@@ -281,17 +281,17 @@
                       class="w-20 [&_input]:text-right"
                       aria-label="Discount %"
                     />
-                    <span class="w-24 tabular-nums">{{ formatCurrency(totals.discount) }}</span>
+                    <span class="w-24 tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.discount) }}</span>
                   </div>
-                  <p class="mt-1 text-xs" :class="overDiscountLimit ? 'text-ink-red-5' : 'text-ink-gray-5'">{{ discountHint }}</p>
+                  <p class="mt-1 text-xs" :class="overDiscountLimit ? 'text-[#9b1c1c] font-medium' : 'text-polaris-subdued'">{{ discountHint }}</p>
                 </dd>
               </div>
               <div v-else class="flex justify-between">
-                <dt class="text-ink-gray-6">Discount ({{ formatNumber(form.discount_percent || 0, 2) }}%)</dt>
-                <dd class="tabular-nums">{{ formatCurrency(form.discount_amount || 0) }}</dd>
+                <dt class="text-polaris-secondary">Discount ({{ formatNumber(form.discount_percent || 0, 2) }}%)</dt>
+                <dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(form.discount_amount || 0) }}</dd>
               </div>
-              <div class="flex justify-between border-t border-outline-gray-2 pt-3 text-lg font-semibold text-ink-gray-9">
-                <dt>Grand Total</dt><dd class="tabular-nums">{{ formatCurrency(totals.grand) }}</dd>
+              <div class="flex justify-between border-t border-[#e1e3e5] pt-3 text-sm font-bold text-polaris-text">
+                <dt>Grand Total</dt><dd class="tabular-nums text-base">{{ formatCurrency(totals.grand) }}</dd>
               </div>
             </dl>
           </div>
@@ -301,17 +301,21 @@
       <!-- Side column: store sync, payment, invoice -->
       <div class="space-y-4">
         <!-- Store sync -->
-        <div class="fs-card">
-          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-            <span class="lucide-shopping-bag size-4 text-ink-gray-7" />
-            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">{{ platform }} Sync</h2>
+        <div class="fs-card overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-[#f1f2f4] px-4 py-3">
+            <span class="flex size-6 items-center justify-center rounded-md bg-[#008060] text-white">
+              <svg class="size-3.5 fill-current" viewBox="0 0 24 24">
+                <path d="M19.7 7.7l-2.2-.6c-.1 0-.1-.1-.1-.2 0-1.8-1.5-3.3-3.3-3.3-.4 0-.8.1-1.2.2-.4-1.2-1.5-2.1-2.9-2.1C8.2 1.7 6.8 3.1 6.8 5c0 .2 0 .4.1.6L5 6.2c-.3.1-.5.3-.5.6l-1.9 14c0 .3.1.6.4.8.1.1.3.1.5.1h17c.3 0 .5-.2.5-.5l-1.3-13.5z"/>
+              </svg>
+            </span>
+            <h2 class="flex-1 text-sm font-semibold text-polaris-text">Shopify Sync</h2>
             <StatusPill :status="orderStatus(d)" />
           </div>
-          <dl class="divide-y divide-outline-gray-1 px-4">
+          <dl class="divide-y divide-[#f1f2f4] px-4 text-xs">
             <div v-for="item in syncRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-              <dt class="text-ink-gray-6">{{ item.label }}</dt>
-              <dd class="truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
-                <a v-if="item.href" :href="item.href" target="_blank" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
+              <dt class="text-polaris-secondary">{{ item.label }}</dt>
+              <dd class="truncate text-right font-medium" :class="item.muted ? 'text-polaris-subdued' : 'text-polaris-text'">
+                <a v-if="item.href" :href="item.href" target="_blank" class="inline-flex items-center gap-1 font-semibold text-polaris-focus hover:underline">
                   {{ item.value }}<span class="lucide-external-link size-3.5" />
                 </a>
                 <template v-else>{{ item.value }}</template>
@@ -319,8 +323,8 @@
             </div>
           </dl>
           <div class="space-y-2 p-4 pt-1">
-            <p v-if="d.docstatus === 0" class="text-ink-gray-5">The order is sent to the store when it is submitted.</p>
-            <div v-if="d.docstatus === 1 && d.sync_status === 'Failed'" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+            <p v-if="d.docstatus === 0" class="text-xs text-polaris-secondary">The order is sent to Shopify when submitted.</p>
+            <div v-if="d.docstatus === 1 && d.sync_status === 'Failed'" class="flex gap-2 rounded-lg bg-[#fde8e8] border border-[#f8b4b4] px-3 py-2.5 text-xs text-[#9b1c1c]">
               <span class="lucide-circle-alert mt-px size-4 shrink-0" />
               <div class="min-w-0 break-words">
                 <div class="font-semibold">Sync failed</div>
@@ -331,7 +335,7 @@
               v-if="d.docstatus === 1 && d.sync_status === 'Failed'"
               class="w-full"
               variant="solid"
-              label="Retry Sync"
+              label="Retry Shopify Sync"
               icon-left="lucide-refresh-cw"
               :loading="retrying"
               @click="retrySync"
@@ -339,6 +343,7 @@
             <Button
               v-if="session.isManager && d.docstatus !== 0"
               class="w-full"
+              variant="ghost"
               label="View Sync Log"
               :route="{ name: 'SyncLogs', query: { reference: name } }"
             />
@@ -346,17 +351,17 @@
         </div>
 
         <!-- Payment (Razorpay payment link); read-only, written by the server -->
-        <div v-if="d.docstatus === 1" class="fs-card">
-          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-            <span class="lucide-credit-card size-4 text-ink-gray-7" />
-            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Payment</h2>
+        <div v-if="d.docstatus === 1" class="fs-card overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-[#f1f2f4] px-4 py-3">
+            <span class="lucide-credit-card size-4 text-polaris-secondary" />
+            <h2 class="flex-1 text-sm font-semibold text-polaris-text">Payment</h2>
             <StatusPill :status="pay.payment_status || 'Unpaid'" />
           </div>
-          <dl class="divide-y divide-outline-gray-1 px-4">
+          <dl class="divide-y divide-[#f1f2f4] px-4 text-xs">
             <div v-for="item in paymentRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
-              <dd class="min-w-0 truncate text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">
-                <a v-if="item.href" :href="item.href" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-ink-blue-6 hover:underline">
+              <dt class="shrink-0 text-polaris-secondary">{{ item.label }}</dt>
+              <dd class="min-w-0 truncate text-right font-medium" :class="item.muted ? 'text-polaris-subdued' : 'text-polaris-text'">
+                <a v-if="item.href" :href="item.href" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 font-semibold text-polaris-focus hover:underline">
                   {{ item.value }}<span class="lucide-external-link size-3.5" />
                 </a>
                 <template v-else>{{ item.value }}</template>
@@ -404,19 +409,19 @@
         </div>
 
         <!-- Invoice and confirmation email -->
-        <div v-if="d.docstatus === 1" class="fs-card">
-          <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-            <span class="lucide-file-text size-4 text-ink-gray-7" />
-            <h2 class="flex-1 text-base font-semibold text-ink-gray-9">Invoice</h2>
+        <div v-if="d.docstatus === 1" class="fs-card overflow-hidden">
+          <div class="flex items-center gap-2 border-b border-[#f1f2f4] px-4 py-3">
+            <span class="lucide-file-text size-4 text-polaris-secondary" />
+            <h2 class="flex-1 text-sm font-semibold text-polaris-text">Invoice</h2>
           </div>
-          <dl class="divide-y divide-outline-gray-1 px-4">
+          <dl class="divide-y divide-[#f1f2f4] px-4 text-xs">
             <div v-for="item in invoiceRows" :key="item.label" class="flex items-center justify-between gap-3 py-2.5">
-              <dt class="shrink-0 text-ink-gray-6">{{ item.label }}</dt>
-              <dd class="min-w-0 break-words text-right" :class="item.muted ? 'text-ink-gray-5' : 'text-ink-gray-8'">{{ item.value }}</dd>
+              <dt class="shrink-0 text-polaris-secondary">{{ item.label }}</dt>
+              <dd class="min-w-0 break-words text-right font-medium" :class="item.muted ? 'text-polaris-subdued' : 'text-polaris-text'">{{ item.value }}</dd>
             </div>
           </dl>
           <div class="space-y-2 p-4 pt-1">
-            <div v-if="confirmationError" class="flex gap-2 rounded-4 bg-surface-red-2 px-3 py-2.5 text-ink-red-6">
+            <div v-if="confirmationError" class="flex gap-2 rounded-lg bg-[#fde8e8] border border-[#f8b4b4] px-3 py-2.5 text-xs text-[#9b1c1c]">
               <span class="lucide-circle-alert mt-px size-4 shrink-0" />
               <div class="min-w-0 break-words">{{ d.confirmation_status }}</div>
             </div>
@@ -444,23 +449,23 @@
     <Dialog v-model="pickerOpen" title="Add products" size="xl" @after-leave="resetPicker">
       <div class="space-y-3">
         <TextInput v-model="pickerQuery" placeholder="Search by name, SKU or barcode" autofocus>
-          <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+          <template #prefix><span class="lucide-search size-4 text-polaris-subdued" /></template>
         </TextInput>
-        <div class="max-h-80 overflow-y-auto rounded-4 border border-outline-gray-2">
+        <div class="max-h-80 overflow-y-auto rounded-xl border border-[#e1e3e5]">
           <div v-if="picker.loading && !picker.data" class="flex justify-center py-8"><LoadingIndicator class="size-4" /></div>
-          <div v-else-if="!pickerRows.length" class="py-8 text-center text-ink-gray-5">No products found</div>
+          <div v-else-if="!pickerRows.length" class="py-8 text-center text-xs text-polaris-secondary">No products found</div>
           <label
             v-for="p in pickerRows"
             :key="p.name"
-            class="flex cursor-pointer items-center gap-3 border-b border-outline-gray-1 px-3 py-2 last:border-b-0 hover:bg-surface-gray-1"
+            class="flex cursor-pointer items-center gap-3 border-b border-[#f1f2f4] px-3 py-2.5 last:border-b-0 hover:bg-[#f9fafb]"
           >
             <Checkbox :model-value="picked.has(p.name)" @update:model-value="togglePicked(p.name)" />
             <span class="min-w-0 flex-1">
-              <span class="block truncate text-ink-gray-9">{{ productLabel(p) }}</span>
-              <span class="font-mono text-xs text-ink-gray-5">{{ p.sku || p.name }}</span>
+              <span class="block truncate text-sm font-medium text-polaris-text">{{ productLabel(p) }}</span>
+              <span class="font-mono text-xs text-polaris-secondary">{{ p.sku || p.name }}</span>
             </span>
-            <span class="text-right text-xs tabular-nums text-ink-gray-5">
-              {{ formatCurrency(p.price) }}
+            <span class="text-right text-xs tabular-nums text-polaris-secondary">
+              <span class="font-medium text-polaris-text">{{ formatCurrency(p.price) }}</span>
               <span class="block">{{ stockText(p, 'in stock', 'Not tracked') }}</span>
             </span>
           </label>
@@ -531,7 +536,7 @@ const Field = defineComponent({
   props: { label: String, required: Boolean },
   setup: (p, { slots }) => () =>
     h('div', { class: 'space-y-1.5' }, [
-      h('div', { class: 'text-sm text-ink-gray-6' }, [p.label, p.required ? h('span', { class: 'text-ink-red-5' }, ' *') : null]),
+      h('div', { class: 'text-xs font-medium text-polaris-secondary' }, [p.label, p.required ? h('span', { class: 'text-polaris-critical' }, ' *') : null]),
       slots.default?.(),
     ]),
 })
@@ -540,11 +545,11 @@ const Field = defineComponent({
 const ReadOnly = defineComponent({
   props: { value: String, aside: String, route: Object },
   setup: (p) => () =>
-    h('div', { class: 'flex h-7 items-center gap-2 rounded-4 bg-surface-gray-2 px-2' }, [
+    h('div', { class: 'flex h-8 items-center gap-2 rounded-lg bg-[#f1f2f4] border border-[#e1e3e5] px-2.5 text-sm' }, [
       p.value && p.route
-        ? h(RouterLink, { to: p.route, class: 'flex-1 truncate text-ink-gray-8 hover:underline' }, () => p.value)
-        : h('span', { class: ['flex-1 truncate', p.value ? 'text-ink-gray-8' : 'text-ink-gray-4'] }, p.value || '—'),
-      p.aside ? h('span', { class: 'shrink-0 text-ink-gray-5' }, p.aside) : null,
+        ? h(RouterLink, { to: p.route, class: 'flex-1 truncate font-medium text-polaris-text hover:underline' }, () => p.value)
+        : h('span', { class: ['flex-1 truncate', p.value ? 'text-polaris-text' : 'text-polaris-subdued'] }, p.value || '—'),
+      p.aside ? h('span', { class: 'shrink-0 text-xs text-polaris-secondary' }, p.aside) : null,
     ]),
 })
 

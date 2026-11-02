@@ -55,12 +55,12 @@
           </div>
         </SectionCard>
 
-        <SectionCard title="Store Sync">
+        <SectionCard title="Shopify Customer Sync">
           <template #actions>
-            <Button v-if="canWrite && ['Draft', 'Failed'].includes(d.sync_status)" label="Sync to Store" size="sm" :loading="syncing" @click="syncToStore" />
+            <Button v-if="canWrite && ['Draft', 'Failed'].includes(d.sync_status)" label="Sync to Shopify" size="sm" :loading="syncing" @click="syncToStore" />
           </template>
           <InfoGrid :items="syncInfo" :columns="1" />
-          <div v-if="d.sync_error" class="mt-3 rounded-3 px-3 py-2 text-sm" :class="d.sync_status === 'Failed' ? 'bg-surface-red-1 text-ink-red-5' : 'bg-surface-amber-1 text-ink-amber-7'">
+          <div v-if="d.sync_error" class="mt-3 rounded-lg border px-3 py-2 text-sm" :class="d.sync_status === 'Failed' ? 'bg-[#fde8e8] text-[#9b1c1c] border-[#f8b4b4]' : 'bg-[#fef3d6] text-[#744210] border-[#fbd88e]'">
             {{ d.sync_error }}
           </div>
         </SectionCard>
@@ -157,13 +157,13 @@ const address = computed(() => [
 ])
 const syncInfo = computed(() => [
   { label: 'Status', value: d.value.sync_status || 'Draft' },
-  { label: 'Platform', value: d.value.platform },
-  { label: 'Store customer ID', value: d.value.external_customer_id },
+  { label: 'Platform', value: d.value.platform || 'Shopify' },
+  { label: 'Shopify Customer ID', value: d.value.external_customer_id },
   { label: 'Last synced', value: d.value.last_synced ? formatDateTime(d.value.last_synced) : null },
 ])
 const lastVisitClass = computed(() => {
   const days = daysAgo(d.value.last_visit)
-  return days === null || days > 30 ? 'text-ink-red-5' : days > 7 ? 'text-ink-amber-7' : 'text-ink-gray-9'
+  return days === null || days > 30 ? 'text-polaris-critical' : days > 7 ? 'text-polaris-attention' : 'text-polaris-text'
 })
 
 const visitColumns = [

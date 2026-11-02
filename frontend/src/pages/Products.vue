@@ -3,7 +3,10 @@
   <div class="flex h-full flex-col">
     <PageHeader title="Products">
       <template #meta>
-        <span class="text-ink-gray-5">Synced from the store</span>
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-[#e4f6ed] px-2.5 py-0.5 text-xs font-semibold text-[#0d5936] border border-[#aee8cb]">
+          <span class="size-1.5 rounded-full bg-[#108043]" />
+          Shopify Catalog
+        </span>
       </template>
       <template #actions>
         <Button

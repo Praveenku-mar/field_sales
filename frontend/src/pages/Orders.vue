@@ -1,13 +1,19 @@
 <template>
   <!-- Full height: the table fills what is left and scrolls inside its card -->
   <div class="flex h-full flex-col">
-    <PageHeader title="Field Orders">
+    <PageHeader title="Orders">
+      <template #meta>
+        <span class="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-[#e4f6ed] px-2.5 py-0.5 text-xs font-semibold text-[#0d5936] border border-[#aee8cb]">
+          <span class="size-1.5 rounded-full bg-[#108043]" />
+          Shopify Synced
+        </span>
+      </template>
       <template #actions>
         <Button label="New Order" icon-left="lucide-plus" variant="solid" @click="newOrderOpen = true" />
       </template>
     </PageHeader>
     <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
-      <ListFilters v-model="model" search-placeholder="Search order or retailer" :tabs="tabs" :fields="filterFields">
+      <ListFilters v-model="model" search-placeholder="Search orders or customers" :tabs="tabs" :fields="filterFields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
       <DataTable

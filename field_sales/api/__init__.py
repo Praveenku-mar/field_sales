@@ -4,6 +4,7 @@
 """Whitelisted endpoints used by the Store Connection, Retailer, Visit and Field Order forms and the Platform Product view."""
 
 
+import re
 from urllib.parse import urlsplit
 
 import frappe
@@ -16,6 +17,7 @@ from frappe.sessions import clear_sessions
 from frappe.utils import flt, formatdate, get_link_to_form, get_url, getdate, now_datetime, nowdate
 from frappe.utils.password import check_password
 
+from field_sales.api import mobile
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import RETAILER_ROLE, STAFF_ROLES, get_allowed_reps, hierarchy_filters, is_admin
@@ -27,7 +29,6 @@ from field_sales.sync.stock import fetch_live_stock
 from field_sales.sync.stock import get_sell_locations as _get_sell_locations
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
 from field_sales.utils.limits import SALES_REPS, check_limit
-from field_sales.api import mobile
 
 VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
 # Roles a user may hold for a manager to reset their password (the rest are automatic roles).
@@ -36,6 +37,36 @@ REP_ONLY_ROLES = {"Field Sales Rep", "All", "Guest", "Desk User"}
 LOGIN_ROLES = {"Sales Manager", "System Manager"}
 # A retailer login user holds the retailer role plus Frappe's automatic roles, nothing else.
 RETAILER_LOGIN_ROLES = {"Field Sales Retailer", "All", "Guest"}
+_SAFE_REQUEST_HOST = re.compile(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
+
+
+def _retailer_login_url() -> str:
+	"""Build the retailer login URL from the origin used for this API request.
+
+	Frappe's configured ``host_name`` may intentionally be an internal address
+	(for example, PDF rendering). Prefer the current request origin for invite
+	links, while rejecting malformed Host values and falling back to site config.
+	The reverse proxy must reject unknown Host headers and set trusted forwarded
+	headers; Frappe's ProxyFix consumes those headers before this function runs.
+	"""
+	request = getattr(frappe.local, "request", None)
+	if request:
+		# Some tunnels/proxies preserve the internal Host for upstream routing and
+		# expose the public origin only through X-Forwarded-* headers.
+		headers = request.headers
+		forwarded_host = (headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
+		forwarded_proto = (
+			(headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+		)
+		if forwarded_host and _SAFE_REQUEST_HOST.fullmatch(forwarded_host):
+			scheme = forwarded_proto if forwarded_proto in ("http", "https") else "https"
+			return f"{scheme}://{forwarded_host}/fieldsales/login"
+
+		host = (request.host or "").strip()
+		scheme = (request.scheme or "").lower()
+		if _SAFE_REQUEST_HOST.fullmatch(host) and scheme in ("http", "https"):
+			return f"{scheme}://{host}/fieldsales/login"
+	return get_url("/fieldsales/login")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -472,7 +503,7 @@ def _send_retailer_invite(user: str, retailer: str) -> None:
 			"store_name": store,
 			"user": user,
 			"link": link,
-			"login_url": get_url("/fieldsales/login"),
+			"login_url": _retailer_login_url(),
 		},
 	)
 

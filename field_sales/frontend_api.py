@@ -230,12 +230,14 @@ def get_dashboard() -> dict:
 		order_by="status desc, modified desc",
 		limit_page_length=50,
 	)
-	orders_today = frappe.get_list(
+	today_order_totals = frappe.get_list(
 		"Field Order",
 		filters={"order_date": today, "docstatus": 1},
-		fields=["name", "grand_total"],
-		limit_page_length=0,
+		fields=[{"COUNT": "*", "as": "orders"}, {"SUM": "grand_total", "as": "order_value"}],
 	)
+	today_orders_count = cint(today_order_totals[0].orders) if today_order_totals else 0
+	today_order_val = flt(today_order_totals[0].order_value) if today_order_totals else 0.0
+
 	counts = {status: 0 for status in ("Planned", "In Progress", "Completed")}
 	for visit in visits_today:
 		counts[visit.status] = counts.get(visit.status, 0) + 1
@@ -246,8 +248,8 @@ def get_dashboard() -> dict:
 			"visits_planned": len(visits_today),
 			"visits_completed": counts["Completed"],
 			"visits_in_progress": counts["In Progress"],
-			"orders": len(orders_today),
-			"order_value": sum(flt(o.grand_total) for o in orders_today),
+			"orders": today_orders_count,
+			"order_value": today_order_val,
 		},
 		"attention": _attention_counts(today),
 		"visits_today": visits_today[:8],
@@ -289,12 +291,31 @@ def get_product_activity(product: str) -> dict:
 		order_by="`tabField Order`.order_date desc",
 		limit_page_length=10,
 	)
-	recent_30d = frappe.get_list(
-		"Field Order",
-		filters=[["Field Order Item", "product", "=", product], ["Field Order", "docstatus", "=", 1], ["Field Order", "order_date", ">=", since]],
-		fields=["name", "`tabField Order Item`.qty as qty", "`tabField Order Item`.amount as amount"],
-		limit_page_length=0,
-	)
+	from field_sales.permissions import field_order_query
+
+	perm = field_order_query()
+	where = ["fo.docstatus = 1", "foi.product = %(product)s", "fo.order_date >= %(since)s"]
+	if perm and perm != "1=0":
+		where.append(perm.replace("`tabField Order`", "fo"))
+
+	if perm == "1=0":
+		act = {"orders": 0, "units": 0, "value": 0.0}
+	else:
+		where_clause = " AND ".join(f"({w})" for w in where)
+		agg_rows = frappe.db.sql(
+			f"""
+			SELECT
+				COUNT(DISTINCT fo.name) as orders,
+				COALESCE(SUM(foi.qty), 0) as units,
+				COALESCE(SUM(foi.amount), 0) as value
+			FROM `tabField Order` fo
+			JOIN `tabField Order Item` foi ON foi.parent = fo.name
+			WHERE {where_clause}
+			""",
+			{"product": product, "since": since},
+			as_dict=True,
+		)
+		act = agg_rows[0] if agg_rows else {"orders": 0, "units": 0, "value": 0.0}
 
 	external_product_id = frappe.db.get_value("Platform Product", product, "external_product_id")
 	variants = (
@@ -310,9 +331,9 @@ def get_product_activity(product: str) -> dict:
 	)
 
 	return {
-		"orders_30d": len({r.name for r in recent_30d}),
-		"units_30d": sum(flt(r.qty) for r in recent_30d),
-		"value_30d": flt(sum(flt(r.amount) for r in recent_30d), 2),
+		"orders_30d": cint(act.get("orders") or 0),
+		"units_30d": flt(act.get("units") or 0.0),
+		"value_30d": flt(act.get("value") or 0.0, 2),
 		"recent_orders": recent,
 		"variants": variants,
 	}

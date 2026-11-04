@@ -9,6 +9,7 @@ lazy-loaded detail endpoints, separate count queries, and debounced prefix searc
 
 import base64
 import json
+import re
 from urllib.parse import unquote
 
 import frappe
@@ -472,8 +473,12 @@ PRODUCT_CARD_FIELDS = [
 	"product_title as title",
 	"variant_title",
 	"sku",
+	"barcode",
+	"uom",
 	"price",
+	"compare_at_price",
 	"available_qty",
+	"track_inventory",
 	"status",
 	"image",
 	"modified",
@@ -487,11 +492,15 @@ def get_products_list(
 	cursor: str | None = None,
 	limit: int = DEFAULT_PAGE_SIZE,
 	status: str | None = "Active",
+	tab: str | None = None,
 	search: str | None = None,
+	barcode: str | None = None,
 	track_inventory: int | str | None = None,
+	location_id: str | None = None,
 ) -> dict:
 	"""
-	Keyset-paginated products list. Excludes raw HTML descriptions and multi-location tables.
+	Keyset-paginated products list with location stock and barcode support.
+	Excludes raw HTML descriptions and multi-location tables from list queries.
 	"""
 	_check_access()
 	frappe.has_permission("Platform Product", "read", throw=True)
@@ -499,7 +508,14 @@ def get_products_list(
 	where = []
 	params = {}
 
-	if status and status.strip() in ("Active", "Archived", "Draft"):
+	# Tab filters: 'Active', 'low', 'all'
+	if tab == "low":
+		where.append("`tabPlatform Product`.`status` = 'Active'")
+		where.append("`tabPlatform Product`.`track_inventory` = 1")
+		where.append("`tabPlatform Product`.`available_qty` <= 5")
+	elif tab == "all":
+		pass
+	elif status and status.strip() in ("Active", "Archived", "Draft"):
 		where.append("`tabPlatform Product`.`status` = %(f_status)s")
 		params["f_status"] = status.strip()
 
@@ -507,15 +523,25 @@ def get_products_list(
 		where.append("`tabPlatform Product`.`track_inventory` = %(f_track)s")
 		params["f_track"] = cint(track_inventory)
 
+	if barcode and barcode.strip():
+		code = barcode.strip()
+		variants = [code]
+		if re.match(r"^0\d{12}$", code):
+			variants.append(code[1:])
+		elif re.match(r"^\d{12}$", code):
+			variants.append(f"0{code}")
+		where.append("`tabPlatform Product`.`barcode` IN %(f_barcodes)s")
+		params["f_barcodes"] = tuple(variants)
+
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
 		where.append(
-			"(`tabPlatform Product`.`name` LIKE %(f_search)s OR `tabPlatform Product`.`product_title` LIKE %(f_search)s OR `tabPlatform Product`.`sku` LIKE %(f_search)s)"
+			"(`tabPlatform Product`.`name` LIKE %(f_search)s OR `tabPlatform Product`.`product_title` LIKE %(f_search)s OR `tabPlatform Product`.`sku` LIKE %(f_search)s OR `tabPlatform Product`.`barcode` LIKE %(f_search)s)"
 		)
 		params["f_search"] = f"{term}%"
 
 	decoded_cursor = decode_cursor(cursor, ("modified", "name"))
-	return _execute_keyset_query(
+	res = _execute_keyset_query(
 		doctype="Platform Product",
 		fields=PRODUCT_CARD_FIELDS,
 		order_by=list(PRODUCT_KEYS),
@@ -524,6 +550,24 @@ def get_products_list(
 		params=params,
 		limit=limit,
 	)
+
+	# If a selling location is selected, fetch and overlay stock for this page only
+	if location_id and res.get("items"):
+		loc_id = location_id.strip()
+		tracked_names = [it["name"] for it in res["items"] if it.get("track_inventory")]
+		if tracked_names:
+			stock_rows = frappe.get_all(
+				"Product Stock",
+				filters={"product": ["in", tracked_names], "location_id": loc_id},
+				fields=["product", "available_qty"],
+			)
+			stock_map = {row["product"]: flt(row["available_qty"]) for row in stock_rows}
+			for item in res["items"]:
+				if item.get("track_inventory"):
+					item["available_qty"] = stock_map.get(item["name"], 0.0)
+					item["location_id"] = loc_id
+
+	return res
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -904,13 +948,63 @@ def get_product_detail_stock(product_id: str) -> dict:
 			"title": product.product_title,
 			"variant_title": product.variant_title,
 			"sku": product.sku,
+			"barcode": getattr(product, "barcode", "") or "",
+			"uom": getattr(product, "uom", "Nos") or "Nos",
+			"image": getattr(product, "image", None),
+			"collection": getattr(product, "collection", None),
 			"price": flt(product.price),
+			"compare_at_price": flt(getattr(product, "compare_at_price", 0.0)),
 			"available_qty": flt(product.available_qty),
 			"track_inventory": bool(product.track_inventory),
 			"status": product.status,
 		},
 		"locations": locations,
 		"location_stock": stock_by_loc,
+	}
+
+
+@frappe.whitelist(methods=["GET"])
+def get_product_sync_status() -> dict:
+	"""
+	Returns the latest product sync execution status and details for managers/admins.
+	"""
+	_check_access()
+	frappe.only_for(["System Manager", "Sales Manager"])
+
+	from frappe.utils.background_jobs import is_job_enqueued
+	from field_sales.sync.products import JOB_ID
+
+	is_running = False
+	try:
+		is_running = bool(is_job_enqueued(JOB_ID))
+	except Exception:
+		pass
+
+	log = frappe.db.get_value(
+		"Sync Log",
+		{"operation": "Product Sync"},
+		["name", "status", "creation", "duration_ms", "error_message", "response_payload"],
+		order_by="creation desc",
+		as_dict=True,
+	)
+
+	summary = {}
+	if log and log.get("response_payload"):
+		try:
+			summary = json.loads(log["response_payload"])
+		except Exception:
+			pass
+
+	return {
+		"is_running": is_running,
+		"last_sync": {
+			"name": log.get("name") if log else None,
+			"status": log.get("status") if log else None,
+			"timestamp": str(log.get("creation")) if log else None,
+			"duration_ms": log.get("duration_ms") if log else 0,
+			"error_message": log.get("error_message") if log else None,
+			"summary": summary,
+		} if log else None,
 	}
 
 
@@ -1050,7 +1144,7 @@ def mobile_search(
 			"""
 			SELECT name, product_title as title, sku as subtitle, status as badge, 'Platform Product' as doctype
 			FROM `tabPlatform Product`
-			WHERE (`product_title` LIKE %(pfx)s OR `name` LIKE %(pfx)s OR `sku` LIKE %(pfx)s)
+			WHERE (`product_title` LIKE %(pfx)s OR `name` LIKE %(pfx)s OR `sku` LIKE %(pfx)s OR `barcode` LIKE %(pfx)s)
 			ORDER BY modified DESC
 			LIMIT %(limit)s
 			""",

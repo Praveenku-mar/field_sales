@@ -8,7 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, validate_email_address
 
-from field_sales.permissions import get_own_rep, is_admin
+from field_sales.permissions import STAFF_ROLES, get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 from field_sales.utils.geo import has_coords
 from field_sales.utils.guards import is_system_manager, keep_server_fields
@@ -27,6 +27,8 @@ SERVER_FIELDS = (
 )
 # May move a located retailer or change its geofence radius (both decide check-in distance).
 LOCATION_EDIT_ROLES = {"Sales Manager", "System Manager"}
+# May link or re-point a retailer's login user (the Login Access card and its APIs).
+LOGIN_EDIT_ROLES = LOCATION_EDIT_ROLES
 
 
 class Retailer(Document):
@@ -43,6 +45,7 @@ class Retailer(Document):
 		self._guard_location()
 		self._validate_phone()
 		self._validate_email()
+		self._validate_user()
 		self._validate_coordinates()
 
 	def _keep_server_fields(self):
@@ -129,6 +132,32 @@ class Retailer(Document):
 		if "," in self.email or ";" in self.email:
 			frappe.throw(_("Enter a single email address. Received: {0}").format(self.email))
 		validate_email_address(self.email, throw=True)
+
+	def _validate_user(self):
+		"""
+		The login user, when set, is this retailer's alone and never a staff user.
+
+		Re-pointing it is a manager action (the Login Access card); the retailer
+		login APIs run as one. The user's email doubles as the contact email when
+		the retailer has none, so confirmations reach the person who signs in.
+		"""
+		if not self.user:
+			return
+		if not self.is_new() and self.has_value_changed("user") and not (
+			LOGIN_EDIT_ROLES & set(frappe.get_roles())
+		):
+			frappe.throw(_("Only a Sales Manager can change a retailer's login user"), frappe.PermissionError)
+		if self.user in ("Administrator", "Guest"):
+			frappe.throw(_("This user cannot be a retailer login"), frappe.PermissionError)
+		if STAFF_ROLES & set(frappe.get_roles(self.user)):
+			frappe.throw(_("{0} works in Field Sales and cannot be a retailer login").format(self.user))
+		other = frappe.db.get_value("Retailer", {"user": self.user, "name": ("!=", self.name)}, "name")
+		if other:
+			frappe.throw(
+				_("This user is already the login for retailer {0}").format(other), frappe.DuplicateEntryError
+			)
+		if not self.email:
+			self.email = frappe.db.get_value("User", self.user, "email") or None
 
 	def _validate_coordinates(self):
 

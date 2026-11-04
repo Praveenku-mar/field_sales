@@ -2,7 +2,7 @@
   <div>
     <PageHeader :title="d.full_name || d.sales_rep || name" :status="d.name ? d.status : null">
       <template #meta>
-        <span class="text-ink-gray-5">{{ periodLabel }}</span>
+        <span class="text-polaris-secondary">{{ periodLabel }}</span>
       </template>
       <template #actions>
         <template v-if="d.can_manage && d.docstatus === 0">
@@ -13,11 +13,11 @@
       </template>
     </PageHeader>
 
-    <div v-if="statement.error" class="px-5">
+    <div v-if="statement.error" class="px-4 sm:px-6">
       <div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Statement not found" :description="errorText" /></div>
     </div>
 
-    <div v-else class="space-y-4 px-5 pb-6">
+    <div v-else class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8">
       <div class="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <NumberCard label="Total Sales" :value="money(d.total_sales)" :loading="!d.name" />
         <NumberCard label="Slab Rate" :value="d.name ? `${formatNumber(d.slab_rate_applied, 2)}%` : null" :loading="!d.name" />

@@ -7,10 +7,10 @@
     <EmptyState icon="lucide-circle-alert" title="Could not load invoice settings" :description="errorText" />
   </div>
 
-  <div v-else class="fs-card">
+  <div v-else class="fs-card overflow-hidden">
     <!-- Order confirmation -->
-    <section class="p-8">
-      <h3 class="text-base font-medium text-ink-gray-9">Order Confirmation</h3>
+    <section class="p-6 sm:p-8">
+      <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Order Confirmation</h3>
       <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
         <Checkbox
           v-model="d.send_order_confirmation"
@@ -21,9 +21,9 @@
     </section>
 
     <!-- Seller details printed on the tax invoice -->
-    <section class="border-t border-desk-border p-4">
-      <h3 class="text-base font-medium text-ink-gray-9">Company Details</h3>
-      <p class="mt-1 text-sm text-ink-gray-5">Printed as the seller on the tax invoice.</p>
+    <section class="border-t border-[#f1f2f4] p-6 sm:p-8">
+      <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Company Details</h3>
+      <p class="mt-1 text-sm text-polaris-secondary">Printed as the seller on the tax invoice.</p>
       <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
         <TextInput v-model="d.company_name" label="Company Name" />
         <TextInput v-model="d.company_gstin" label="GSTIN" />

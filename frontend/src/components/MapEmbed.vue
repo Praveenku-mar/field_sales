@@ -1,9 +1,9 @@
 <template>
-  <div v-if="hasCoords" class="overflow-hidden rounded-3 border border-desk-border">
+  <div v-if="hasCoords" class="overflow-hidden rounded-xl border border-[#e1e3e5]">
     <iframe :src="src" class="block h-64 w-full border-0" loading="lazy" :title="title" />
-    <div class="flex items-center justify-between bg-surface-gray-1 px-3 py-1.5 text-xs text-ink-gray-5">
+    <div class="flex items-center justify-between border-t border-[#e1e3e5] bg-[#fafafa] px-3.5 py-2 text-xs text-polaris-secondary">
       <span>{{ Number(latitude).toFixed(5) }}, {{ Number(longitude).toFixed(5) }}</span>
-      <a :href="link" target="_blank" rel="noopener" class="hover:underline">Open map ↗</a>
+      <a :href="link" target="_blank" rel="noopener" class="font-medium text-polaris-focus hover:underline">Open map ↗</a>
     </div>
   </div>
   <EmptyState v-else icon="lucide-map-pin-off" title="No location" :description="emptyDescription" />

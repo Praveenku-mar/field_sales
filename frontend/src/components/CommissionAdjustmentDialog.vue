@@ -1,9 +1,12 @@
 <template>
   <Dialog v-model="open" title="New adjustment" size="md" @after-leave="reset">
     <form id="commission-adjustment" class="space-y-4" @submit.prevent="save">
-      <div v-if="error" class="rounded-4 bg-surface-red-2 px-3 py-2 text-sm text-ink-red-7" role="alert">{{ error }}</div>
+      <div v-if="error" class="flex items-center gap-2 rounded-lg border border-[#fed3d1] bg-[#fff4f4] px-4 py-3 text-sm text-[#d72c0d]" role="alert">
+        <span class="lucide-circle-alert size-4 shrink-0 text-[#d72c0d]" />
+        <span>{{ error }}</span>
+      </div>
       <div class="space-y-1.5">
-        <div class="text-sm text-ink-gray-6">Sales Rep <span class="text-ink-red-4">*</span></div>
+        <div class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Sales Rep <span class="text-[#d72c0d]">*</span></div>
         <LinkField
           v-model="form.sales_rep"
           class="w-full"

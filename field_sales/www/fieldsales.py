@@ -8,9 +8,11 @@ from urllib.parse import quote
 import frappe
 from frappe import _
 
+from field_sales.permissions import is_retailer_user
+
 no_cache = 1
 
-APP_ROLES = ("System Manager", "Sales Manager", "Field Sales Rep")
+APP_ROLES = ("System Manager", "Sales Manager", "Field Sales Rep", "Field Sales Retailer")
 
 
 def get_context(context):
@@ -21,8 +23,16 @@ def get_context(context):
 		context.boot = get_boot(embedded)
 		return context
 
+	path = frappe.request.path if frappe.request else ""
+	if _is_login_page(path):
+		# The app's own login screen: guests and signed-in users alike may load the
+		# shell (a signed-in user without an app role can sign in as someone who has one).
+		frappe.db.commit()
+		context.boot = get_boot()
+		return context
+
 	if frappe.session.user == "Guest":
-		_redirect(f"/login?redirect-to={quote(frappe.request.path if frappe.request else '/fieldsales')}")
+		_redirect(f"{_app_base()}/login?redirect-to={quote(path or '/fieldsales')}")
 
 	if not has_app_access():
 		frappe.throw(_("You do not have access to Field Sales"), frappe.PermissionError)
@@ -60,6 +70,9 @@ def get_boot(embedded: dict | None = None) -> dict:
 		boot.update(embedded)
 	else:
 		boot.csrf_token = frappe.sessions.get_csrf_token()
+		# A retailer login starts on My Orders; everyone else on the dashboard.
+		if is_retailer_user():
+			boot.default_route = f"{_app_base()}/my-orders"
 	return boot
 
 
@@ -89,6 +102,11 @@ def _app_base() -> str:
 	"""The path the app was opened under: /fs or /fieldsales."""
 	path = frappe.request.path if frappe.request else ""
 	return "/fs" if path == "/fs" or path.startswith("/fs/") else "/fieldsales"
+
+
+def _is_login_page(path: str) -> bool:
+	"""Whether this request is for the app's own login screen (either base path)."""
+	return path.rstrip("/") in ("/fieldsales/login", "/fs/login")
 
 
 def _redirect(location: str):

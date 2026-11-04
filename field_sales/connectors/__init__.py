@@ -2,12 +2,14 @@
 # For license information, please see license.txt
 
 """
-Connector factory. The only entry point core code may use to reach a store::
+Connector factory. The entry point core code uses to reach a store::
 
 	from field_sales.connectors import get_connector
 
 	result = get_connector().test_connection()
 """
+
+from __future__ import annotations
 
 import frappe
 from frappe import _
@@ -15,23 +17,19 @@ from frappe import _
 from field_sales.connectors.base import BaseConnector, ConnectorError
 from field_sales.connectors.shopify import ShopifyConnector
 
-# WooCommerce / Odoo connectors register here when they are added.
 CONNECTORS: dict[str, type[BaseConnector]] = {
 	"Shopify": ShopifyConnector,
 }
 
-__all__ = ["BaseConnector", "ConnectorError", "get_connector"]
+__all__ = ["BaseConnector", "ConnectorError", "CONNECTORS", "get_connector"]
 
 
-def get_connector(require_enabled: bool = True) -> BaseConnector:
+def get_connector(require_enabled: bool = True) -> ShopifyConnector:
 	"""
-	Return a connector for the platform configured on Store Connection.
+	Return the Shopify connector configured on Store Connection.
 
 	Raises a ``frappe.ValidationError`` if the connection is disabled or the
-	platform has no connector yet.
-
-	:param require_enabled: Pass ``False`` to skip the disabled check, for callers
-		(webhook receiver) that decide for themselves what a disabled connection means.
+	platform is not Shopify.
 	"""
 	settings = frappe.get_single("Store Connection")
 	if require_enabled and not settings.enabled:
@@ -39,6 +37,6 @@ def get_connector(require_enabled: bool = True) -> BaseConnector:
 
 	connector_cls = CONNECTORS.get(settings.platform)
 	if not connector_cls:
-		frappe.throw(_("Platform {0} is not supported yet").format(settings.platform or _("(not set)")))
+		frappe.throw(_("Platform {0} is not supported").format(settings.platform or _("(not set)")))
 
 	return connector_cls(settings)

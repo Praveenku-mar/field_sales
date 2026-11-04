@@ -2,14 +2,14 @@
   <div>
     <PageHeader title="Sync Failures">
       <template #meta>
-        <span class="text-ink-gray-5">{{ total }} record{{ total === 1 ? '' : 's' }} not in the store</span>
+        <span class="text-polaris-secondary">{{ total }} record{{ total === 1 ? '' : 's' }} not in the store</span>
       </template>
       <template #actions>
         <Button icon="lucide-refresh-cw" variant="ghost" @click="refresh" />
       </template>
     </PageHeader>
 
-    <div class="space-y-5 px-5 pb-6">
+    <div class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8">
       <SectionCard :title="`Field Orders (${orders.count.data ?? '…'})`" flush>
         <DataTable
           class="max-h-[60vh]"
@@ -25,10 +25,10 @@
           @load-more="orders.list.next()"
         >
           <template #cell-retailer_name="{ row }">
-            <div class="font-medium text-ink-gray-9">{{ row.retailer_name }}</div>
-            <div class="text-xs text-ink-gray-5">{{ row.name }}</div>
+            <div class="font-medium text-polaris-text">{{ row.retailer_name }}</div>
+            <div class="text-xs text-polaris-secondary">{{ row.name }}</div>
           </template>
-          <template #cell-sync_error="{ value }"><span class="text-ink-red-5">{{ value || 'Sync failed' }}</span></template>
+          <template #cell-sync_error="{ value }"><span class="text-polaris-critical">{{ value || 'Sync failed' }}</span></template>
           <template #cell-actions="{ row }">
             <Button label="Retry" size="sm" :loading="retrying[row.name]" @click.stop="retry('order', row.name)" />
           </template>
@@ -50,10 +50,10 @@
           @load-more="retailers.list.next()"
         >
           <template #cell-retailer_name="{ row }">
-            <div class="font-medium text-ink-gray-9">{{ row.retailer_name }}</div>
-            <div class="text-xs text-ink-gray-5">{{ [row.name, row.city].filter(Boolean).join(' · ') }}</div>
+            <div class="font-medium text-polaris-text">{{ row.retailer_name }}</div>
+            <div class="text-xs text-polaris-secondary">{{ [row.name, row.city].filter(Boolean).join(' · ') }}</div>
           </template>
-          <template #cell-sync_error="{ value }"><span class="text-ink-red-5">{{ value || 'Sync failed' }}</span></template>
+          <template #cell-sync_error="{ value }"><span class="text-polaris-critical">{{ value || 'Sync failed' }}</span></template>
           <template #cell-actions="{ row }">
             <Button label="Retry" size="sm" :loading="retrying[row.name]" @click.stop="retry('retailer', row.name)" />
           </template>

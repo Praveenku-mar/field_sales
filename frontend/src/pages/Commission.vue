@@ -11,7 +11,7 @@
     </PageHeader>
 
     <div
-      class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5"
+      class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6"
       :class="tab === 'mine' && 'overflow-y-auto xl:overflow-hidden'"
     >
       <div class="shrink-0"><TabButtons v-model="tab" :options="tabs" /></div>
@@ -25,11 +25,11 @@
           <NumberCard label="Net" :value="money(summary.data?.net)" :loading="!summary.data" theme="green" />
         </div>
 
-        <div v-if="gap" class="fs-card flex shrink-0 items-center gap-2 px-4 py-3 text-ink-gray-8">
-          <span class="lucide-trending-up size-4 text-ink-gray-6" />
+        <div v-if="gap" class="fs-card flex shrink-0 items-center gap-2.5 px-4 py-3 text-polaris-text bg-[#f9fafb]">
+          <span class="lucide-trending-up size-4 text-polaris-success" />
           <span>
-            <span class="font-medium">{{ formatCurrency(gap.amount, currency, 0) }}</span> more sales this month reaches the
-            <span class="font-medium">{{ gap.rate }}%</span> slab
+            <span class="font-semibold">{{ formatCurrency(gap.amount, currency, 0) }}</span> more sales this month reaches the
+            <span class="font-semibold">{{ gap.rate }}%</span> slab
           </span>
         </div>
 
@@ -76,13 +76,13 @@
             </DataTable>
 
           <SectionCard title="Top Products" class="xl:min-h-0 xl:overflow-y-auto">
-            <ul v-if="summary.data?.top_products?.length" class="divide-y divide-outline-gray-1">
+            <ul v-if="summary.data?.top_products?.length" class="divide-y divide-[#f1f2f4]">
               <li v-for="p in summary.data.top_products" :key="p.product" class="flex items-center justify-between gap-3 py-2">
-                <span class="truncate text-ink-gray-8">{{ p.title || p.product }}</span>
-                <span class="tabular-nums text-ink-gray-9">{{ money(p.commission) }}</span>
+                <span class="truncate text-sm text-polaris-text">{{ p.title || p.product }}</span>
+                <span class="tabular-nums font-medium text-polaris-text">{{ money(p.commission) }}</span>
               </li>
             </ul>
-            <div v-else class="py-4 text-center text-ink-gray-5">No products yet</div>
+            <div v-else class="py-4 text-center text-xs text-polaris-secondary">No products yet</div>
           </SectionCard>
         </div>
       </template>

@@ -1,18 +1,18 @@
 <template>
-  <div class="flex flex-wrap items-center gap-2">
+  <div class="flex flex-wrap items-center gap-2.5">
     <TextInput
       v-model="search"
-      class="w-60"
+      class="w-full sm:w-64"
       type="text"
       :placeholder="searchPlaceholder"
       :debounce="300"
     >
-      <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+      <template #prefix><span class="lucide-search size-4 text-polaris-subdued" /></template>
     </TextInput>
     <!-- Beside the search box, e.g. a barcode scan button -->
     <slot name="search-actions" />
     <TabButtons v-if="tabs.length" v-model="tab" :options="tabs" />
-    <div v-for="field in fields" :key="field.fieldname" class="w-40">
+    <div v-for="field in fields" :key="field.fieldname" class="w-full sm:w-44">
       <FormControl
         v-model="values[field.fieldname]"
         :type="field.type || 'select'"

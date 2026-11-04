@@ -6,7 +6,7 @@
         <Button v-if="session.isManager" label="New Sales Rep" icon-left="lucide-plus" variant="solid" @click="newRepOpen = true" />
       </template>
     </PageHeader>
-    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
       <ListFilters v-model="model" search-placeholder="Search name, email, territory" :tabs="tabs" :fields="fields" />
       <DataTable
         :columns="columns"
@@ -24,14 +24,14 @@
           <div class="flex items-center gap-2.5">
             <Avatar :label="row.full_name || row.name" :image="row.user_image" size="md" />
             <div class="min-w-0">
-              <div class="truncate font-medium text-ink-gray-9">{{ row.full_name || row.name }}</div>
-              <div class="truncate text-xs text-ink-gray-5">{{ row.name }}</div>
+              <div class="truncate font-medium text-polaris-text">{{ row.full_name || row.name }}</div>
+              <div class="truncate text-xs text-polaris-secondary">{{ row.name }}</div>
             </div>
           </div>
         </template>
         <template #cell-order_value="{ row }">
-          <span class="tabular-nums">{{ stat(row, 'order_value') == null ? '—' : formatCurrency(stat(row, 'order_value'), undefined, 0) }}</span>
-          <div class="text-xs text-ink-gray-5">{{ plural(stat(row, 'orders') || 0, 'order') }}</div>
+          <span class="tabular-nums font-medium text-polaris-text">{{ stat(row, 'order_value') == null ? '—' : formatCurrency(stat(row, 'order_value'), undefined, 0) }}</span>
+          <div class="text-xs text-polaris-secondary">{{ plural(stat(row, 'orders') || 0, 'order') }}</div>
         </template>
         <template #cell-achievement="{ row }">
           <Achievement :pct="stat(row, 'achievement_pct')" />

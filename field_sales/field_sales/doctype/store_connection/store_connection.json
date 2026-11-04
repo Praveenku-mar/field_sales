@@ -22,16 +22,6 @@
   "installed_on",
   "uninstalled_on",
   "embedded_user",
-  "woocommerce_section",
-  "woo_consumer_key",
-  "col_break_woo",
-  "woo_consumer_secret",
-  "woo_api_version",
-  "odoo_section",
-  "odoo_database",
-  "col_break_odoo",
-  "odoo_username",
-  "odoo_api_key",
   "token_section",
   "access_token",
   "refresh_token",
@@ -84,7 +74,8 @@
    "fieldname": "platform",
    "fieldtype": "Select",
    "label": "Platform",
-   "options": "\nShopify\nWooCommerce\nOdoo",
+   "default": "Shopify",
+   "options": "Shopify",
    "reqd": 1
   },
   {
@@ -101,7 +92,7 @@
    "fieldtype": "Data",
    "label": "Store URL",
    "reqd": 1,
-   "description": "Shopify: kovai-mart.myshopify.com · WooCommerce: https://shop.com · Odoo: https://company.odoo.com",
+   "description": "Shopify: store.myshopify.com",
    "read_only_depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
   },
   {
@@ -174,68 +165,6 @@
    "description": "Requests from inside the Shopify admin run as this user. Left empty, shopify-admin@<site> is created on first use (Sales Manager, with its own Sales Rep)."
   },
   {
-   "fieldname": "woocommerce_section",
-   "fieldtype": "Section Break",
-   "label": "WooCommerce Credentials",
-   "depends_on": "eval:doc.platform=='WooCommerce'"
-  },
-  {
-   "fieldname": "woo_consumer_key",
-   "fieldtype": "Data",
-   "label": "Consumer Key",
-   "depends_on": "eval:doc.platform=='WooCommerce'",
-   "mandatory_depends_on": "eval:doc.platform=='WooCommerce'"
-  },
-  {
-   "fieldname": "col_break_woo",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "woo_consumer_secret",
-   "fieldtype": "Password",
-   "label": "Consumer Secret",
-   "depends_on": "eval:doc.platform=='WooCommerce'",
-   "mandatory_depends_on": "eval:doc.platform=='WooCommerce'"
-  },
-  {
-   "fieldname": "woo_api_version",
-   "fieldtype": "Data",
-   "label": "API Version",
-   "default": "wc/v3",
-   "depends_on": "eval:doc.platform=='WooCommerce'"
-  },
-  {
-   "fieldname": "odoo_section",
-   "fieldtype": "Section Break",
-   "label": "Odoo Credentials",
-   "depends_on": "eval:doc.platform=='Odoo'"
-  },
-  {
-   "fieldname": "odoo_database",
-   "fieldtype": "Data",
-   "label": "Database",
-   "depends_on": "eval:doc.platform=='Odoo'",
-   "mandatory_depends_on": "eval:doc.platform=='Odoo'"
-  },
-  {
-   "fieldname": "col_break_odoo",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "odoo_username",
-   "fieldtype": "Data",
-   "label": "Username",
-   "depends_on": "eval:doc.platform=='Odoo'",
-   "mandatory_depends_on": "eval:doc.platform=='Odoo'"
-  },
-  {
-   "fieldname": "odoo_api_key",
-   "fieldtype": "Password",
-   "label": "API Key",
-   "depends_on": "eval:doc.platform=='Odoo'",
-   "mandatory_depends_on": "eval:doc.platform=='Odoo'"
-  },
-  {
    "fieldname": "token_section",
    "fieldtype": "Section Break",
    "label": "Token",
@@ -283,7 +212,7 @@
    "fieldname": "default_location_id",
    "fieldtype": "Data",
    "label": "Default Location ID",
-   "description": "Shopify location / Odoo warehouse ID; leave blank for WooCommerce"
+   "description": "Shopify location to sell from (must match a location marked Sell from here below)"
   },
   {
    "fieldname": "col_break_defaults",

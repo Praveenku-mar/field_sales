@@ -38,7 +38,7 @@
    "fieldname": "platform",
    "fieldtype": "Select",
    "label": "Platform",
-   "options": "Shopify\nWooCommerce\nOdoo\nRazorpay",
+   "options": "Shopify\nRazorpay",
    "reqd": 1,
    "in_list_view": 1,
    "in_standard_filter": 1

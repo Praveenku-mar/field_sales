@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader :title="d.retailer_name || name" :status="d.name ? statusLabel : null">
-      <template #meta><span class="text-ink-gray-5">{{ name }}</span></template>
+      <template #meta><span class="text-polaris-secondary">{{ name }}</span></template>
       <template #actions>
         <Button
           v-if="session.isManager"
@@ -17,9 +17,9 @@
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Customer not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Customer not found" :description="errorText" /></div></div>
 
-    <div v-else class="grid grid-cols-1 gap-5 px-5 pb-6 xl:grid-cols-3">
+    <div v-else class="grid grid-cols-1 gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-3">
       <div class="space-y-5 xl:col-span-2">
         <SectionCard title="Details">
           <InfoGrid :items="details" :columns="3" />
@@ -45,25 +45,33 @@
       <div class="space-y-5">
         <SectionCard title="Last 30 Days">
           <div class="grid grid-cols-3 gap-3 text-center">
-            <div><div class="text-xl font-semibold tabular-nums">{{ summary.data?.visits_30d ?? '—' }}</div><div class="text-xs text-ink-gray-5">Visits</div></div>
-            <div><div class="text-xl font-semibold tabular-nums">{{ summary.data?.orders_30d ?? '—' }}</div><div class="text-xs text-ink-gray-5">Orders</div></div>
-            <div><div class="truncate text-xl font-semibold tabular-nums">{{ summary.data ? formatCurrency(summary.data.value_30d, undefined, 0) : '—' }}</div><div class="text-xs text-ink-gray-5">Value</div></div>
+            <div><div class="text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ summary.data?.visits_30d ?? '—' }}</div><div class="text-xs text-polaris-secondary">Visits</div></div>
+            <div><div class="text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ summary.data?.orders_30d ?? '—' }}</div><div class="text-xs text-polaris-secondary">Orders</div></div>
+            <div><div class="truncate text-xl sm:text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ summary.data ? formatCurrency(summary.data.value_30d, undefined, 0) : '—' }}</div><div class="text-xs text-polaris-secondary">Value</div></div>
           </div>
-          <div class="mt-4 border-t border-desk-border pt-3 text-sm">
-            <span class="text-ink-gray-5">Last visit: </span>
+          <div class="mt-4 border-t border-[#f1f2f4] pt-3 text-sm">
+            <span class="text-polaris-secondary">Last visit: </span>
             <span :class="lastVisitClass">{{ d.last_visit ? `${relativeDay(d.last_visit)} (${formatDate(d.last_visit)})` : 'Never' }}</span>
           </div>
         </SectionCard>
 
-        <SectionCard title="Store Sync">
+        <SectionCard title="Shopify Customer Sync">
           <template #actions>
-            <Button v-if="canWrite && ['Draft', 'Failed'].includes(d.sync_status)" label="Sync to Store" size="sm" :loading="syncing" @click="syncToStore" />
+            <Button v-if="canWrite && ['Draft', 'Failed'].includes(d.sync_status)" label="Sync to Shopify" size="sm" :loading="syncing" @click="syncToStore" />
           </template>
           <InfoGrid :items="syncInfo" :columns="1" />
-          <div v-if="d.sync_error" class="mt-3 rounded-3 px-3 py-2 text-sm" :class="d.sync_status === 'Failed' ? 'bg-surface-red-1 text-ink-red-5' : 'bg-surface-amber-1 text-ink-amber-7'">
+          <div v-if="d.sync_error" class="mt-3 rounded-lg border px-3 py-2 text-sm" :class="d.sync_status === 'Failed' ? 'bg-[#fde8e8] text-[#9b1c1c] border-[#f8b4b4]' : 'bg-[#fef3d6] text-[#744210] border-[#fbd88e]'">
             {{ d.sync_error }}
           </div>
         </SectionCard>
+
+        <!-- Managers only: invite the customer into the app's My Orders view. -->
+        <RetailerLoginCard
+          v-if="session.isManager"
+          :retailer="name"
+          :fallback-email="d.email || ''"
+          @updated="doc.reload()"
+        />
       </div>
     </div>
 
@@ -86,6 +94,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import RetailerDialog from '@/components/RetailerDialog.vue'
 import NewOrderDialog from '@/components/NewOrderDialog.vue'
+import RetailerLoginCard from '@/components/RetailerLoginCard.vue'
 import { useSessionStore } from '@/stores/session'
 import { callMethod } from '@/utils/api'
 import { daysAgo, formatCurrency, formatDate, formatDateTime, orderStatus, relativeDay, today } from '@/utils/format'
@@ -148,13 +157,13 @@ const address = computed(() => [
 ])
 const syncInfo = computed(() => [
   { label: 'Status', value: d.value.sync_status || 'Draft' },
-  { label: 'Platform', value: d.value.platform },
-  { label: 'Store customer ID', value: d.value.external_customer_id },
+  { label: 'Platform', value: d.value.platform || 'Shopify' },
+  { label: 'Shopify Customer ID', value: d.value.external_customer_id },
   { label: 'Last synced', value: d.value.last_synced ? formatDateTime(d.value.last_synced) : null },
 ])
 const lastVisitClass = computed(() => {
   const days = daysAgo(d.value.last_visit)
-  return days === null || days > 30 ? 'text-ink-red-5' : days > 7 ? 'text-ink-amber-7' : 'text-ink-gray-9'
+  return days === null || days > 30 ? 'text-polaris-critical' : days > 7 ? 'text-polaris-attention' : 'text-polaris-text'
 })
 
 const visitColumns = [

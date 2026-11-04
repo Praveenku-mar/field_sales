@@ -1,7 +1,10 @@
 <template>
   <Dialog v-model="open" :title="isEdit ? `Edit plan: ${form.plan_name}` : 'New Commission Plan'" size="3xl">
     <form id="commission-plan" class="space-y-6" @submit.prevent="save">
-      <div v-if="error" class="rounded-4 bg-surface-red-2 px-3 py-2 text-sm text-ink-red-7" role="alert">{{ error }}</div>
+      <div v-if="error" class="flex items-center gap-2 rounded-lg border border-[#fed3d1] bg-[#fff4f4] px-4 py-3 text-sm text-[#d72c0d]" role="alert">
+        <span class="lucide-circle-alert size-4 shrink-0 text-[#d72c0d]" />
+        <span>{{ error }}</span>
+      </div>
 
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2">
         <FormControl v-model="form.plan_name" label="Plan Name" required :disabled="isEdit" />
@@ -10,8 +13,8 @@
         <div class="flex items-end pb-1"><Switch v-model="form.is_active" label="Active" /></div>
       </section>
 
-      <section class="space-y-4">
-        <h3 class="text-base font-medium text-ink-gray-9">Rule</h3>
+      <section class="border-t border-[#f1f2f4] pt-4 space-y-4">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Commission Rule</h3>
 
         <FormControl
           v-if="form.rule_type === 'Flat %'"
@@ -34,7 +37,7 @@
             class="md:w-1/2"
           />
           <div class="space-y-2">
-            <div class="text-sm text-ink-gray-6">Rates (the most specific match wins: product, then collection, then tag)</div>
+            <div class="text-xs text-polaris-secondary font-medium">Rates (the most specific match wins: product, then collection, then tag)</div>
             <div v-for="(row, i) in form.rates" :key="i" class="grid grid-cols-[150px_minmax(0,1fr)_90px_32px] items-start gap-2">
               <FormControl v-model="row.match_type" type="select" :options="MATCH_TYPES" aria-label="Match type" @update:model-value="clearMatch(row)" />
               <LinkField
@@ -74,7 +77,7 @@
             class="md:w-1/2"
           />
           <div class="space-y-2">
-            <div class="text-sm text-ink-gray-6">Slabs (by the month's total sales; To = 0 means no limit)</div>
+            <div class="text-xs text-polaris-secondary font-medium">Slabs (by the month's total sales; To = 0 means no limit)</div>
             <div v-for="(row, i) in form.slabs" :key="i" class="grid grid-cols-[repeat(3,minmax(0,1fr))_32px] items-start gap-2">
               <FormControl v-model.number="row.from_amount" type="number" min="0" placeholder="From" aria-label="From amount" />
               <FormControl v-model.number="row.to_amount" type="number" min="0" placeholder="To (0 = no limit)" aria-label="To amount" />
@@ -97,7 +100,7 @@
         />
       </section>
 
-      <section class="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <section class="border-t border-[#f1f2f4] pt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <FormControl
           v-model.number="form.penalty_factor"
           label="Discount Penalty Factor"

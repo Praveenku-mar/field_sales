@@ -12,8 +12,8 @@
     <div
       v-if="testResult"
       role="status"
-      class="flex items-start gap-2.5 rounded-3 border px-4 py-3 text-sm"
-      :class="testResult.ok ? 'border-outline-green-2 bg-surface-green-1 text-ink-green-7' : 'border-outline-red-2 bg-surface-red-1 text-ink-red-6'"
+      class="flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm"
+      :class="testResult.ok ? 'border-[#aee8cb] bg-[#e4f6ed] text-[#0d5936]' : 'border-[#f8b4b4] bg-[#fde8e8] text-[#9b1c1c]'"
     >
       <span :class="[testResult.ok ? 'lucide-circle-check' : 'lucide-circle-x', 'mt-0.5 size-4 shrink-0']" aria-hidden="true" />
       <p class="min-w-0 flex-1 break-words">
@@ -22,7 +22,7 @@
       </p>
       <button
         type="button"
-        class="flex shrink-0 rounded-3 p-0.5 opacity-70 hover:opacity-100"
+        class="flex shrink-0 rounded p-0.5 opacity-70 hover:opacity-100"
         aria-label="Dismiss"
         @click="testResult = null"
       >
@@ -34,7 +34,7 @@
     <div
       v-if="locked"
       role="note"
-      class="flex items-start gap-2.5 rounded-3 border border-outline-blue-2 bg-surface-blue-1 px-4 py-3 text-sm text-ink-blue-7"
+      class="flex items-start gap-2.5 rounded-xl border border-[#bae6fd] bg-[#e0f2fe] px-4 py-3 text-sm text-[#0369a1]"
     >
       <span class="lucide-circle-info mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <p class="min-w-0 flex-1 break-words">
@@ -45,10 +45,10 @@
       </p>
     </div>
 
-    <div class="fs-card">
+    <div class="fs-card overflow-hidden">
       <!-- Connection -->
-      <section class="p-8">
-        <h3 class="text-base font-medium text-ink-gray-9">Connection</h3>
+      <section class="p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Connection</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <Checkbox
             v-model="d.enabled"

@@ -1,35 +1,35 @@
 <template>
   <div class="fs-card overflow-hidden">
-    <header class="flex flex-wrap items-center justify-between gap-2 border-b border-desk-border px-4 py-3">
+    <header class="flex flex-wrap items-center justify-between gap-3 border-b border-[#f1f2f4] px-4 sm:px-6 py-4 bg-white">
       <div>
-        <h3 class="text-base font-medium text-ink-gray-9">Outgoing Email</h3>
-        <p class="text-sm text-ink-gray-5">Sends rep invites, password resets and the daily manager summary.</p>
+        <h3 class="text-sm font-semibold text-polaris-text">Outgoing Email</h3>
+        <p class="mt-0.5 text-xs text-polaris-secondary">Sends rep invites, password resets and the daily manager summary.</p>
       </div>
       <Button variant="solid" label="New Email Account" icon-left="lucide-plus" @click="openForm()" />
     </header>
 
     <ErrorMessage v-if="accounts.list.error" class="px-4 pt-3" :message="accounts.list.error" />
 
-    <div v-if="accounts.list.loading && !accounts.data" class="flex justify-center py-12 text-ink-gray-5">
+    <div v-if="accounts.list.loading && !accounts.data" class="flex justify-center py-12 text-polaris-secondary">
       <LoadingIndicator class="size-5" />
     </div>
-    <ul v-else-if="accounts.data?.length" class="divide-y divide-desk-border">
+    <ul v-else-if="accounts.data?.length" class="divide-y divide-[#f1f2f4]">
       <li v-for="a in accounts.data" :key="a.name">
         <button
           type="button"
-          class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-surface-gray-1 focus-visible:bg-surface-gray-1 focus-visible:outline-none"
+          class="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors duration-100 hover:bg-[#f9fafb] focus-visible:outline-none"
           @click="openForm(a)"
         >
-          <span class="lucide-mail size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
+          <span class="lucide-mail size-4 shrink-0 text-polaris-secondary" aria-hidden="true" />
           <span class="min-w-0 flex-1">
-            <span class="block truncate font-medium text-ink-gray-9">{{ a.email_id }}</span>
-            <span class="block truncate text-xs text-ink-gray-5">
+            <span class="block truncate font-medium text-polaris-text">{{ a.email_id }}</span>
+            <span class="block truncate text-xs text-polaris-secondary">
               {{ [a.name !== a.email_id ? a.name : null, a.service || 'Custom', a.smtp_server].filter(Boolean).join(' · ') }}
             </span>
           </span>
-          <Badge v-if="a.default_outgoing" theme="blue" label="Default" />
-          <Badge :theme="a.enable_outgoing ? 'green' : 'gray'" :label="a.enable_outgoing ? 'Enabled' : 'Disabled'" />
-          <span class="lucide-chevron-right size-4 shrink-0 text-ink-gray-4" aria-hidden="true" />
+          <StatusPill v-if="a.default_outgoing" status="Planned" label="Default" />
+          <StatusPill :status="a.enable_outgoing ? 'Active' : 'Inactive'" :label="a.enable_outgoing ? 'Enabled' : 'Disabled'" />
+          <span class="lucide-chevron-right size-4 shrink-0 text-polaris-subdued" aria-hidden="true" />
         </button>
       </li>
     </ul>
@@ -134,6 +134,7 @@ import {
 import { isEmbedded } from '@/shopify/embedded'
 import { createMerchantEmailAccounts, saveMerchantEmailAccountUrl } from '@/shopify/merchantSettings'
 import EmptyState from './EmptyState.vue'
+import StatusPill from './StatusPill.vue'
 import { callMethod } from '@/utils/api'
 
 // Outgoing (SMTP, password sign-in) accounts only. Incoming mail, OAuth and Frappe Mail need

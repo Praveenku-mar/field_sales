@@ -13,8 +13,8 @@
     <div
       v-if="testBanner"
       role="status"
-      class="flex items-start gap-2.5 rounded-3 border px-4 py-3 text-sm"
-      :class="testBanner.ok ? 'border-outline-green-2 bg-surface-green-1 text-ink-green-7' : 'border-outline-red-2 bg-surface-red-1 text-ink-red-6'"
+      class="flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm"
+      :class="testBanner.ok ? 'border-[#aee8cb] bg-[#e4f6ed] text-[#0d5936]' : 'border-[#f8b4b4] bg-[#fde8e8] text-[#9b1c1c]'"
     >
       <span :class="[testBanner.ok ? 'lucide-circle-check' : 'lucide-circle-x', 'mt-0.5 size-4 shrink-0']" aria-hidden="true" />
       <p class="min-w-0 flex-1">
@@ -23,7 +23,7 @@
       </p>
       <button
         type="button"
-        class="flex shrink-0 rounded-3 p-0.5 opacity-70 hover:opacity-100"
+        class="flex shrink-0 rounded p-0.5 opacity-70 hover:opacity-100"
         aria-label="Dismiss"
         @click="testBanner = null"
       >
@@ -31,10 +31,10 @@
       </button>
     </div>
 
-    <div class="fs-card">
+    <div class="fs-card overflow-hidden">
       <!-- Inside the Shopify admin the install owns the connection: no platform, URL or credentials -->
-      <section v-if="embedded" class="p-8">
-        <h3 class="text-base font-medium text-ink-gray-9">Connected shop</h3>
+      <section v-if="embedded" class="p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Connected shop</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <TextInput :model-value="d.shop_name ? `${d.shop_name} (${d.store_url})` : d.store_url" label="Shop" disabled />
           <TextInput :model-value="formatDateTime(d.installed_on)" label="Installed On" disabled />
@@ -47,8 +47,8 @@
         </div>
       </section>
       <!-- Connection -->
-      <section v-if="!embedded" class="p-8">
-        <h3 class="text-base font-medium text-ink-gray-9">Connection</h3>
+      <section v-if="!embedded" class="p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Connection</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <Select v-model="d.platform" :options="PLATFORMS" label="Platform" required placeholder="Select platform" />
           <TextInput
@@ -56,7 +56,7 @@
             label="Shop Domain"
             placeholder="kovai-mart.myshopify.com"
             required
-            description="Shopify: kovai-mart.myshopify.com · WooCommerce: https://shop.com · Odoo: https://company.odoo.com"
+            description="Shopify: kovai-mart.myshopify.com"
           />
           <Checkbox
             v-model="d.enabled"
@@ -67,10 +67,10 @@
       </section>
 
       <!-- Credentials -->
-      <section v-if="!embedded" class="border-t border-desk-border p-4">
+      <section v-if="!embedded" class="border-t border-[#f1f2f4] p-6 sm:p-8">
         <div class="flex items-center justify-between gap-2">
-          <h3 class="text-base font-medium text-ink-gray-9">Credentials</h3>
-          <span class="inline-flex items-center gap-1.5 text-xs text-ink-gray-5">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Credentials</h3>
+          <span class="inline-flex items-center gap-1.5 text-xs text-polaris-secondary">
             <span class="lucide-lock size-3.5" />
             Stored encrypted
           </span>
@@ -82,7 +82,7 @@
             <template #suffix>
               <button
                 type="button"
-                class="flex size-5 items-center justify-center rounded text-ink-gray-5 hover:text-ink-gray-8"
+                class="flex size-5 items-center justify-center rounded text-polaris-secondary hover:text-polaris-text"
                 aria-label="Copy Client ID"
                 title="Copy"
                 @click="copyClientId"
@@ -104,75 +104,35 @@
           <Select v-model="d.shopify_api_version" :options="apiVersions" label="API Version" />
         </div>
 
-        <!-- WooCommerce -->
-        <div v-else-if="d.platform === 'WooCommerce'" class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
-          <TextInput v-model="d.woo_consumer_key" label="Consumer Key" required />
-          <TextInput
-            v-model="d.woo_consumer_secret"
-            :type="secretsShown.woo_consumer_secret ? 'text' : 'password'"
-            label="Consumer Secret"
-            required
-            description="Stored encrypted — the masked value is kept unless you type a new secret"
-          >
-            <template #suffix><SecretToggle field="woo_consumer_secret" /></template>
-          </TextInput>
-          <TextInput v-model="d.woo_api_version" label="API Version" placeholder="wc/v3" />
-        </div>
-
-        <!-- Odoo -->
-        <div v-else-if="d.platform === 'Odoo'" class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
-          <TextInput v-model="d.odoo_database" label="Database" required />
-          <TextInput v-model="d.odoo_username" label="Username" required />
-          <TextInput
-            v-model="d.odoo_api_key"
-            :type="secretsShown.odoo_api_key ? 'text' : 'password'"
-            label="API Key"
-            required
-            description="Stored encrypted — the masked value is kept unless you type a new key"
-          >
-            <template #suffix><SecretToggle field="odoo_api_key" /></template>
-          </TextInput>
-        </div>
-
         <div class="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button
             variant="outline"
             label="Test Connection"
             icon-left="lucide-cable"
             :loading="testing"
-            :disabled="d.platform !== 'Shopify'"
+            :disabled="!d.platform"
             @click="testConnection"
           />
-          <p v-if="d.platform && d.platform !== 'Shopify'" class="text-sm text-ink-gray-5">
-            Live calls support Shopify connections only (for now)
-          </p>
-          <p v-else-if="status" class="inline-flex items-center gap-1.5 text-sm">
+          <p v-if="status" class="inline-flex items-center gap-1.5 text-sm">
             <span
-              :class="[status.ok ? 'lucide-circle-check text-ink-green-7' : 'lucide-circle-x text-ink-red-5', 'size-4 shrink-0']"
+              :class="[status.ok ? 'lucide-circle-check text-polaris-success' : 'lucide-circle-x text-polaris-critical', 'size-4 shrink-0']"
             />
-            <span :class="status.ok ? 'text-ink-gray-6' : 'text-ink-red-5'">{{ status.text }}</span>
+            <span :class="status.ok ? 'text-polaris-secondary' : 'text-polaris-critical'">{{ status.text }}</span>
           </p>
         </div>
       </section>
 
       <!-- Defaults -->
-      <section class="border-t border-desk-border p-4">
-        <h3 class="text-base font-medium text-ink-gray-9">Defaults</h3>
+      <section class="border-t border-[#f1f2f4] p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Defaults</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <Select
-            v-if="d.platform === 'Shopify'"
             :model-value="d.default_location_id"
             :options="locationOptions"
             label="Default Location"
             required
             description="Stock is checked against this Shopify location unless an order picks another"
             @update:model-value="setLocation"
-          />
-          <TextInput
-            v-else
-            v-model="d.default_location_id"
-            label="Default Location ID"
-            description="Odoo warehouse ID; leave blank for WooCommerce"
           />
           <TextInput :model-value="d.default_location_name" label="Default Location Name" disabled />
           <Select v-model="d.order_mode" :options="ORDER_MODES" label="Create Shopify Order As" />
@@ -181,34 +141,34 @@
       </section>
 
       <!-- Locations: the places reps can sell from. Saved with the form. -->
-      <section class="border-t border-desk-border p-4">
-        <h3 class="text-base font-medium text-ink-gray-9">Locations</h3>
-        <p class="mt-1 text-sm text-ink-gray-5">
+      <section class="border-t border-[#f1f2f4] p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Locations</h3>
+        <p class="mt-1 text-sm text-polaris-secondary">
           Reps pick one of the ticked locations on each order, and its stock is kept in sync. Use Fetch Locations to
           load them from the store.
         </p>
-        <div v-if="!locationRows.length" class="mt-4 text-sm text-ink-gray-5">No locations yet</div>
-        <div v-else class="mt-4 overflow-x-auto rounded-3 border border-desk-border">
-          <table class="w-full text-left">
+        <div v-if="!locationRows.length" class="mt-4 text-sm text-polaris-secondary">No locations yet</div>
+        <div v-else class="mt-4 overflow-x-auto rounded-xl border border-[#e1e3e5]">
+          <table class="w-full text-left border-collapse">
             <thead>
-              <tr class="border-b border-desk-border bg-surface-gray-1 text-xs font-medium text-ink-gray-5">
-                <th class="px-4 py-2">Name</th>
-                <th class="px-4 py-2">ID</th>
-                <th class="px-4 py-2 text-right">Sell from here</th>
+              <tr class="border-b border-[#e1e3e5] bg-[#fafafa] text-xs font-semibold uppercase tracking-wider text-polaris-secondary">
+                <th class="px-4 py-3">Name</th>
+                <th class="px-4 py-3">ID</th>
+                <th class="px-4 py-3 text-right">Sell from here</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in locationRows" :key="row.location_id" class="border-b border-desk-border last:border-0">
-                <td class="px-4 py-2.5 text-ink-gray-9">
+              <tr v-for="row in locationRows" :key="row.location_id" class="border-b border-[#f1f2f4] transition-colors duration-100 last:border-0 hover:bg-[#f9fafb]">
+                <td class="px-4 py-3 text-sm text-polaris-text">
                   {{ row.location_name || row.location_id }}
                   <span
                     v-if="row.location_id === d.default_location_id"
-                    class="ml-2 rounded-3 bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-7"
+                    class="ml-2 rounded-md border border-[#aee8cb] bg-[#e4f6ed] px-2 py-0.5 text-xs font-semibold text-[#0d5936]"
                   >Default</span>
-                  <span v-else-if="missingFromStore(row)" class="ml-2 text-xs text-ink-amber-7">Not returned by the store</span>
+                  <span v-else-if="missingFromStore(row)" class="ml-2 text-xs font-medium text-polaris-attention">Not returned by the store</span>
                 </td>
-                <td class="px-4 py-2.5 font-mono text-xs text-ink-gray-6">{{ row.location_id }}</td>
-                <td class="px-4 py-2.5">
+                <td class="px-4 py-3 font-mono text-xs text-polaris-secondary">{{ row.location_id }}</td>
+                <td class="px-4 py-3">
                   <div class="flex justify-end">
                     <Checkbox
                       :model-value="!!row.sell_from"
@@ -225,8 +185,8 @@
       </section>
 
       <!-- Status -->
-      <section v-if="!embedded" class="border-t border-desk-border p-4">
-        <h3 class="text-base font-medium text-ink-gray-9">Status</h3>
+      <section v-if="!embedded" class="border-t border-[#f1f2f4] p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Status</h3>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <TextInput :model-value="d.shop_name" label="Shop Name" disabled />
           <TextInput :model-value="d.last_test_status" label="Last Test Status" disabled />
@@ -314,7 +274,7 @@ const SecretToggle = defineComponent({
   },
 })
 
-const PLATFORMS = ['Shopify', 'WooCommerce', 'Odoo'].map((v) => ({ label: v, value: v }))
+const PLATFORMS = [{ label: 'Shopify', value: 'Shopify' }]
 const ORDER_MODES = [
   { label: 'Draft Order', value: 'Draft' },
   { label: 'Confirmed Order', value: 'Confirmed' },

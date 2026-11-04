@@ -1,14 +1,17 @@
 <template>
   <Dialog v-model="open" title="Generate statements" size="md" @after-leave="reset">
     <form id="generate-statements" class="space-y-4" @submit.prevent="generate">
-      <p class="text-sm text-ink-gray-6">
+      <p class="text-sm text-polaris-secondary">
         Drafts a statement for each rep with open commission entries up to the end of the month. Reps who already have
         one for the month are skipped.
       </p>
-      <div v-if="error" class="rounded-4 bg-surface-red-2 px-3 py-2 text-sm text-ink-red-7" role="alert">{{ error }}</div>
+      <div v-if="error" class="flex items-center gap-2 rounded-lg border border-[#fed3d1] bg-[#fff4f4] px-4 py-3 text-sm text-[#d72c0d]" role="alert">
+        <span class="lucide-circle-alert size-4 shrink-0 text-[#d72c0d]" />
+        <span>{{ error }}</span>
+      </div>
       <FormControl v-model="form.month" type="select" label="Month" :options="months" />
       <div class="space-y-1.5">
-        <div class="text-sm text-ink-gray-6">Sales Rep</div>
+        <div class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Sales Rep</div>
         <LinkField
           v-model="form.sales_rep"
           class="w-full"
@@ -18,7 +21,7 @@
           :search-fields="['full_name', 'name', 'territory']"
           placeholder="All commission-active reps"
         />
-        <button v-if="form.sales_rep" type="button" class="text-xs text-ink-gray-6 underline" @click="form.sales_rep = null">
+        <button v-if="form.sales_rep" type="button" class="text-xs font-medium text-polaris-blue hover:underline" @click="form.sales_rep = null">
           Clear (all reps)
         </button>
       </div>

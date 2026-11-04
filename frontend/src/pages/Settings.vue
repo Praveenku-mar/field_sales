@@ -39,7 +39,7 @@
         />
       </template>
     </PageHeader>
-    <div class="px-5 pb-5">
+    <div class="px-4 sm:px-6 pb-6 sm:pb-8">
       <ShopifyPlanCard v-if="tab === 'store' && session.isManager" class="mb-4" />
       <!-- Sales Managers may also edit Razorpay; the other tabs are System Manager only -->
       <RazorpaySettings v-if="tab === 'razorpay' && canEdit" ref="razorpayForm" />

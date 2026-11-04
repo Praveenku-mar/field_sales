@@ -2,28 +2,28 @@
   <div>
     <PageHeader title="Notifications">
       <template #meta>
-        <span v-if="unread" class="text-ink-gray-5">{{ unread }} unread</span>
+        <span v-if="unread" class="text-polaris-secondary">{{ unread }} unread</span>
       </template>
       <template #actions>
         <Button label="Mark all as read" icon-left="lucide-check-check" :disabled="!unread" :loading="markingAll" @click="markAll" />
       </template>
     </PageHeader>
 
-    <div class="px-5 pb-6">
+    <div class="px-4 sm:px-6 pb-6 sm:pb-8">
       <SectionCard flush>
         <div v-if="list.loading && !rows.length" class="flex justify-center py-16"><LoadingIndicator class="size-5" /></div>
         <EmptyState v-else-if="!rows.length" icon="lucide-bell" title="No notifications" description="Mentions, assignments and alerts for you show up here." />
-        <ul v-else class="divide-y divide-outline-gray-1">
+        <ul v-else class="divide-y divide-[#f1f2f4]">
           <li v-for="row in rows" :key="row.name">
-            <button type="button" class="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-surface-gray-1" @click="open(row)">
-              <span class="mt-1.5 size-2 shrink-0 rounded-full" :class="row.read ? 'bg-transparent' : 'bg-surface-red-5'" />
+            <button type="button" class="flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors duration-100 hover:bg-[#f9fafb]" @click="open(row)">
+              <span class="mt-1.5 size-2 shrink-0 rounded-full" :class="row.read ? 'bg-transparent' : 'bg-[#005bd3]'" />
               <div class="min-w-0 flex-1">
-                <div class="line-clamp-2" :class="row.read ? 'text-ink-gray-6' : 'font-medium text-ink-gray-9'">{{ row.subject }}</div>
-                <div class="mt-0.5 text-xs text-ink-gray-5">
+                <div class="line-clamp-2" :class="row.read ? 'text-polaris-secondary' : 'font-semibold text-polaris-text'">{{ row.subject }}</div>
+                <div class="mt-0.5 text-xs text-polaris-subdued">
                   {{ [row.from_user, row.document_type && row.document_name ? `${row.document_type} ${row.document_name}` : null].filter(Boolean).join(' · ') }}
                 </div>
               </div>
-              <span class="shrink-0 text-xs text-ink-gray-5">{{ dayjs(row.creation).fromNow() }}</span>
+              <span class="shrink-0 text-xs text-polaris-subdued">{{ dayjs(row.creation).fromNow() }}</span>
             </button>
           </li>
         </ul>

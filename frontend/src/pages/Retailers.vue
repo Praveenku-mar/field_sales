@@ -6,7 +6,7 @@
         <Button label="New Customer" icon-left="lucide-plus" variant="solid" @click="newRetailerOpen = true" />
       </template>
     </PageHeader>
-    <div class="flex min-h-0 flex-1 flex-col gap-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
       <ListFilters v-model="model" search-placeholder="Search name, city, phone" :tabs="tabs" :fields="fields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
@@ -23,8 +23,8 @@
         @load-more="list.next()"
       >
         <template #cell-retailer_name="{ row }">
-          <div class="font-medium text-ink-gray-9">{{ row.retailer_name }}</div>
-          <div class="text-xs text-ink-gray-5">{{ [row.name, row.city].filter(Boolean).join(' · ') }}</div>
+          <div class="font-medium text-polaris-text">{{ row.retailer_name }}</div>
+          <div class="text-xs text-polaris-secondary">{{ [row.name, row.city].filter(Boolean).join(' · ') }}</div>
         </template>
         <template #cell-last_visit="{ value }">
           <span :class="lastVisitClass(value)">{{ relativeDay(value) }}</span>
@@ -94,6 +94,10 @@ const { model, list, count, presetLabel, pageSize } = useDocList({
 
 function lastVisitClass(value) {
   const days = daysAgo(value)
-  return days === null || days > 30 ? 'text-ink-red-5' : days > 7 ? 'text-ink-amber-7' : 'text-ink-gray-8'
+  return days === null || days > 30
+    ? 'font-medium text-polaris-critical'
+    : days > 7
+      ? 'font-medium text-polaris-attention'
+      : 'text-polaris-text'
 }
 </script>

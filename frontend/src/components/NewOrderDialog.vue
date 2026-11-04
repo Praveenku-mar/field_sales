@@ -2,7 +2,7 @@
   <Dialog v-model="open" title="New Order" size="lg" @after-leave="resetForm">
     <div class="space-y-6">
       <section>
-        <h3 class="text-base font-medium text-ink-gray-9">Order Details</h3>
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Order Details</h3>
         <div class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
           <Combobox
             v-model="form.retailer"
@@ -32,13 +32,13 @@
             required
           />
         </div>
-        <p v-if="visit" class="mt-3 text-sm text-ink-gray-5">
+        <p v-if="visit" class="mt-3 text-sm text-polaris-secondary">
           The order is attached to this visit; its customer is fixed.
         </p>
       </section>
 
-      <section class="border-t border-desk-border pt-6">
-        <p class="text-sm text-ink-gray-5">
+      <section class="border-t border-[#f1f2f4] pt-5">
+        <p class="text-sm text-polaris-secondary">
           A draft order is created without items — add products and submit it on the order page.
         </p>
       </section>

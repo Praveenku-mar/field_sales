@@ -2,7 +2,7 @@
   <div>
     <PageHeader title="Rep Commission">
       <template #meta>
-        <LoadingIndicator v-if="report.loading && report.data" class="size-4 text-ink-gray-5" />
+        <LoadingIndicator v-if="report.loading && report.data" class="size-4 text-polaris-subdued" />
       </template>
       <template #actions>
         <Button label="Export" icon-left="lucide-download" :disabled="!rows.length" @click="exportCsv" />
@@ -10,9 +10,9 @@
       </template>
     </PageHeader>
 
-    <div class="space-y-5 px-5 pb-6">
-      <!-- Filters: the same ones as the desk report -->
-      <div class="fs-card flex flex-wrap items-end gap-3 p-4">
+    <div class="space-y-6 px-4 sm:px-6 pb-6 sm:pb-8">
+      <!-- Filters: Polaris control card -->
+      <div class="fs-card flex flex-wrap items-end gap-3 p-4 sm:p-5">
         <div class="w-36">
           <FormControl v-model="filters.from_date" type="date" label="From Date" />
         </div>
@@ -41,18 +41,18 @@
         <NumberCard v-for="i in 8" v-else :key="i" label="" loading />
       </div>
 
-      <!-- Table -->
+      <!-- Table: Shopify Polaris IndexTable -->
       <div class="fs-card overflow-hidden">
         <div class="overflow-x-auto">
-          <table class="w-full text-left">
+          <table class="w-full text-left border-collapse">
             <thead>
-              <tr class="border-b border-desk-border bg-surface-gray-1 text-ink-gray-5">
+              <tr class="border-b border-[#e1e3e5] bg-[#fafafa] text-[#616161]">
                 <th
                   v-for="(col, i) in COLUMNS"
                   :key="col.fieldname"
                   scope="col"
-                  class="whitespace-nowrap px-3 py-2 text-xs font-medium"
-                  :class="[i > 0 && 'text-right', i === 0 && 'sticky left-0 z-20 min-w-56 border-r border-desk-border bg-surface-gray-1']"
+                  class="whitespace-nowrap px-3.5 py-3 text-xs font-semibold uppercase tracking-wider"
+                  :class="[i > 0 && 'text-right', i === 0 && 'sticky left-0 z-20 min-w-56 border-r border-[#e1e3e5] bg-[#fafafa]']"
                 >
                   {{ col.label }}
                 </th>
@@ -60,30 +60,30 @@
             </thead>
             <tbody>
               <template v-if="report.loading && !rows.length">
-                <tr v-for="i in 5" :key="'s' + i" class="border-b border-desk-border last:border-0">
-                  <td v-for="col in COLUMNS" :key="col.fieldname" class="px-3 py-3">
-                    <div class="h-3 w-3/4 animate-pulse rounded-3 bg-surface-gray-2" />
+                <tr v-for="i in 5" :key="'s' + i" class="border-b border-[#f1f2f4] last:border-0">
+                  <td v-for="col in COLUMNS" :key="col.fieldname" class="px-3.5 py-3">
+                    <div class="h-3.5 w-3/4 animate-pulse rounded bg-[#ebebeb]" />
                   </td>
                 </tr>
               </template>
               <tr
                 v-for="row in rows"
                 :key="row.sales_rep + row.currency"
-                class="group border-b border-desk-border last:border-0 hover:bg-surface-gray-1"
+                class="group border-b border-[#f1f2f4] last:border-0 transition-colors duration-100 hover:bg-[#f9fafb]"
               >
                 <th
                   scope="row"
-                  class="sticky left-0 z-10 whitespace-nowrap border-r border-desk-border bg-surface-base px-3 py-2 font-normal group-hover:bg-surface-gray-1"
+                  class="sticky left-0 z-10 whitespace-nowrap border-r border-[#f1f2f4] bg-white px-3.5 py-2.5 font-normal group-hover:bg-[#f9fafb]"
                 >
-                  <RouterLink :to="{ name: 'SalesRep', params: { name: row.sales_rep } }" class="block text-ink-gray-9 hover:underline">
+                  <RouterLink :to="{ name: 'SalesRep', params: { name: row.sales_rep } }" class="block font-medium text-polaris-text hover:underline">
                     {{ row.rep_name }}
                   </RouterLink>
-                  <span v-if="row.email" class="block text-xs text-ink-gray-5">{{ row.email }}</span>
+                  <span v-if="row.email" class="block text-xs text-polaris-secondary">{{ row.email }}</span>
                 </th>
                 <td
                   v-for="col in COLUMNS.slice(1)"
                   :key="col.fieldname"
-                  class="whitespace-nowrap px-3 py-2 text-right tabular-nums"
+                  class="whitespace-nowrap px-3.5 py-2.5 text-right tabular-nums text-sm text-polaris-text"
                   :class="cellClass(col.fieldname, row)"
                 >
                   {{ formatCell(col, row) }}
@@ -91,9 +91,9 @@
               </tr>
             </tbody>
             <tfoot v-if="rows.length > 1">
-              <tr class="border-t border-desk-border bg-surface-gray-1 font-semibold text-ink-gray-9">
-                <th scope="row" class="sticky left-0 z-10 border-r border-desk-border bg-surface-gray-1 px-3 py-2 text-left">Total</th>
-                <td v-for="col in COLUMNS.slice(1)" :key="col.fieldname" class="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+              <tr class="border-t-2 border-[#e1e3e5] bg-[#fafafa] font-semibold text-polaris-text">
+                <th scope="row" class="sticky left-0 z-10 border-r border-[#e1e3e5] bg-[#fafafa] px-3.5 py-2.5 text-left text-xs uppercase tracking-wider">Total</th>
+                <td v-for="col in COLUMNS.slice(1)" :key="col.fieldname" class="whitespace-nowrap px-3.5 py-2.5 text-right tabular-nums text-sm">
                   {{ formatCell(col, total) }}
                 </td>
               </tr>
@@ -107,7 +107,7 @@
           title="No commission in this period"
           description="No commission entries match these filters."
         />
-        <div v-if="rows.length" class="border-t border-desk-border px-4 py-2 text-xs text-ink-gray-5">
+        <div v-if="rows.length" class="border-t border-[#e1e3e5] bg-[#fafafa] px-4 py-2.5 text-xs font-medium text-polaris-secondary">
           {{ rows.length }} {{ rows.length === 1 ? 'rep' : 'reps' }}
         </div>
       </div>

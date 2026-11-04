@@ -1,8 +1,8 @@
 <template>
-  <div class="px-5 pt-5">
+  <div class="px-4 sm:px-6 pt-6">
     <div class="fs-card">
-      <EmptyState icon="lucide-compass" title="Page not found" description="This page does not exist.">
-        <Button label="Go to Dashboard" :route="{ name: 'Dashboard' }" />
+      <EmptyState icon="lucide-compass" title="Page not found" description="The page you are looking for does not exist or may have moved.">
+        <Button variant="solid" label="Go to Dashboard" :route="{ name: 'Dashboard' }" />
       </EmptyState>
     </div>
   </div>

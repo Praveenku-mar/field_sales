@@ -1,44 +1,48 @@
 <template>
-  <Sidebar v-model:collapsed="collapsed" width="224px" class="border-r border-outline-gray-2">
+  <Sidebar v-model:collapsed="collapsed" width="240px" class="border-r border-[#e1e3e5] bg-white">
     <SidebarHeader
       title="Field Sales"
-      :subtitle="session.store.name || 'No store connected'"
+      :subtitle="storeSubtitle"
       logo="/assets/field_sales/images/logo.svg"
       class="px-2"
     />
 
-    <div class="flex flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-2">
-      <SidebarItem label="Search" icon="lucide-search" style="height: 2.5rem" @click="$emit('open-search')">
-        <template #prefix><span class="lucide-search size-6 text-ink-gray-6" /></template>
-        <template #suffix>
-          <kbd class="mr-2 text-xs text-ink-gray-4">Ctrl K</kbd>
-        </template>
-      </SidebarItem>
-      <SidebarItem label="Notification" icon="lucide-bell" style="height: 2.5rem" :route="{ name: 'Notifications' }" :active="route.name === 'Notifications'">
-        <template #prefix><span class="lucide-bell size-6 text-ink-gray-6" /></template>
+    <div class="flex flex-1 flex-col gap-1 overflow-y-auto px-2 pb-2">
+      <!-- Staff tools: a customer login has no notifications. -->
+      <SidebarItem
+        v-if="!session.isRetailer"
+        label="Notifications"
+        icon="lucide-bell"
+        style="height: 2.25rem"
+        :route="{ name: 'Notifications' }"
+        :active="route.name === 'Notifications'"
+      >
+        <template #prefix><span class="lucide-bell size-5 text-polaris-secondary" /></template>
         <template v-if="counts.data?.unread_notifications" #suffix>
-          <span class="mr-2 text-xs font-medium tabular-nums text-ink-red-5">{{ counts.data.unread_notifications }}</span>
+          <span class="mr-2 inline-flex items-center rounded-full bg-[#fde8e8] px-1.5 py-0.2 text-xs font-semibold tabular-nums text-[#9b1c1c]">
+            {{ counts.data.unread_notifications }}
+          </span>
         </template>
       </SidebarItem>
 
-      <div class="h-6 shrink-0" />
+      <div v-if="!session.isRetailer" class="my-1 border-t border-[#f1f2f4]" />
 
       <SidebarItem
         v-for="item in navItems"
         :key="item.label"
         :label="item.label"
-        style="height: 2.5rem"
+        style="height: 2.25rem"
         :route="item.route && { name: item.route }"
         :href="item.href"
         :active="isActive(item)"
       >
-        <template #prefix><span :class="[item.icon, 'size-6 text-ink-gray-6']" /></template>
-        <span class="truncate text-base leading-tighter">{{ item.label }}</span>
+        <template #prefix><span :class="[item.icon, 'size-5 text-polaris-secondary']" /></template>
+        <span class="truncate text-sm font-medium leading-tighter">{{ item.label }}</span>
         <template v-if="countOf(item)" #suffix>
           <Tooltip :text="item.countTooltip" :disabled="!item.countTooltip">
             <span
-              class="mr-2 text-xs tabular-nums"
-              :class="item.countTheme === 'red' ? 'font-medium text-ink-red-5' : 'text-ink-gray-5'"
+              class="mr-2 inline-flex items-center rounded-full px-1.5 py-0.2 text-xs tabular-nums"
+              :class="item.countTheme === 'red' ? 'bg-[#fde8e8] font-semibold text-[#9b1c1c]' : 'bg-[#f1f2f4] text-polaris-secondary font-medium'"
             >
               {{ countOf(item) }}
             </span>
@@ -47,7 +51,7 @@
       </SidebarItem>
     </div>
 
-    <div class="flex flex-col gap-0.5 border-t border-outline-gray-2 p-2">
+    <div class="flex flex-col gap-0.5 border-t border-[#e1e3e5] p-2">
       <UserMenu :collapsed="collapsed" />
       <SidebarCollapseToggle />
     </div>
@@ -68,11 +72,19 @@ defineEmits(['open-search'])
 const session = useSessionStore()
 const route = useRoute()
 
+const storeSubtitle = computed(() => {
+  if (session.store?.name) {
+    return session.store.name.includes('.') ? session.store.name : `${session.store.name}.myshopify.com`
+  }
+  return 'Shopify Field Sales'
+})
+
 const navItems = computed(() => NAV_ITEMS.filter((item) => session.canSee(item)))
 
+// A customer login shows no counts (its nav has none), so it never fetches or polls them.
 const counts = createResource({
   url: 'field_sales.frontend_api.get_sidebar_counts',
-  auto: true,
+  auto: !session.isRetailer,
 })
 
 function countOf(item) {
@@ -89,7 +101,10 @@ const collapsed = ref(getPreference('fs:sidebar-collapsed') === '1')
 watch(collapsed, (v) => setPreference('fs:sidebar-collapsed', v ? '1' : '0'))
 
 // Counts change as people work; refresh them when moving between pages.
-watch(() => route.name, () => counts.reload())
+watch(
+  () => route.name,
+  () => !session.isRetailer && counts.reload(),
+)
 // The Notifications page announces read/unread changes made without leaving it.
 const reloadCounts = () => counts.reload()
 // There is no realtime connection, so poll while the tab is in view to pick up new notifications.
@@ -97,7 +112,7 @@ let poll = null
 onMounted(() => {
   window.addEventListener('fs:notifications-changed', reloadCounts)
   poll = setInterval(() => {
-    if (document.visibilityState === 'visible') counts.reload()
+    if (!session.isRetailer && document.visibilityState === 'visible') counts.reload()
   }, 60000)
 })
 onBeforeUnmount(() => {

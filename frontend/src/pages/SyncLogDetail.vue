@@ -1,24 +1,24 @@
 <template>
   <div>
     <PageHeader :title="d.operation ? `${d.operation}${d.reference_name ? ` · ${d.reference_name}` : ''}` : name" :status="d.status || null">
-      <template #meta><span class="text-ink-gray-5">{{ d.creation ? formatDateTime(d.creation) : '' }}</span></template>
+      <template #meta><span class="text-polaris-secondary">{{ d.creation ? formatDateTime(d.creation) : '' }}</span></template>
       <template #actions>
         <Button v-if="referenceRoute" :label="`Open ${d.reference_doctype}`" icon-left="lucide-arrow-up-right" :route="referenceRoute" />
       </template>
     </PageHeader>
 
-    <div v-if="doc.get.error" class="px-5"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Sync log entry not found" :description="errorText" /></div></div>
+    <div v-if="doc.get.error" class="px-4 sm:px-6"><div class="fs-card"><EmptyState icon="lucide-circle-alert" title="Sync log entry not found" :description="errorText" /></div></div>
 
-    <div v-else class="grid grid-cols-1 items-start gap-4 px-5 pb-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <div class="min-w-0 space-y-4">
-        <div v-if="d.error_message || d.error_code" class="flex gap-2 rounded-4 bg-surface-red-2 px-4 py-3 text-ink-red-6">
-          <span class="lucide-circle-alert mt-px size-4 shrink-0" />
+    <div v-else class="grid grid-cols-1 items-start gap-5 px-4 sm:px-6 pb-6 sm:pb-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div class="min-w-0 space-y-5">
+        <div v-if="d.error_message || d.error_code" class="flex gap-2.5 rounded-xl border border-[#f8b4b4] bg-[#fde8e8] px-4 py-3 text-[#9b1c1c]">
+          <span class="lucide-circle-alert mt-0.5 size-4 shrink-0 text-[#9b1c1c]" />
           <div class="min-w-0 break-words">
             <div class="font-semibold">
               {{ d.status === 'Retrying' ? 'Failed, will retry' : 'Failed' }}
-              <span v-if="d.error_code" class="ml-1 font-mono text-xs font-normal">{{ d.error_code }}</span>
+              <span v-if="d.error_code" class="ml-1 font-mono text-xs font-normal">({{ d.error_code }})</span>
             </div>
-            <div v-if="d.error_message" class="whitespace-pre-wrap">{{ d.error_message }}</div>
+            <div v-if="d.error_message" class="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{{ d.error_message }}</div>
           </div>
         </div>
 
@@ -30,28 +30,28 @@
           <template #actions>
             <Button v-if="p.text" variant="ghost" size="sm" :label="copied === p.label ? 'Copied' : 'Copy'" :icon-left="copied === p.label ? 'lucide-check' : 'lucide-copy'" @click="copy(p)" />
           </template>
-          <pre v-if="p.text" class="max-h-96 overflow-auto bg-surface-gray-1 p-4 font-mono text-xs leading-relaxed text-ink-gray-8">{{ p.text }}</pre>
-          <div v-else class="px-4 py-5 text-ink-gray-5">Nothing recorded</div>
+          <pre v-if="p.text" class="max-h-96 overflow-auto bg-[#fafafa] p-4 font-mono text-xs leading-relaxed text-polaris-text border-t border-[#f1f2f4]">{{ p.text }}</pre>
+          <div v-else class="px-4 py-5 text-polaris-secondary">Nothing recorded</div>
         </SectionCard>
       </div>
 
-      <div class="fs-card">
-        <div class="flex items-center gap-2 border-b border-desk-border px-4 py-3">
-          <span class="lucide-history size-4 text-ink-gray-7" />
-          <h2 class="flex-1 text-base font-semibold text-ink-gray-9">{{ d.reference_name ? 'All Attempts' : 'Recent Entries' }}</h2>
-          <span class="text-ink-gray-5">{{ history.data?.length || '' }}</span>
+      <div class="fs-card overflow-hidden">
+        <div class="flex items-center gap-2 border-b border-[#f1f2f4] bg-[#fafafa] px-4 py-3">
+          <span class="lucide-history size-4 text-polaris-secondary" />
+          <h2 class="flex-1 text-sm font-semibold text-polaris-text">{{ d.reference_name ? 'All Attempts' : 'Recent Entries' }}</h2>
+          <span class="text-xs text-polaris-secondary">{{ history.data?.length || '' }}</span>
         </div>
         <div v-if="history.list.loading && !history.data" class="flex justify-center py-6"><LoadingIndicator class="size-4" /></div>
-        <ol v-else class="divide-y divide-outline-gray-1">
+        <ol v-else class="divide-y divide-[#f1f2f4]">
           <li v-for="row in history.data || []" :key="row.name">
             <RouterLink
               :to="{ name: 'SyncLogEntry', params: { name: row.name } }"
-              class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-gray-1"
-              :class="row.name === name && 'bg-surface-gray-2'"
+              class="flex items-center gap-3 px-4 py-3 transition-colors duration-100 hover:bg-[#f9fafb]"
+              :class="row.name === name && 'bg-[#f1f2f4] font-medium'"
             >
               <div class="min-w-0 flex-1">
-                <div class="truncate text-ink-gray-9">{{ row.operation }}<span v-if="row.attempt" class="text-ink-gray-5"> · #{{ row.attempt }}</span></div>
-                <div class="text-xs text-ink-gray-5">{{ relativeDay(row.creation) }}, {{ formatTime(row.creation) }}</div>
+                <div class="truncate text-polaris-text">{{ row.operation }}<span v-if="row.attempt" class="text-polaris-secondary"> · #{{ row.attempt }}</span></div>
+                <div class="text-xs text-polaris-secondary">{{ relativeDay(row.creation) }}, {{ formatTime(row.creation) }}</div>
               </div>
               <StatusPill :status="row.status" />
             </RouterLink>

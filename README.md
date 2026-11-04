@@ -27,6 +27,12 @@ Sales rep commission follows the order's state on the store. Subscribe these top
 
 Each event makes Field Sales re-read the order from Shopify and update the commission entries, so repeated or late deliveries are harmless. Orders that were not placed from Field Sales are ignored. Commission statements for the previous month are drafted automatically on the 1st of every month.
 
+### Customer logins (My Orders)
+
+A retailer (shown as "Customer" in the app) can be given a sign-in to see their own orders. Open the customer's page in the app and use the **Login Access** card (managers only): enter an email and **Send Invite** — the customer gets a welcome email from the store ("Welcome to &lt;store name&gt;") with a link to set a password, then signs in at `/fieldsales/login` and sees only that customer's orders (status, totals, invoice download and any payment link), read only. The same card sends password reset links and can remove access.
+
+Invites need an outgoing email account (Settings → Outgoing Email). Removing access signs the customer out everywhere and disables the user; inviting the same email later re-enables it. Customer logins are website users with a single "Field Sales Retailer" role and no desk access; one login per customer.
+
 ### Shopify App Store setup
 
 Store Connection has two **Auth Modes**. *Client Credentials* (the default, and what existing sites use) only works for a store in the same Shopify organization as the app: you type the store URL, client id and secret on Store Connection. *OAuth* is for merchants who install Field Sales from the Shopify App Store: the install fills in the store URL and tokens, and the app's credentials live in site config. One site serves one shop; while a shop is connected, an install from another shop is refused.

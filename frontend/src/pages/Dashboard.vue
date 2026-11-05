@@ -139,13 +139,14 @@
             view-report
           />
           <NumberCard
+            v-if="session.isAdmin"
             label="Sync Failures"
             icon="lucide-triangle-alert"
             :value="cards.failed_sync_count"
             :theme="cards.failed_sync_count ? 'red' : null"
             caption="Requires intervention"
-            :to="session.isManager ? { name: 'SyncFailures' } : null"
-            :view-report="session.isManager"
+            :to="{ name: 'SyncFailures' }"
+            view-report
           >
             <template v-if="cards.failed_sync_count" #badge>
               <StatusPill status="Failed" label="Needs attention" />
@@ -413,9 +414,9 @@
           <EmptyState v-else-if="overview.data" icon="lucide-calendar" title="No visits today" description="Visits planned for today appear here." />
         </SectionCard>
 
-        <SectionCard title="Sync Failures" flush>
+        <SectionCard v-if="session.isAdmin" title="Sync Failures" flush>
           <template #actions>
-            <Button v-if="session.isManager" label="All failures" variant="ghost" :route="{ name: 'SyncFailures' }" />
+            <Button label="All failures" variant="ghost" :route="{ name: 'SyncFailures' }" />
           </template>
           <ul v-if="o.failures?.length" class="divide-y divide-[#f1f2f4]">
             <li v-for="f in o.failures" :key="f.type + f.name">

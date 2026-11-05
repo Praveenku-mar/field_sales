@@ -4,6 +4,7 @@
 // the router and the server check again). `retailerOnly` is for the customer login alone:
 // a role check would leak it (Administrator holds every role).
 export const MANAGERS = ['System Manager', 'Sales Manager']
+export const ADMINS = ['System Manager']
 
 // Staff pages: everyone who works the app. A customer login (Field Sales Retailer)
 // holds none of these roles and gets the customer items below instead.
@@ -28,8 +29,8 @@ export const NAV_ITEMS = [
   // Everyone: a rep sees their own commission; managers also see the team and statements.
   { label: 'Commission', route: 'Commission', icon: 'lucide-wallet', feature: 'commission', roles: STAFF },
   { label: 'Reports', route: 'Reports', icon: 'lucide-chart-column', roles: MANAGERS },
-  { label: 'Sync Failures', route: 'SyncFailures', icon: 'lucide-triangle-alert', roles: MANAGERS },
-  { label: 'Sync Log', route: 'SyncLogs', icon: 'lucide-scroll-text', roles: MANAGERS },
+  { label: 'Sync Failures', route: 'SyncFailures', icon: 'lucide-triangle-alert', roles: ADMINS },
+  { label: 'Sync Log', route: 'SyncLogs', icon: 'lucide-scroll-text', roles: ADMINS },
   { label: 'Settings', route: 'Settings', icon: 'lucide-settings', roles: MANAGERS },
   // The customer login: its own orders, read only.
   { label: 'My Orders', route: 'MyOrders', icon: 'lucide-shopping-cart', retailerOnly: true },

@@ -341,7 +341,7 @@
               @click="retrySync"
             />
             <Button
-              v-if="session.isManager && d.docstatus !== 0"
+              v-if="session.isAdmin && d.docstatus !== 0"
               class="w-full"
               variant="ghost"
               label="View Sync Log"

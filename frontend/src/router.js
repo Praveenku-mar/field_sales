@@ -6,6 +6,7 @@ import { APP_BASE } from '@/utils/base'
 // Sync Log, Reports and Store Connection are manager pages. The Sales Rep list is open to
 // reps too: the server limits it to themselves and their team.
 const MANAGERS = ['System Manager', 'Sales Manager']
+const ADMINS = ['System Manager']
 
 // The customer login: My Orders and its detail page are the only pages it may open.
 // Not a `roles` check: holding the Field Sales Retailer role is not the same as being
@@ -124,20 +125,20 @@ const routes = [
     path: '/sync-log',
     name: 'SyncLogs',
     component: () => import('@/pages/SyncLogs.vue'),
-    meta: { title: 'Sync Log', roles: MANAGERS },
+    meta: { title: 'Sync Log', roles: ADMINS },
   },
   {
     path: '/sync-log/:name',
     name: 'SyncLogEntry',
     component: () => import('@/pages/SyncLogDetail.vue'),
     props: true,
-    meta: { parent: 'SyncLogs', roles: MANAGERS },
+    meta: { parent: 'SyncLogs', roles: ADMINS },
   },
   {
     path: '/sync-failures',
     name: 'SyncFailures',
     component: () => import('@/pages/SyncFailures.vue'),
-    meta: { title: 'Sync Failures', roles: MANAGERS },
+    meta: { title: 'Sync Failures', roles: ADMINS },
   },
   {
     path: '/notifications',

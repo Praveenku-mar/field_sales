@@ -7,8 +7,8 @@ import frappe
 from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
 
-# Roles that can open the Sync Failures page.
-MONITOR_ROLES = ("Sales Manager", "System Manager")
+# Roles that can open the Sync Failures page and inspect sync logs (Admin only).
+MONITOR_ROLES = ("System Manager",)
 ADMIN_ROLES = ("System Manager",)
 
 

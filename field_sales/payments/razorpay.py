@@ -41,7 +41,8 @@ from field_sales.utils.money import site_currency
 API_BASE = "https://api.razorpay.com/v1"
 REQUEST_TIMEOUT = 20  # seconds
 WEBHOOK_PATH = "/api/method/field_sales.payments.razorpay.webhook"
-SETTINGS_ROLES = ("System Manager", "Sales Manager")
+# Keys, webhook and test: System Manager only. Sales Managers keep read (secrets masked).
+SETTINGS_ROLES = ("System Manager",)
 PLATFORM = "Razorpay"  # Sync Log platform
 MIN_EXPIRY_SECONDS = 16 * 60  # Razorpay wants expire_by at least 15 minutes ahead
 MAX_REFERENCE_TRIES = 10
@@ -522,8 +523,11 @@ def webhook():
 		_log_rejected(401, "INVALID_SIGNATURE", "Payment webhook signature is missing or wrong")
 		return _respond(401, "invalid signature")
 
+	# The event id header is not signed; the hash of the signed body is, so a replay of a
+	# delivered body under a new event id is a duplicate too.
 	event_id = (headers.get("X-Razorpay-Event-Id") or "").strip() or None
-	if _already_handled(event_id):
+	payload_hash = hashlib.sha256(raw_body).hexdigest()
+	if _already_handled(event_id, payload_hash):
 		return _respond(200, "duplicate")
 
 	try:
@@ -538,6 +542,7 @@ def webhook():
 		"event_id": event_id,
 		"event": body.get("event"),
 		"payment_link_id": link.get("id"),
+		"payload_hash": payload_hash,
 		"payload": raw_body.decode("utf-8", "replace"),
 	}
 
@@ -551,12 +556,21 @@ def webhook():
 		return _respond(200, "ignored")
 	record["reference_order"] = field_order
 
+	# Links are created in the site currency (_link_payload); money in any other is not this order's.
+	currency = site_currency()
+	other = {c for c in (link.get("currency"), (payment or {}).get("currency")) if c and c != currency}
+	if other:
+		_record_event(
+			record, "Ignored", error=f"Currency {', '.join(sorted(other))} does not match the order's {currency}"
+		)
+		return _respond(200, "ignored: currency mismatch")
+
 	user = frappe.session.user
 	try:
 		frappe.set_user("Administrator")
 		doc = frappe.get_doc("Field Order", field_order, for_update=True)
 		# Another delivery of this event may have finished while this one waited for the lock.
-		if _already_handled(event_id):
+		if _already_handled(event_id, payload_hash):
 			return _respond(200, "duplicate")
 		if _stale_link(doc, link):
 			# The order moved to a new link while this event waited for the lock
@@ -789,11 +803,14 @@ def _valid_signature(raw_body: bytes, signature: str | None, settings) -> bool:
 	return hmac.compare_digest(expected.encode(), signature.strip().encode())
 
 
-def _already_handled(event_id: str | None) -> bool:
-	if not event_id:
-		return False
-	status = frappe.db.get_value("Razorpay Webhook Event", {"event_id": event_id}, "status")
-	return status in ("Processed", "Ignored")
+def _already_handled(event_id: str | None, payload_hash: str | None = None) -> bool:
+	"""Whether this event id, or this exact signed body, was already Processed or Ignored."""
+	done = ("in", ("Processed", "Ignored"))
+	if event_id and frappe.db.exists("Razorpay Webhook Event", {"event_id": event_id, "status": done}):
+		return True
+	return bool(
+		payload_hash and frappe.db.exists("Razorpay Webhook Event", {"payload_hash": payload_hash, "status": done})
+	)
 
 
 def _record_event(values: dict, status: str, error: str | None = None) -> None:

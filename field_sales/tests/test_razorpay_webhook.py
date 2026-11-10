@@ -197,6 +197,22 @@ class TestRazorpayWebhook(IntegrationTestCase):
 		apply.assert_not_called()
 		self.assertEqual(frappe.db.count("Razorpay Webhook Event", {"event_id": "evt_1"}), 1)
 
+	def test_replayed_body_under_a_new_event_id_does_nothing(self):
+		# The event id header is not signed; the body is.
+		self.post(self.body(), event_id="evt_1")
+		with patch.object(razorpay, "_apply_link_state") as apply:
+			code, result = self.post(self.body(), event_id="evt_replay")
+		self.assertEqual((code, result), (200, {"status": "duplicate"}))
+		apply.assert_not_called()
+
+	def test_other_currency_is_ignored(self):
+		body = self.body()
+		body["payload"]["payment_link"]["entity"]["currency"] = "USD"
+		code, result = self.post(body)
+		self.assertEqual((code, result), (200, {"status": "ignored: currency mismatch"}))
+		self.assertEqual(self.event().status, "Ignored")
+		self.assertEqual(self.order_values().payment_status, "Link Sent")
+
 	def test_error_is_recorded_and_retried(self):
 		with patch.object(razorpay, "_apply_link_state", side_effect=Exception("boom")), patch.object(
 			frappe.db, "rollback"

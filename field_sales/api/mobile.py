@@ -14,6 +14,7 @@ from urllib.parse import unquote
 
 import frappe
 from frappe import _
+from frappe.rate_limiter import rate_limit
 from frappe.utils import cint, flt, getdate, nowdate
 
 from field_sales.commission import commission_enabled
@@ -29,6 +30,7 @@ from field_sales.permissions import (
 	sales_rep_query,
 	visit_query,
 )
+from field_sales.utils.search import escape_like
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
@@ -285,7 +287,7 @@ def get_orders_list(
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
 		where.append("(`tabField Order`.`name` LIKE %(f_search)s OR `tabField Order`.`retailer_name` LIKE %(f_search)s)")
-		params["f_search"] = f"{term}%"
+		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("order_date", "modified", "name"))
 	return _execute_keyset_query(
@@ -382,7 +384,7 @@ def get_visits_list(
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
 		where.append("(`tabVisit`.`name` LIKE %(f_search)s OR `tabVisit`.`retailer_name` LIKE %(f_search)s OR `tabVisit`.`city` LIKE %(f_search)s)")
-		params["f_search"] = f"{term}%"
+		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("visit_date", "modified", "name"))
 	return _execute_keyset_query(
@@ -500,7 +502,7 @@ def get_customers_list(
 		where.append(
 			"(`tabRetailer`.`name` LIKE %(f_search)s OR `tabRetailer`.`retailer_name` LIKE %(f_search)s OR `tabRetailer`.`phone` LIKE %(f_search)s OR `tabRetailer`.`city` LIKE %(f_search)s)"
 		)
-		params["f_search"] = f"{term}%"
+		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("modified", "name"))
 	return _execute_keyset_query(
@@ -589,7 +591,7 @@ def get_products_list(
 		where.append(
 			"(`tabPlatform Product`.`name` LIKE %(f_search)s OR `tabPlatform Product`.`product_title` LIKE %(f_search)s OR `tabPlatform Product`.`sku` LIKE %(f_search)s OR `tabPlatform Product`.`barcode` LIKE %(f_search)s)"
 		)
-		params["f_search"] = f"{term}%"
+		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("modified", "name"))
 	res = _execute_keyset_query(
@@ -668,7 +670,7 @@ def get_team_list(
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
 		where.append("(`tabSales Rep`.`name` LIKE %(f_search)s OR `tabSales Rep`.`full_name` LIKE %(f_search)s)")
-		params["f_search"] = f"{term}%"
+		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("full_name", "name"))
 	return _execute_keyset_query(
@@ -810,8 +812,11 @@ def get_retailer_payments_list(
 		"order_date as payment_date",
 		"grand_total as amount",
 		"payment_status as status",
-		"payment_reference",
+		"razorpay_payment_id as payment_reference",
+		"paid_on",
 		"name as order_id",
+		# Keyset keys (ORDER_KEYS): the next cursor is read from these.
+		"order_date",
 		"modified",
 	]
 
@@ -901,12 +906,14 @@ def get_customer_detail_records(customer_id: str) -> dict:
 	doc = frappe.get_doc("Retailer", customer_id)
 	doc.check_permission("read")
 
-	# Outstanding balance calculation via SQL aggregate
+	# Outstanding balance via SQL aggregate, over the orders the user may see: every rep reads
+	# every retailer, but another team's orders are not theirs to total.
+	order_scope = field_order_query(frappe.session.user) or "1=1"
 	unpaid_orders = frappe.db.sql(
-		"""
+		f"""
 		SELECT COALESCE(SUM(grand_total), 0) as balance
 		FROM `tabField Order`
-		WHERE retailer = %(ret)s AND docstatus = 1 AND payment_status != 'Paid'
+		WHERE retailer = %(ret)s AND docstatus = 1 AND payment_status != 'Paid' AND ({order_scope})
 		""",
 		{"ret": customer_id},
 		as_dict=True,
@@ -1124,6 +1131,7 @@ def get_mobile_count(
 
 
 @frappe.whitelist(methods=["GET", "POST"])
+@rate_limit(limit=120, seconds=60, user_based=True, ip_based=False)
 def mobile_search(
 	query: str,
 	doctype: str | None = None,
@@ -1144,7 +1152,7 @@ def mobile_search(
 		return {"results": [], "query": query}
 
 	limit = min(max(1, cint(limit) or MAX_SEARCH_SUGGESTIONS), MAX_SEARCH_SUGGESTIONS)
-	pfx = f"{query}%"
+	pfx = f"{escape_like(query)}%"
 	results = []
 
 	# 1. Customers / Retailers
@@ -1226,3 +1234,33 @@ def mobile_search(
 			results.extend(rows)
 
 	return {"results": results[:limit], "query": query}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 11. Duplicate-safe order creation
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@frappe.whitelist(methods=["GET", "POST"])
+def find_order_by_client_temp_id(client_temp_id: str) -> dict | None:
+	"""
+	The Field Order the app created with this ``client_temp_id`` (Field Order.client_temp_id),
+	so after a timeout it can tell whether the order was saved before creating it again.
+
+	Scoped by ``frappe.get_list``: an order the user may not read is not found. Cancelled
+	orders are left out (a cancelled order may be taken again).
+
+	:return: ``{"name", "docstatus"}``, or ``None`` when there is no such order.
+	"""
+	_check_access()
+	client_temp_id = (client_temp_id or "").strip()
+	if not client_temp_id or len(client_temp_id) > 140:
+		frappe.throw(_("Client Temp ID is required"), frappe.ValidationError)
+	rows = frappe.get_list(
+		"Field Order",
+		filters={"client_temp_id": client_temp_id, "docstatus": ("!=", 2)},
+		fields=["name", "docstatus"],
+		order_by="creation asc",
+		limit=1,
+	)
+	return {"name": rows[0].name, "docstatus": rows[0].docstatus} if rows else None

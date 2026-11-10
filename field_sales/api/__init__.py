@@ -5,6 +5,7 @@
 
 
 import re
+from typing import NoReturn
 from urllib.parse import urlsplit
 
 import frappe
@@ -24,10 +25,12 @@ from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import (
 	RETAILER_ROLE,
 	STAFF_ROLES,
+	field_order_query,
 	get_allowed_reps,
 	hierarchy_filters,
 	is_admin,
 	is_manager_or_admin,
+	visit_query,
 )
 from field_sales.sync.customers import push_retailers
 from field_sales.sync.notify import MONITOR_ROLES
@@ -35,6 +38,7 @@ from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.products import enqueue_sync
 from field_sales.sync.stock import fetch_live_stock
 from field_sales.sync.stock import get_sell_locations as _get_sell_locations
+from field_sales.utils.credentials import rotate_api_secret
 from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
 from field_sales.utils.limits import SALES_REPS, check_limit
 
@@ -291,6 +295,14 @@ def create_sales_rep(
 		new_user.insert(ignore_permissions=True)
 		user_created = True
 	else:
+		# An existing user becomes a rep: never a System Manager or a retailer login (their
+		# roles would be widened by a manager), unless a System Manager does it.
+		held = set(frappe.get_roles(user))
+		if not is_admin() and ({"System Manager", RETAILER_ROLE} & held or user in ("Administrator", "Guest")):
+			frappe.throw(
+				_("{0} cannot be made a Sales Rep here. Ask a System Manager.").format(user),
+				frappe.PermissionError,
+			)
 		sync_sales_rep_roles(user, is_mgr, is_rep)
 
 	rep.insert()
@@ -301,7 +313,7 @@ def create_sales_rep(
 @rate_limit(limit=10, seconds=60 * 60, user_based=True, ip_based=False)
 def set_sales_rep_password(
 	sales_rep: str, new_password: str, logout_all_sessions: int = 1, old_password: str | None = None
-) -> None:
+) -> dict | None:
 	"""
 	Set a new password for a Sales Rep's user, from the app's Sales Rep page.
 
@@ -311,6 +323,10 @@ def set_sales_rep_password(
 
 	Nobody may reset Administrator's here. The password policy still applies (User.validate).
 	Rate limited per user, since a wrong ``old_password`` is a password guess.
+
+	The user's API secret is rotated, so app tokens issued with the old password stop working.
+	For your own password the new ``{"api_key", "api_secret"}`` is returned so this device
+	stays signed in; otherwise ``None``.
 	"""
 	rep = frappe.get_doc("Sales Rep", sales_rep)
 	user = rep.user
@@ -339,6 +355,10 @@ def set_sales_rep_password(
 	user_doc.logout_all_sessions = frappe.utils.cint(logout_all_sessions)
 	# Reps and Sales Managers cannot write User in the desk; the checks above stand in for that.
 	user_doc.save(ignore_permissions=True)
+	api_secret = rotate_api_secret(user)
+	if user == frappe.session.user and api_secret:
+		return {"api_key": frappe.db.get_value("User", user, "api_key"), "api_secret": api_secret}
+	return None
 
 
 @frappe.whitelist(methods=["POST"])
@@ -352,7 +372,9 @@ def send_sales_rep_password_reset(sales_rep: str, logout_all_sessions: int = 0) 
 	for users who pass ``_check_password_target``. Not for your own account: use
 	Change Password. The link itself is never returned.
 
-	:param logout_all_sessions: Also sign the rep out of every device now.
+	:param logout_all_sessions: Also sign the rep out of every device now (browser sessions and
+		app tokens: the API secret is rotated). Without it nothing changes until the rep uses the
+		link; the reset itself happens in Frappe's ``update_password``, outside this app.
 	:return: ``{"email": user}``
 	"""
 	rep = frappe.get_doc("Sales Rep", sales_rep)
@@ -378,6 +400,7 @@ def send_sales_rep_password_reset(sales_rep: str, logout_all_sessions: int = 0) 
 	user_doc._reset_password(send_email=True)
 	if frappe.utils.cint(logout_all_sessions):
 		clear_sessions(user=user, force=True)
+		rotate_api_secret(user)
 	return {"email": user}
 
 
@@ -412,7 +435,9 @@ def get_retailer_login(retailer: str) -> dict:
 	:return: ``{"user", "enabled"}`` with ``user=None`` when the retailer has no login.
 	"""
 	_check_login_manager()
-	user = frappe.db.get_value("Retailer", retailer, "user")
+	doc = frappe.get_doc("Retailer", retailer)
+	doc.check_permission("read")
+	user = doc.user
 	if not user:
 		return {"user": None, "enabled": None}
 	return {"user": user, "enabled": bool(frappe.db.get_value("User", user, "enabled"))}
@@ -433,12 +458,16 @@ def _check_retailer_login_user(user: str) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
+@rate_limit(limit=30, seconds=60 * 60, user_based=True, ip_based=False)
 def create_retailer_login(retailer: str, email: str, send_invite: int = 1) -> dict:
 	"""
 	Invite a retailer into the app's My Orders view, from its page's Login Access card.
 
 	Creates a Website User for ``email`` (or adopts an existing user who is no Field Sales
-	staff), gives it the Field Sales Retailer role and links it as Retailer.user. The invite
+	staff and holds no other role), gives it the Field Sales Retailer role and links it as
+	Retailer.user. A disabled user is enabled again only when it was a retailer login before
+	(holds the Field Sales Retailer role, as ``revoke_retailer_login`` leaves it); an account
+	disabled for any other reason stays disabled. The invite
 	is one branded welcome email ("Welcome to <store>", template ``retailer_invite``) with
 	Frappe's one-time set-password link in it — not Frappe's own "Welcome to Frappe" mail.
 	It needs an outgoing email account, so it cannot silently never arrive.
@@ -469,6 +498,13 @@ def create_retailer_login(retailer: str, email: str, send_invite: int = 1) -> di
 		user_doc = frappe.get_doc("User", email)
 		changed = False
 		if not user_doc.enabled:
+			if RETAILER_ROLE not in {row.role for row in user_doc.roles}:
+				frappe.throw(
+					_("{0} is a disabled account and cannot be a retailer login. Ask a System Manager.").format(
+						email
+					),
+					frappe.PermissionError,
+				)
 			# A login removed earlier, invited again: bring the user back.
 			user_doc.enabled = 1
 			changed = True
@@ -555,11 +591,14 @@ def send_retailer_password_reset(retailer: str, logout_all_sessions: int = 0) ->
 	Managers only, for users who pass ``_check_retailer_login_user``. The link itself
 	is never returned.
 
-	:param logout_all_sessions: Also sign the retailer out of every device now.
+	:param logout_all_sessions: Also sign the retailer out of every device now (browser sessions
+		and app tokens: the API secret is rotated).
 	:return: ``{"email": user}``
 	"""
 	_check_login_manager()
-	user = frappe.db.get_value("Retailer", retailer, "user")
+	doc = frappe.get_doc("Retailer", retailer)
+	doc.check_permission("write")
+	user = doc.user
 	if not user:
 		frappe.throw(_("Customer {0} has no login").format(retailer))
 	_check_retailer_login_user(user)
@@ -575,6 +614,7 @@ def send_retailer_password_reset(retailer: str, logout_all_sessions: int = 0) ->
 	user_doc._reset_password(send_email=True)
 	if frappe.utils.cint(logout_all_sessions):
 		clear_sessions(user=user, force=True)
+		rotate_api_secret(user)
 	return {"email": user}
 
 
@@ -600,6 +640,7 @@ def revoke_retailer_login(retailer: str) -> dict:
 	# Managers cannot write User in the desk; the checks above stand in for that.
 	user_doc.save(ignore_permissions=True)
 	clear_sessions(user=user, force=True)
+	rotate_api_secret(user)
 	doc.user = None
 	doc.save()
 	return {"disabled": user}
@@ -767,6 +808,10 @@ def check_out(
 	}
 
 
+# Each call is one store request per product page; a client cannot ask for the whole catalogue.
+LIVE_STOCK_MAX_PRODUCTS = 50
+
+
 @frappe.whitelist(methods=["POST"])
 def get_live_stock(products: str | list, location_id: str | None = None) -> dict:
 	"""
@@ -775,12 +820,16 @@ def get_live_stock(products: str | list, location_id: str | None = None) -> dict
 	Also saved on the Platform Products. Only tracked products are returned;
 	untracked ones are always available.
 
-	:param products: Platform Product names (list or JSON list).
+	:param products: Platform Product names (list or JSON list), at most ``LIVE_STOCK_MAX_PRODUCTS``.
 	:param location_id: The order's location; the default location when omitted.
 	:return: ``{product: available_qty}``
 	"""
 	frappe.has_permission("Platform Product", "read", throw=True)
 	products = frappe.parse_json(products) if isinstance(products, str) else products
+	if products and not isinstance(products, list):
+		frappe.throw(_("Products must be a list"))
+	if products and len(products) > LIVE_STOCK_MAX_PRODUCTS:
+		frappe.throw(_("Ask for at most {0} products at a time").format(LIVE_STOCK_MAX_PRODUCTS))
 	try:
 		return fetch_live_stock(products or [], location_id or None)
 	except ConnectorError as e:
@@ -953,23 +1002,35 @@ def get_retailer_cities(txt: str | None = None) -> list[str]:
 
 @frappe.whitelist()
 def get_retailer_summary(retailer: str) -> dict:
-	"""Last 30 days at a retailer, for the summary bar on its form."""
+	"""
+	Last 30 days at a retailer, for the summary bar on its form.
+
+	Every rep may read every retailer, but the counts cover only the visits and orders the
+	user may see (their hierarchy; a retailer login its own orders; admins everything).
+	"""
 	frappe.has_permission("Retailer", "read", retailer, throw=True)
 	since = frappe.utils.add_days(frappe.utils.nowdate(), -30)
+	user = frappe.session.user
 
-	visit = frappe.qb.DocType("Visit")
-	visits = (
-		frappe.qb.from_(visit)
-		.select(Count("*"))
-		.where((visit.retailer == retailer) & (visit.status == "Completed") & (visit.visit_date >= since))
-	).run()[0][0]
+	visit_scope = visit_query(user) or "1=1"
+	visits = frappe.db.sql(
+		f"""
+		SELECT COUNT(*) FROM `tabVisit`
+		WHERE `tabVisit`.`retailer` = %(retailer)s AND `tabVisit`.`status` = 'Completed'
+			AND `tabVisit`.`visit_date` >= %(since)s AND ({visit_scope})
+		""",
+		{"retailer": retailer, "since": since},
+	)[0][0]
 
-	order = frappe.qb.DocType("Field Order")
-	orders, value = (
-		frappe.qb.from_(order)
-		.select(Count("*"), Sum(order.grand_total))
-		.where((order.retailer == retailer) & (order.docstatus == 1) & (order.order_date >= since))
-	).run()[0]
+	order_scope = field_order_query(user) or "1=1"
+	orders, value = frappe.db.sql(
+		f"""
+		SELECT COUNT(*), SUM(`tabField Order`.`grand_total`) FROM `tabField Order`
+		WHERE `tabField Order`.`retailer` = %(retailer)s AND `tabField Order`.`docstatus` = 1
+			AND `tabField Order`.`order_date` >= %(since)s AND ({order_scope})
+		""",
+		{"retailer": retailer, "since": since},
+	)[0]
 
 	return {"visits_30d": visits, "orders_30d": orders, "value_30d": flt(value)}
 
@@ -1060,34 +1121,69 @@ def _is_rep_or_their_manager(sales_rep: str) -> bool:
 	)
 
 
+# Failed mobile logins per user before the account is locked out of the app login.
+LOGIN_MAX_FAILURES = 5
+LOGIN_LOCKOUT_SECONDS = 10 * 60
+LOGIN_FAILED_MESSAGE = "Invalid login credentials"
+
+
+def _login_failure_key(usr: str) -> str:
+	return frappe.cache.make_key(f"field_sales:mobile_login_failures:{usr}")
+
+
+def _login_failed(usr: str) -> NoReturn:
+	"""Count a failed login for ``usr`` (kept for the lockout window) and refuse it."""
+	key = _login_failure_key(usr)
+	failures = frappe.cache.incr(key)
+	if failures == 1:
+		frappe.cache.expire(key, LOGIN_LOCKOUT_SECONDS)
+	frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=10, seconds=10 * 60, ip_based=True)
 def mobile_login(usr: str, pwd: str) -> dict:
 	"""
 	Mobile & Web App Authentication endpoint.
 	Validates credentials, verifies Field Sales app access, and returns API credentials.
-	"""
-	from frappe.core.doctype.user.user import generate_keys
-	from frappe.utils.password import check_password
 
+	- Rate limited per IP, and locked per user after ``LOGIN_MAX_FAILURES`` failures for
+	  ``LOGIN_LOCKOUT_SECONDS`` (counted in the cache, so a rolled-back request still counts).
+	- Wrong password, unknown user, locked, disabled or no Field Sales role all get the same
+	  "Invalid login credentials", so the answer does not tell which accounts exist.
+	- The first login of a user creates their API key and secret; later logins return the
+	  same pair (a password change or "sign out everywhere" rotates the secret).
+	"""
+	from field_sales.utils.credentials import issue_api_secret
+	from field_sales.www.fieldsales import has_app_access
+
+	usr = (usr or "").strip()
 	if not usr or not pwd:
 		frappe.throw(_("Username and password are required"), frappe.AuthenticationError)
+	if len(usr) > 140 or len(pwd) > MAX_PASSWORD_SIZE:
+		frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
+
+	usr_key = usr.lower()
+	if frappe.utils.cint(frappe.cache.get(_login_failure_key(usr_key))) >= LOGIN_MAX_FAILURES:
+		frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
 
 	try:
-		user_name = check_password(usr.strip(), pwd)
-	except Exception:
-		frappe.throw(_("Invalid login credentials"), frappe.AuthenticationError)
+		user_name = check_password(usr, pwd)
+	except frappe.AuthenticationError:
+		_login_failed(usr_key)
 
-	user = frappe.get_doc("User", user_name)
-	if not user.enabled:
-		frappe.throw(_("User is disabled"), frappe.AuthenticationError)
+	user = frappe.db.get_value("User", user_name, ["name", "full_name", "enabled", "api_key"], as_dict=True)
+	if not user or not user.enabled or user.name == "Guest" or not has_app_access(user.name):
+		_login_failed(usr_key)
 
+	frappe.cache.delete(_login_failure_key(usr_key))
 	api_key = user.api_key
-	api_secret = user.get_password("api_secret")
+	api_secret = frappe.utils.password.get_decrypted_password(
+		"User", user.name, "api_secret", raise_exception=False
+	)
 	if not api_key or not api_secret:
-		keys = generate_keys(user.name)
-		api_key = keys["api_key"]
-		api_secret = keys["api_secret"]
-		frappe.db.commit()
+		# A POST commits at the end of the request.
+		api_key, api_secret = issue_api_secret(user.name)
 
 	return {
 		"message": "Logged In",
@@ -1096,4 +1192,3 @@ def mobile_login(usr: str, pwd: str) -> dict:
 		"api_key": api_key,
 		"api_secret": api_secret,
 	}
-

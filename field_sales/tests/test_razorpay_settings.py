@@ -96,7 +96,10 @@ class TestRazorpaySettings(IntegrationTestCase):
 
 		data = get("Razorpay Settings", "Razorpay Settings")
 		self.assertNotIn("s3cret", str(data.get("key_secret")))
-		self.assertEqual(get_webhook_url(), frappe.utils.get_url(WEBHOOK_PATH))
+		# Keys, webhook and test are System Manager only.
+		self.assertFalse(frappe.has_permission("Razorpay Settings", "write"))
+		self.assertRaises(frappe.PermissionError, get_webhook_url)
+		self.assertRaises(frappe.PermissionError, test_connection)
 
 	def test_webhook_url_follows_a_tunnel(self):
 		# ngrok --host-header keeps Host local; the public address comes in X-Forwarded-*.

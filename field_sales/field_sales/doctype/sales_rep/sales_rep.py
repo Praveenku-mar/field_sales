@@ -6,7 +6,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
-from field_sales.permissions import clear_allowed_reps_cache, is_manager_or_admin
+from field_sales.permissions import clear_allowed_reps_cache, is_admin, is_manager_or_admin
 
 
 def sync_sales_rep_roles(user_name: str, is_sales_manager: bool, is_sales_rep: bool) -> None:
@@ -55,6 +55,10 @@ class SalesRep(Document):
 	def validate(self):
 		if self.max_discount_pct is not None and not 0 <= flt(self.max_discount_pct) <= 100:
 			frappe.throw(_("Max Discount % must be between 0 and 100."))
+
+		# Re-pointing a rep at another user would hand that user the rep's team and roles.
+		if not self.is_new() and self.has_value_changed("user") and not is_admin():
+			frappe.throw(_("Only a System Manager can change the user of a Sales Rep."), frappe.PermissionError)
 
 		if self.is_new() and self.user and frappe.db.exists("User", self.user):
 			user_roles = set(frappe.get_roles(self.user))

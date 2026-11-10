@@ -422,6 +422,20 @@ RETAILER_TYPES = ("Kirana", "Supermarket", "Wholesaler", "Medical", "Other")
 CUSTOMER_KEYS = (("modified", "desc"), ("name", "desc"))
 
 
+def _preset_conditions(doctype: str, preset: str) -> list[str]:
+	"""
+	SQL conditions of a dashboard preset for ``doctype``, built by Frappe's own filter
+	compiler (values escaped, empty dates compared as 0001-01-01, like the card's count).
+	"""
+	from frappe.model.db_query import DatabaseQuery
+
+	data = get_attention_presets().get(preset) or get_card_presets().get(preset)
+	if not data or data["doctype"] != doctype:
+		frappe.throw(_("Unknown list preset: {0}").format(preset), frappe.ValidationError)
+	query = DatabaseQuery(doctype)
+	return [query.prepare_filter_condition(f) for f in data["filters"]]
+
+
 @frappe.whitelist(methods=["GET", "POST"])
 def get_customers_list(
 	cursor: str | None = None,
@@ -431,10 +445,14 @@ def get_customers_list(
 	sales_rep: str | None = None,
 	search: str | None = None,
 	retailer_type: str | None = None,
+	preset: str | None = None,
 ) -> dict:
 	"""
 	Keyset-paginated mobile customers list. Excludes tax documents and heavy contact tables.
 	Retailer login only sees their own retailer profile.
+
+	``preset`` names a Retailer "Needs attention" preset (e.g. ``not_visited_30d``), so the
+	list a dashboard card opens applies the same filters the card counted.
 	"""
 	_check_access()
 	user = frappe.session.user
@@ -473,6 +491,9 @@ def get_customers_list(
 			if is_admin(user) or sales_rep.strip() in allowed:
 				where.append("`tabRetailer`.`sales_rep` = %(f_rep)s")
 				params["f_rep"] = sales_rep.strip()
+
+		if preset:
+			where.extend(_preset_conditions("Retailer", preset))
 
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()

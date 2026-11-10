@@ -127,6 +127,16 @@ class TestMobileAPI(FrappeTestCase):
 			[r["name"] for r in unfiltered["items"]],
 		)
 
+	def test_customers_preset_matches_dashboard_count(self):
+		"""A Retailer preset lists exactly the customers its dashboard card counts."""
+		for key in ("not_visited_30d", "pending_retailers"):
+			listed = get_customers_list(limit=500, preset=key)
+			count = get_mobile_count("Retailer", preset=key)["count"]
+			self.assertEqual(len(listed["items"]), min(count, 500), key)
+		for bogus in ("draft_orders", "' OR 1=1 --"):
+			with self.assertRaises(frappe.ValidationError):
+				get_customers_list(limit=5, preset=bogus)
+
 	def test_products_keyset_pagination(self):
 		"""Products list returns card fields with price and available quantity."""
 		res = get_products_list(limit=3)

@@ -198,9 +198,19 @@ ORDER_CARD_FIELDS = [
 	"docstatus",
 	"sync_status",
 	"payment_status",
+	"amount_paid",
 	"sales_rep",
+	"visit",
+	"total_qty",
+	"net_total",
+	"discount_amount",
+	"tax_amount",
+	"location_name",
+	"remarks",
 	"modified",
 ]
+
+PAYMENT_STATUSES = ("Unpaid", "Link Sent", "Partially Paid", "Paid", "Link Expired", "Link Cancelled")
 
 ORDER_KEYS = (("order_date", "desc"), ("modified", "desc"), ("name", "desc"))
 
@@ -216,6 +226,7 @@ def get_orders_list(
 	date_from: str | None = None,
 	date_to: str | None = None,
 	search: str | None = None,
+	payment_status: str | None = None,
 ) -> dict:
 	"""
 	Keyset-paginated mobile orders list. Returns card fields only (excludes child items).
@@ -252,6 +263,10 @@ def get_orders_list(
 	if status and status.strip() in ("Pending", "Synced", "Failed"):
 		where.append("`tabField Order`.`sync_status` = %(f_status)s")
 		params["f_status"] = status.strip()
+
+	if payment_status and payment_status.strip() in PAYMENT_STATUSES:
+		where.append("`tabField Order`.`payment_status` = %(f_payment_status)s")
+		params["f_payment_status"] = payment_status.strip()
 
 	if sales_rep and not is_retailer_user(user):
 		allowed = get_allowed_reps(user)
@@ -301,6 +316,10 @@ VISIT_CARD_FIELDS = [
 	"check_in_time",
 	"check_out_time",
 	"time_on_site_min",
+	"visit_purpose",
+	"notes",
+	"order_taken",
+	"no_order_reason",
 	"modified",
 ]
 
@@ -391,8 +410,14 @@ CUSTOMER_CARD_FIELDS = [
 	"sales_rep",
 	"sync_status",
 	"last_visit",
+	"owner_name",
+	"retailer_type",
+	"latitude",
+	"longitude",
 	"modified",
 ]
+
+RETAILER_TYPES = ("Kirana", "Supermarket", "Wholesaler", "Medical", "Other")
 
 CUSTOMER_KEYS = (("modified", "desc"), ("name", "desc"))
 
@@ -405,6 +430,7 @@ def get_customers_list(
 	city: str | None = None,
 	sales_rep: str | None = None,
 	search: str | None = None,
+	retailer_type: str | None = None,
 ) -> dict:
 	"""
 	Keyset-paginated mobile customers list. Excludes tax documents and heavy contact tables.
@@ -433,6 +459,10 @@ def get_customers_list(
 		if status and status.strip() in ("Active", "Inactive"):
 			where.append("`tabRetailer`.`status` = %(f_status)s")
 			params["f_status"] = status.strip()
+
+		if retailer_type and retailer_type.strip() in RETAILER_TYPES:
+			where.append("`tabRetailer`.`retailer_type` = %(f_type)s")
+			params["f_type"] = retailer_type.strip()
 
 		if city:
 			where.append("`tabRetailer`.`city` = %(f_city)s")

@@ -104,6 +104,29 @@ class TestMobileAPI(FrappeTestCase):
 			self.assertIn("city", first)
 			self.assertNotIn("address_line1", first)
 
+	def test_orders_payment_status_filter(self):
+		"""payment_status narrows the list; unknown values are ignored, not injected."""
+		res = get_orders_list(limit=100, payment_status="Paid")
+		self.assertTrue(all(r["payment_status"] == "Paid" for r in res["items"]))
+		unfiltered = get_orders_list(limit=5)
+		bogus = get_orders_list(limit=5, payment_status="' OR 1=1 --")
+		self.assertEqual(
+			[r["name"] for r in bogus["items"]],
+			[r["name"] for r in unfiltered["items"]],
+		)
+
+	def test_customers_retailer_type_filter(self):
+		"""retailer_type narrows the list and is returned on each card."""
+		res = get_customers_list(limit=100, retailer_type="Kirana")
+		for row in res["items"]:
+			self.assertEqual(row["retailer_type"], "Kirana")
+		unfiltered = get_customers_list(limit=5)
+		bogus = get_customers_list(limit=5, retailer_type="Nope")
+		self.assertEqual(
+			[r["name"] for r in bogus["items"]],
+			[r["name"] for r in unfiltered["items"]],
+		)
+
 	def test_products_keyset_pagination(self):
 		"""Products list returns card fields with price and available quantity."""
 		res = get_products_list(limit=3)

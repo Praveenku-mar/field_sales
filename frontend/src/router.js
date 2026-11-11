@@ -46,7 +46,7 @@ const routes = [
     path: '/retailers',
     name: 'Retailers',
     component: () => import('@/pages/Retailers.vue'),
-    meta: { title: 'Customers' },
+    meta: { title: 'Shops' },
   },
   {
     path: '/retailers/:name',

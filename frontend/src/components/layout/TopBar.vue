@@ -42,7 +42,7 @@
       >
         <span class="flex items-center gap-2">
           <span class="lucide-search size-3.5 text-polaris-subdued" />
-          <span>Search orders, customers, products...</span>
+          <span>Search orders, shops, products...</span>
         </span>
         <kbd class="rounded border border-[#e1e3e5] bg-white px-1.5 py-0.5 text-[10px] font-medium text-polaris-subdued shadow-2xs">Ctrl K</kbd>
       </button>

@@ -1302,3 +1302,51 @@ def find_order_by_client_temp_id(client_temp_id: str) -> dict | None:
 		limit=1,
 	)
 	return {"name": rows[0].name, "docstatus": rows[0].docstatus} if rows else None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 12. Mobile manifest (edition discovery)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# The connector this app ships with. Each edition (field_sales, field_sales_woocommerce,
+# field_sales_odoo) answers the same mobile contract under its own namespace.
+MOBILE_EDITION = "shopify"
+
+# Bumped when a response shape or method the app relies on changes incompatibly.
+MOBILE_CONTRACT_VERSION = 1
+
+# What the app may offer against this edition. Every edition serves the shared contract;
+# the extras are connector specific.
+MOBILE_CAPABILITIES = (
+	"orders",
+	"visits",
+	"customers",
+	"products",
+	"live_stock",
+	"dashboard",
+	"commission",
+	"razorpay_payments",
+	"visit_import",
+	"retailer_logins",
+	"store_connection_settings",
+)
+
+
+@frappe.whitelist(allow_guest=True, methods=["GET"])
+@rate_limit(limit=60, seconds=60)
+def get_mobile_manifest() -> dict:
+	"""
+	Tells the mobile app which Field Sales edition serves this site, before sign-in.
+
+	``active`` is whether this app owns the Field Sales data (the Field Order DocType):
+	a site that has more than one edition installed answers from each, and only the
+	owner's methods act on the data. Nothing about users, settings or the store is returned.
+	"""
+	module = frappe.db.get_value("DocType", "Field Order", "module")
+	owner = frappe.local.module_app.get(frappe.scrub(module)) if module else None
+	return {
+		"edition": MOBILE_EDITION,
+		"contract_version": MOBILE_CONTRACT_VERSION,
+		"active": owner == __name__.split(".", 1)[0],
+		"capabilities": list(MOBILE_CAPABILITIES),
+	}

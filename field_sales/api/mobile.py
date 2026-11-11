@@ -837,6 +837,10 @@ def get_retailer_payments_list(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+# Returned as None to a retailer login by get_order_detail (keys kept so clients parse the same shape).
+RETAILER_HIDDEN_ORDER_FIELDS = ("sync_error", "location_id")
+
+
 @frappe.whitelist(methods=["GET"])
 def get_order_detail(order_id: str) -> dict:
 	"""
@@ -866,7 +870,7 @@ def get_order_detail(order_id: str) -> dict:
 		for item in doc.items
 	]
 
-	return {
+	detail = {
 		"name": doc.name,
 		"order_date": str(doc.order_date),
 		"retailer": doc.retailer,
@@ -891,6 +895,11 @@ def get_order_detail(order_id: str) -> dict:
 		"items": items,
 		"modified": str(doc.modified),
 	}
+	if is_retailer_user():
+		# Store sync internals (error text from the store, its location id) are for staff only.
+		for key in RETAILER_HIDDEN_ORDER_FIELDS:
+			detail[key] = None
+	return detail
 
 
 @frappe.whitelist(methods=["GET"])
@@ -1081,6 +1090,43 @@ ALLOWED_COUNT_DOCTYPES = {
 }
 
 
+# Filter on these as well as the fields the user may read (permlevel rules apply).
+COUNT_STANDARD_FIELDS = {"name", "owner", "creation", "modified", "modified_by", "docstatus"}
+
+
+def _count_filters(doctype: str, filters: str | dict | None) -> list[list]:
+	"""
+	``{"field": value}`` equality filters from the client, checked before they reach the query.
+
+	Each key must be a field of ``doctype`` the user may read and each value a plain scalar;
+	anything else is a ValidationError (not a database error), so the client gets a clear 417.
+	"""
+	if filters in (None, "", {}):
+		return []
+	if isinstance(filters, str):
+		try:
+			filters = json.loads(filters)
+		except ValueError:
+			frappe.throw(_("Filters must be a JSON object"), frappe.ValidationError)
+	if not isinstance(filters, dict):
+		frappe.throw(_("Filters must be a JSON object"), frappe.ValidationError)
+
+	allowed = COUNT_STANDARD_FIELDS | set(frappe.get_meta(doctype).get_permitted_fieldnames())
+	result = []
+	for key, value in filters.items():
+		if not isinstance(key, str) or key not in allowed:
+			frappe.throw(
+				_("Unknown filter field for {0}: {1}").format(
+					_(doctype), frappe.utils.escape_html(str(key)[:64])
+				),
+				frappe.ValidationError,
+			)
+		if value is not None and not isinstance(value, str | int | float | bool):
+			frappe.throw(_("Filter {0} must be a single value").format(key), frappe.ValidationError)
+		result.append([key, "=", value])
+	return result
+
+
 @frappe.whitelist(methods=["GET", "POST"])
 def get_mobile_count(
 	doctype: str,
@@ -1105,15 +1151,7 @@ def get_mobile_count(
 		if p_data and p_data.get("filters"):
 			filter_list.extend(p_data["filters"])
 
-	if isinstance(filters, str):
-		try:
-			filters = json.loads(filters)
-		except Exception:
-			filters = None
-
-	if isinstance(filters, dict):
-		for k, v in filters.items():
-			filter_list.append([k, "=", v])
+	filter_list.extend(_count_filters(doctype, filters))
 
 	# Scoped via frappe.get_list which applies row-level hierarchy permissions
 	rows = frappe.get_list(

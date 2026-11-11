@@ -26,14 +26,17 @@ PRICE = 100
 
 
 class TestRetailerLogin(IntegrationTestCase):
-	def test_invite_login_url_uses_current_request_origin(self):
+	def test_invite_login_url_uses_trusted_request_origin(self):
 		request = MagicMock(host="sales.example.com", scheme="https", headers={})
-		with patch.object(frappe.local, "request", request, create=True):
+		with (
+			patch.object(frappe.local, "request", request, create=True),
+			patch.dict(frappe.local.conf, {"field_sales_public_hosts": ["sales.example.com"]}),
+		):
 			self.assertEqual(
 				_retailer_login_url(), "https://sales.example.com/fieldsales/login"
 			)
 
-	def test_invite_login_url_prefers_public_forwarded_origin(self):
+	def test_invite_login_url_prefers_trusted_forwarded_origin(self):
 		request = MagicMock(
 			host="fieldsale.local:8000",
 			scheme="http",
@@ -42,7 +45,10 @@ class TestRetailerLogin(IntegrationTestCase):
 				"X-Forwarded-Proto": "https",
 			},
 		)
-		with patch.object(frappe.local, "request", request, create=True):
+		with (
+			patch.object(frappe.local, "request", request, create=True),
+			patch.dict(frappe.local.conf, {"field_sales_public_hosts": ["sales.example.com"]}),
+		):
 			self.assertEqual(
 				_retailer_login_url(), "https://sales.example.com/fieldsales/login"
 			)

@@ -37,6 +37,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync
 from field_sales.shopify.config import OAUTH_MODE
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.money import site_currency
+from field_sales.utils.urls import public_url
 
 API_BASE = "https://api.razorpay.com/v1"
 REQUEST_TIMEOUT = 20  # seconds
@@ -136,25 +137,16 @@ def get_webhook_url() -> str:
 	return webhook_url()
 
 
-# A bare host with an optional port, as a proxy puts it in X-Forwarded-Host.
-_FORWARDED_HOST = re.compile(r"[A-Za-z0-9.-]+(?::\d{1,5})?")
-
-
 def webhook_url() -> str:
 	"""
-	The webhook URL as the person viewing it reached the site.
+	The webhook URL as the person viewing it reached the site, from a trusted origin only.
 
 	Behind a tunnel (ngrok with ``--host-header``) the Host is the local site name, so the public
-	address only comes in X-Forwarded-Host / X-Forwarded-Proto. Without them: ``host_name``.
+	address only comes in X-Forwarded-Host / X-Forwarded-Proto; it is used when that host is one
+	the site is configured for (``field_sales.utils.urls.allowed_hosts``). Otherwise ``host_name``.
 	``host_name`` itself must stay local (PDF generation fetches CSS from it).
 	"""
-	request = getattr(frappe.local, "request", None)
-	headers = request.headers if request else {}
-	host = (headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
-	if host and _FORWARDED_HOST.fullmatch(host):
-		proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
-		return f"{proto if proto in ('http', 'https') else 'https'}://{host}{WEBHOOK_PATH}"
-	return frappe.utils.get_url(WEBHOOK_PATH)
+	return public_url(WEBHOOK_PATH)
 
 
 @frappe.whitelist(methods=["POST"])

@@ -4,7 +4,6 @@
 """Whitelisted endpoints used by the Store Connection, Retailer, Visit and Field Order forms and the Platform Product view."""
 
 
-import re
 from typing import NoReturn
 from urllib.parse import urlsplit
 
@@ -15,7 +14,7 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.query_builder.functions import Count, Sum
 from frappe.rate_limiter import rate_limit
 from frappe.sessions import clear_sessions
-from frappe.utils import flt, formatdate, get_link_to_form, get_url, getdate, now_datetime, nowdate
+from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
 from frappe.utils.password import check_password
 
 from field_sales.api import mobile
@@ -39,8 +38,16 @@ from field_sales.sync.products import enqueue_sync
 from field_sales.sync.stock import fetch_live_stock
 from field_sales.sync.stock import get_sell_locations as _get_sell_locations
 from field_sales.utils.credentials import rotate_api_secret
-from field_sales.utils.geo import has_coords, haversine_m, is_valid_coords, point_geojson
+from field_sales.utils.geo import (
+	LOCATION_FILL_MAX_ACCURACY_M,
+	has_coords,
+	haversine_m,
+	is_valid_coords,
+	parse_accuracy,
+	point_geojson,
+)
 from field_sales.utils.limits import SALES_REPS, check_limit
+from field_sales.utils.urls import public_url
 
 VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
 # Roles a user may hold for a manager to reset their password (the rest are automatic roles).
@@ -49,36 +56,17 @@ REP_ONLY_ROLES = {"Field Sales Rep", "All", "Guest", "Desk User"}
 LOGIN_ROLES = {"Sales Manager", "System Manager"}
 # A retailer login user holds the retailer role plus Frappe's automatic roles, nothing else.
 RETAILER_LOGIN_ROLES = {"Field Sales Retailer", "All", "Guest"}
-_SAFE_REQUEST_HOST = re.compile(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?")
 
 
 def _retailer_login_url() -> str:
-	"""Build the retailer login URL from the origin used for this API request.
-
-	Frappe's configured ``host_name`` may intentionally be an internal address
-	(for example, PDF rendering). Prefer the current request origin for invite
-	links, while rejecting malformed Host values and falling back to site config.
-	The reverse proxy must reject unknown Host headers and set trusted forwarded
-	headers; Frappe's ProxyFix consumes those headers before this function runs.
 	"""
-	request = getattr(frappe.local, "request", None)
-	if request:
-		# Some tunnels/proxies preserve the internal Host for upstream routing and
-		# expose the public origin only through X-Forwarded-* headers.
-		headers = request.headers
-		forwarded_host = (headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
-		forwarded_proto = (
-			(headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
-		)
-		if forwarded_host and _SAFE_REQUEST_HOST.fullmatch(forwarded_host):
-			scheme = forwarded_proto if forwarded_proto in ("http", "https") else "https"
-			return f"{scheme}://{forwarded_host}/fieldsales/login"
+	The retailer login URL for invite / reset emails.
 
-		host = (request.host or "").strip()
-		scheme = (request.scheme or "").lower()
-		if _SAFE_REQUEST_HOST.fullmatch(host) and scheme in ("http", "https"):
-			return f"{scheme}://{host}/fieldsales/login"
-	return get_url("/fieldsales/login")
+	Built from a trusted origin only (``field_sales.utils.urls.public_url``): the request's Host
+	or X-Forwarded-Host is used only when it is one of the site's configured hosts, so a forged
+	header cannot point the emailed link at another site.
+	"""
+	return public_url("/fieldsales/login")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -707,9 +695,16 @@ def check_in(visit: str, latitude: float, longitude: float, accuracy: float | No
 	retailer = frappe.db.get_value(
 		"Retailer", doc.retailer, ["latitude", "longitude"], as_dict=True, for_update=True
 	)
-	retailer_location_set = not has_coords(retailer.latitude, retailer.longitude)
+	# First visit to a shop with no location on file: this check-in becomes the shop's location.
+	# Only the visit's own retailer, only while its location is empty (row locked above, so two
+	# check-ins cannot both fill it), and only from a good fix: a rough one would set a wrong pin
+	# that every later geofence is measured against. Otherwise a manager sets it on the Retailer.
+	retailer_location_set = (
+		not has_coords(retailer.latitude, retailer.longitude)
+		and accuracy is not None
+		and accuracy <= LOCATION_FILL_MAX_ACCURACY_M
+	)
 	if retailer_location_set:
-		# First visit to a shop with no location on file: this check-in becomes the shop's location.
 		frappe.db.set_value(
 			"Retailer",
 			doc.retailer,
@@ -737,8 +732,13 @@ def check_in(visit: str, latitude: float, longitude: float, accuracy: float | No
 	doc.save()
 
 	warning = None
-	if not doc.within_geofence:
-		warning = _("You are {0} m away from the retailer").format(round(doc.distance_from_retailer_m))
+	if not has_coords(retailer.latitude, retailer.longitude):
+		warning = _(
+			"The shop's location was not saved: GPS accuracy must be {0} m or better. "
+			"Ask your manager to set it on the retailer."
+		).format(LOCATION_FILL_MAX_ACCURACY_M)
+	elif not doc.within_geofence:
+		warning = _("You are {0} m away from the retailer").format(round(flt(doc.distance_from_retailer_m)))
 
 	return {
 		"status": doc.status,
@@ -790,7 +790,7 @@ def check_out(
 		_("Checked out at {0}, {1} (±{2} m){3}").format(
 			latitude,
 			longitude,
-			round(accuracy),
+			round(accuracy) if accuracy is not None else "?",
 			_(", {0} m from the retailer").format(round(distance_m)) if distance_m is not None else "",
 		),
 	)
@@ -1078,8 +1078,11 @@ def _visit_order_status(order) -> str:
 	return order.sync_status or "Pending"
 
 
-def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]:
-	"""Validate a browser GPS fix: it comes from the client, so check it is a real point."""
+def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float | None]:
+	"""
+	Validate a GPS fix: it comes from the client, so check it is a real, finite point on the
+	globe and a sane accuracy (``parse_accuracy``; ``None`` when the client sent none).
+	"""
 	if latitude in (None, "") or longitude in (None, ""):
 		frappe.throw(_("Could not read your location. Allow location access and try again."))
 
@@ -1087,7 +1090,7 @@ def _parse_position(latitude, longitude, accuracy) -> tuple[float, float, float]
 	if not has_coords(latitude, longitude) or not is_valid_coords(latitude, longitude):
 		frappe.throw(_("Invalid location: {0}, {1}").format(latitude, longitude))
 
-	return latitude, longitude, max(flt(accuracy), 0)
+	return latitude, longitude, parse_accuracy(accuracy)
 
 
 def _check_own_visit(doc) -> None:
@@ -1131,6 +1134,18 @@ def _login_failure_key(usr: str) -> str:
 	return frappe.cache.make_key(f"field_sales:mobile_login_failures:{usr}")
 
 
+def _login_lockout_id(usr: str) -> str:
+	"""
+	The identity a failed login counts against: the matching User's name when there is one.
+
+	The database compares user names case- and accent-insensitively, so ``USER@x.com`` and
+	``úser@x.com`` sign in as ``user@x.com``. Keying the lockout on the typed text would give
+	each such variant its own five tries; keying on the User's name gives them one shared count.
+	"""
+	name = frappe.db.get_value("User", {"name": usr}, "name")
+	return (name or usr).lower()
+
+
 def _login_failed(usr: str) -> NoReturn:
 	"""Count a failed login for ``usr`` (kept for the lockout window) and refuse it."""
 	key = _login_failure_key(usr)
@@ -1163,7 +1178,7 @@ def mobile_login(usr: str, pwd: str) -> dict:
 	if len(usr) > 140 or len(pwd) > MAX_PASSWORD_SIZE:
 		frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
 
-	usr_key = usr.lower()
+	usr_key = _login_lockout_id(usr)
 	if frappe.utils.cint(frappe.cache.get(_login_failure_key(usr_key))) >= LOGIN_MAX_FAILURES:
 		frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
 

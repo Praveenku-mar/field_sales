@@ -106,8 +106,16 @@ class TestRazorpaySettings(IntegrationTestCase):
 		tunnel = MagicMock(
 			headers={"X-Forwarded-Host": "abc.ngrok-free.dev", "X-Forwarded-Proto": "https"}
 		)
-		with patch.object(frappe.local, "request", tunnel, create=True):
+		with (
+			patch.object(frappe.local, "request", tunnel, create=True),
+			patch.dict(frappe.local.conf, {"field_sales_public_hosts": ["abc.ngrok-free.dev"]}),
+		):
 			self.assertEqual(razorpay.webhook_url(), f"https://abc.ngrok-free.dev{WEBHOOK_PATH}")
+
+	def test_webhook_url_ignores_an_unknown_forwarded_host(self):
+		forged = MagicMock(headers={"X-Forwarded-Host": "evil.example.net", "X-Forwarded-Proto": "https"})
+		with patch.object(frappe.local, "request", forged, create=True):
+			self.assertEqual(razorpay.webhook_url(), frappe.utils.get_url(WEBHOOK_PATH))
 
 	def test_webhook_url_ignores_a_malformed_forwarded_host(self):
 		bad = MagicMock(headers={"X-Forwarded-Host": "evil.com/path?x=<script>"}, host="site.local")

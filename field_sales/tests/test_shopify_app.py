@@ -221,6 +221,45 @@ class TestOAuthInstall(ShopifyAppTestCase):
 		self.assertEqual(self.password("refresh_token"), "shprt_new")
 		self.assertFalse(self.settings().uninstalled_on)
 
+	def test_disabled_site_refuses_a_different_shop(self):
+		# Uninstalled / disabled: the old shop is still on file, so another shop cannot take over.
+		self.connect_oauth(enabled=0)
+		frappe.db.set_single_value("Store Connection", "uninstalled_on", now_datetime())
+		other = "intruder-shop.myshopify.com"
+		response = self.install(shop=other)
+		self.assertEqual(response.status_code, 400)
+		self.assertIn(b"reset the store connection", response.data)
+
+		# Nor at the callback, even with a state issued before the shop was on file.
+		frappe.cache.set(oauth._state_key("old-state"), other, ex=60)
+		response, post, _enqueue = self.callback("old-state", shop=other)
+		self.assertEqual(response.status_code, 400)
+		post.assert_not_called()
+		self.assertEqual(self.settings().store_url, SHOP)
+
+	def test_client_credentials_shop_on_file_also_blocks_another_shop(self):
+		frappe.db.set_single_value("Store Connection", {"store_url": f"https://{SHOP}/admin", "enabled": 0})
+		self.assertEqual(self.install(shop="intruder-shop.myshopify.com").status_code, 400)
+		self.assertEqual(self.install().status_code, 302)
+
+	def test_reset_connection_allows_a_new_shop(self):
+		self.connect_oauth(enabled=0)
+		frappe.set_user("Guest")
+		self.assertRaises(frappe.PermissionError, oauth.reset_connection)
+		frappe.set_user("Administrator")
+
+		result = oauth.reset_connection()
+		self.assertEqual(result["previous_shop"], SHOP)
+		settings = self.settings()
+		self.assertFalse(settings.store_url or settings.enabled)
+		self.assertFalse(self.password("access_token") or self.password("refresh_token"))
+
+		other = "new-owner.myshopify.com"
+		state, _query = self.state_from(self.install(shop=other))
+		response, _post, _enqueue = self.callback(state, shop=other)
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(self.settings().store_url, other)
+
 	def test_state_cannot_be_reused(self):
 		state, _query = self.state_from(self.install())
 		first, _post, _enqueue = self.callback(state)

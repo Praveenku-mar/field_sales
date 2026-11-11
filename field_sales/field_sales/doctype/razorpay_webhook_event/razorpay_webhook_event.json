@@ -9,7 +9,7 @@
  "module": "Field Sales",
  "name": "Razorpay Webhook Event",
  "owner": "Administrator",
- "modified": "2026-11-10 12:00:00.000000",
+ "modified": "2026-11-10 21:00:00.000000",
  "modified_by": "Administrator",
  "field_order": [
   "event_id",
@@ -98,18 +98,6 @@
  "permissions": [
   {
    "role": "System Manager",
-   "read": 1,
-   "report": 1,
-   "export": 1,
-   "write": 0,
-   "create": 0,
-   "delete": 0,
-   "email": 0,
-   "print": 0,
-   "share": 0
-  },
-  {
-   "role": "Sales Manager",
    "read": 1,
    "report": 1,
    "export": 1,

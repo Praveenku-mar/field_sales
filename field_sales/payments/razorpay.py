@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 import frappe
 import requests
 from frappe import _
-from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
 from frappe.query_builder.functions import Coalesce
 from frappe.utils import (
 	cint,
@@ -35,6 +34,7 @@ from frappe.utils import (
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
 from field_sales.shopify.config import OAUTH_MODE
+from field_sales.push.notify import notify_users
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.money import site_currency
 from field_sales.utils.urls import public_url
@@ -757,17 +757,7 @@ def _notify_payment(doc) -> None:
 		fmt_money(doc.amount_paid, currency=site_currency()),
 		escape_html(doc.retailer_name or doc.retailer or ""),
 	)
-	enqueue_create_notification(
-		users,
-		{
-			"type": "Alert",
-			"document_type": "Field Order",
-			"document_name": doc.name,
-			"from_user": "Administrator",
-			"subject": subject,
-			"email_content": subject,
-		},
-	)
+	notify_users(users, "payment_received", "Field Order", doc.name, subject)
 	message = _payment_fields(doc)
 	for user in users:
 		frappe.publish_realtime(PAYMENT_EVENT, message, user=user, after_commit=True)

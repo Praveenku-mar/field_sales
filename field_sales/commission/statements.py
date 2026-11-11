@@ -21,6 +21,7 @@ from frappe.utils import add_days, cint, flt, get_first_day, getdate, nowdate
 from field_sales.commission import commission_enabled, require_commission_enabled
 from field_sales.commission.engine import penalty_multiplier, slab_rate
 from field_sales.permissions import get_own_rep, is_admin
+from field_sales.push.events import notify_statement
 
 MANAGER_ROLES = {"Sales Manager", "System Manager"}
 
@@ -107,6 +108,7 @@ def mark_paid(name: str, paid_on: str | None = None, payment_reference: str | No
 
 	paid_on = getdate(paid_on) if paid_on else getdate(nowdate())
 	doc.db_set({"status": "Paid", "paid_on": paid_on, "payment_reference": payment_reference or ""})
+	notify_statement(doc, "statement_paid")
 	return {"name": doc.name, "status": "Paid", "paid_on": str(paid_on)}
 
 

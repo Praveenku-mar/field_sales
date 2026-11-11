@@ -25,6 +25,7 @@ from field_sales.commission.statements import (
 	check_not_own_commission,
 )
 from field_sales.permissions import get_allowed_reps, get_own_rep, is_admin
+from field_sales.push.events import notify_statement
 
 PERIODS = ("this_month", "last_month", "this_year", "all")
 MAX_PAGE_LENGTH = 2500
@@ -218,6 +219,7 @@ def approve_statement(name: str) -> dict:
 		frappe.throw(_("Only a Draft Commission Statement can be approved."))
 	doc.submit()
 	doc.reload()
+	notify_statement(doc, "statement_approved")
 	return {"name": doc.name, "status": doc.status, "net_payable": doc.net_payable}
 
 

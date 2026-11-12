@@ -13,7 +13,7 @@
       </template>
     </PageHeader>
     <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
-      <ListFilters v-model="model" search-placeholder="Search orders or customers" :tabs="tabs" :fields="filterFields">
+      <ListFilters v-model="model" search-placeholder="Search orders or shops" :tabs="tabs" :fields="filterFields">
         <PresetChip :label="presetLabel" />
       </ListFilters>
       <DataTable

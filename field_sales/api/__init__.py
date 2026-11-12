@@ -66,7 +66,7 @@ def _retailer_login_url() -> str:
 	or X-Forwarded-Host is used only when it is one of the site's configured hosts, so a forged
 	header cannot point the emailed link at another site.
 	"""
-	return public_url("/fieldsales/login")
+	return public_url("/login?redirect-to=%2Ffieldsales")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -199,8 +199,8 @@ def create_sales_rep(
 	mobile: str | None = None,
 	territory: str | None = None,
 	reports_to: str | None = None,
-	monthly_target: float | None = None,
-	max_discount_pct: float | None = None,
+	monthly_target: float | str | None = None,
+	max_discount_pct: float | str | None = None,
 	sales_manager: int = 0,
 	sales_rep: int = 1,
 	send_welcome_email: int = 1,

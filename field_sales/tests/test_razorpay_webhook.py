@@ -37,7 +37,7 @@ class TestRazorpayWebhook(IntegrationTestCase):
 		set_encrypted_password("Razorpay Settings", "Razorpay Settings", WEBHOOK_SECRET, "webhook_secret")
 		create_link_for_order(self.order.name)  # plink_1
 		self.paise = round(frappe.db.get_value("Field Order", self.order.name, "grand_total") * 100)
-		notify = patch.object(razorpay, "enqueue_create_notification")
+		notify = patch.object(razorpay, "notify_users")
 		self.notify = notify.start()
 		self.addCleanup(notify.stop)
 
@@ -108,10 +108,10 @@ class TestRazorpayWebhook(IntegrationTestCase):
 		manager = self._user("rzp.manager@example.com", "Sales Manager")
 		frappe.local.field_sales_role_users = None  # cached per request / job
 		self.post(self.body())
-		((users, values), _kwargs) = self.notify.call_args
+		((users, kind, doctype, docname, _subject), _kwargs) = self.notify.call_args
 		self.assertIn(self.rep_user, users)
 		self.assertIn(manager, users)
-		self.assertEqual(values["document_name"], self.order.name)
+		self.assertEqual((kind, doctype, docname), ("payment_received", "Field Order", self.order.name))
 
 	def test_partial_payment_is_partially_paid(self):
 		self.post(self.body(event="payment_link.partially_paid", status="partially_paid", amount_paid=10000))

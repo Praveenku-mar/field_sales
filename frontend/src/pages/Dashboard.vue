@@ -221,7 +221,7 @@
             label="Not Visited in 30 Days"
             icon="lucide-store"
             :value="a.not_visited_30d"
-            caption="Active customers"
+            caption="Active shops"
             :loading="!overview.data"
             :to="{ name: 'Retailers', query: { preset: 'not_visited_30d' } }"
             view-report
@@ -236,7 +236,7 @@
             view-report
           />
           <NumberCard
-            label="Pending Customers"
+            label="Pending Shops"
             icon="lucide-user-round-cog"
             :value="a.pending_retailers"
             caption="Waiting to sync to the store"
@@ -426,11 +426,11 @@
                   <div class="truncate font-medium text-polaris-text">{{ f.title || f.name }}</div>
                   <div class="truncate text-xs text-polaris-critical">{{ f.sync_error || 'Sync failed' }}</div>
                 </div>
-                <span class="text-xs text-polaris-secondary">{{ f.type === "Retailer" ? "Customer" : f.type }}</span>
+                <span class="text-xs text-polaris-secondary">{{ f.type === "Retailer" ? "Shop" : f.type }}</span>
               </RouterLink>
             </li>
           </ul>
-          <EmptyState v-else-if="overview.data" icon="lucide-circle-check" title="No sync failures" description="Every order and customer reached the store." />
+          <EmptyState v-else-if="overview.data" icon="lucide-circle-check" title="No sync failures" description="Every order and shop reached the store." />
         </SectionCard>
 
         <SectionCard title="Draft Orders" flush class="xl:col-span-2">
@@ -511,14 +511,14 @@ const PERIODS = [
 
 const orderColumns = [
   { label: 'Order', key: 'name', width: '9rem' },
-  { label: 'Customer', key: 'retailer_name', width: 2 },
+  { label: 'Shop', key: 'retailer_name', width: 2 },
   { label: 'Amount', key: 'grand_total', width: '7rem', align: 'right' },
   { label: 'Sync', key: 'sync_status', width: '6rem' },
   { label: 'Modified', key: 'modified', width: '7rem' },
 ]
 const visitColumns = [
   { label: 'Rep', key: 'rep_name', width: 2 },
-  { label: 'Customer', key: 'retailer_name', width: 2 },
+  { label: 'Shop', key: 'retailer_name', width: 2 },
   { label: 'Checked in', key: 'check_in_time', width: '8rem' },
 ]
 

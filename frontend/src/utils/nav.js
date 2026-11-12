@@ -21,7 +21,7 @@ export const NAV_ITEMS = [
     countTooltip: 'Orders that failed to sync',
     roles: STAFF,
   },
-  { label: 'Customers', route: 'Retailers', icon: 'lucide-store', count: 'retailers', roles: STAFF },
+  { label: 'Shops', route: 'Retailers', icon: 'lucide-store', count: 'retailers', roles: STAFF },
   { label: 'Products', route: 'Products', icon: 'lucide-package', roles: STAFF },
   { label: 'Visits', route: 'Visits', icon: 'lucide-map-pin-check', roles: STAFF },
   // Everyone: a rep sees themselves and their team (Sales Rep permission_query_conditions).
@@ -40,7 +40,7 @@ export const NAV_ITEMS = [
 export const TAB_ITEMS = [
   { label: 'Dashboard', route: 'Dashboard', icon: 'lucide-layout-dashboard', roles: STAFF },
   { label: 'Orders', route: 'Orders', icon: 'lucide-shopping-cart', roles: STAFF },
-  { label: 'Customers', route: 'Retailers', icon: 'lucide-store', roles: STAFF },
+  { label: 'Shops', route: 'Retailers', icon: 'lucide-store', roles: STAFF },
   { label: 'Visits', route: 'Visits', icon: 'lucide-map-pin-check', roles: STAFF },
   { label: 'My Orders', route: 'MyOrders', icon: 'lucide-shopping-cart', retailerOnly: true },
 ]

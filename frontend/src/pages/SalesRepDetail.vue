@@ -80,10 +80,10 @@
           </div>
         </div>
 
-        <SectionCard title="Customers">
+        <SectionCard title="Shops">
           <div class="flex items-baseline justify-between">
             <span class="text-2xl font-bold tracking-tight tabular-nums text-polaris-text">{{ retailerCount.data ?? '—' }}</span>
-            <span class="text-xs text-polaris-secondary">active customers assigned</span>
+            <span class="text-xs text-polaris-secondary">active shops assigned</span>
           </div>
         </SectionCard>
       </div>
@@ -339,7 +339,7 @@ const visits = createListResource({
 })
 const visitColumns = [
   { key: 'visit_date', label: 'Date', format: formatDate },
-  { key: 'retailer_name', label: 'Customer' },
+  { key: 'retailer_name', label: 'Shop' },
   { key: 'city', label: 'City' },
   { key: 'time_on_site_min', label: 'On Site', align: 'right', format: (v, r) => (r.status === 'Completed' ? `${v || 0} min` : '—') },
   { key: 'status', label: 'Status' },
@@ -355,7 +355,7 @@ const orders = createListResource({
 })
 const orderColumns = [
   { key: 'name', label: 'Order' },
-  { key: 'retailer_name', label: 'Customer' },
+  { key: 'retailer_name', label: 'Shop' },
   { key: 'order_date', label: 'Date', format: formatDate },
   { key: 'grand_total', label: 'Total', align: 'right', format: (v) => formatCurrency(v) },
   { key: 'sync_status', label: 'Status' },
@@ -382,7 +382,7 @@ const monthRows = computed(() => [
   { label: 'Visits completed', value: `${formatNumber(m.value.completed_visits)} of ${formatNumber(m.value.planned_visits)}` },
   { label: 'Missed visits', value: formatNumber(m.value.missed_visits), alert: m.value.missed_visits > 0 },
   { label: 'Visit → order', value: pct(m.value.conversion_pct) },
-  { label: 'Customers visited', value: formatNumber(m.value.retailers_visited) },
+  { label: 'Shops visited', value: formatNumber(m.value.retailers_visited) },
   { label: 'Failed syncs', value: formatNumber(m.value.failed_syncs), alert: m.value.failed_syncs > 0 },
 ])
 

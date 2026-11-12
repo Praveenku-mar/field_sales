@@ -27,6 +27,8 @@ class TestMerchantSettings(IntegrationTestCase):
 				"default_location_name": None,
 				"order_mode": "Draft",
 				"match_shop_settings": 0,
+				# A site may already use Administrator here; the save test checks it is not set.
+				"embedded_user": None,
 			},
 		)
 		settings = frappe.get_single("Store Connection")

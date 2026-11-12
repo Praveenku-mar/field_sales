@@ -14,7 +14,8 @@ Shopify App Store install: the OAuth authorization code grant with an expiring o
 
 Neither endpoint needs a Frappe login (``allow_guest``) or a browser cookie: state lives in
 Redis, so a router in front of several sites can forward these requests unchanged.
-One site serves one shop: a different shop is refused while the current one is connected.
+One site serves one shop: once a shop is on file, a different shop is refused until a System
+Manager clears the connection (``reset_connection``).
 """
 
 from __future__ import annotations
@@ -29,7 +30,12 @@ from frappe.utils import now_datetime
 from werkzeug.utils import redirect
 from werkzeug.wrappers import Response
 
-from field_sales.connectors.shopify import REQUEST_TIMEOUT, save_oauth_tokens
+from field_sales.connectors.shopify import (
+	REQUEST_TIMEOUT,
+	clear_oauth_tokens,
+	normalize_shop_domain,
+	save_oauth_tokens,
+)
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
 from field_sales.shopify import config
 
@@ -132,11 +138,56 @@ def _check_signed_request() -> str:
 
 
 def check_shop_allowed(shop: str) -> None:
-	"""One site, one shop: refuse a different shop while one is connected (enabled)."""
+	"""
+	One site, one shop: once a shop is on file (``store_url``), only that shop may install.
+
+	The install HMAC is signed with the app's secret, not bound to this site, so a merchant of
+	any shop can replay their own signed install link here. Refusing only while the connection
+	is enabled would let another shop take over a disabled or uninstalled site and receive its
+	retailers and orders. A different shop is allowed only after a System Manager clears the
+	connection (``reset_connection``). A first install (no ``store_url``) is allowed.
+	"""
 	settings = frappe.get_single("Store Connection")
-	connected = settings.enabled and settings.platform == "Shopify" and settings.store_url
-	if connected and settings.store_url.lower() != shop:
-		raise InstallError("This site is already connected to another shop.")
+	if settings.platform != "Shopify" or not settings.store_url:
+		return
+	if normalize_shop_domain(settings.store_url) != shop:
+		raise InstallError(
+			"This site is linked to another shop. A System Manager must reset the store connection first."
+		)
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_connection() -> dict:
+	"""
+	Forget the connected shop (System Manager only) so a different shop can install the app.
+
+	Drops the tokens, clears Store URL and disables the connection. Set directly: Store URL is
+	mandatory on the form and locked in OAuth mode. Synced records are left as they are.
+	"""
+	frappe.only_for("System Manager")
+	settings = frappe.get_single("Store Connection")
+	previous = settings.store_url
+	clear_oauth_tokens()
+	frappe.db.set_single_value(
+		"Store Connection",
+		{
+			"enabled": 0,
+			"store_url": None,
+			"shop_name": None,
+			"installed_on": None,
+			"uninstalled_on": None,
+			"last_test_status": "Connection reset",
+			"last_tested_on": now_datetime(),
+		},
+	)
+	log_sync_durable(
+		platform="Shopify",
+		operation="Install",
+		status="Success",
+		external_id=(previous or "")[:140] or None,
+		error_message=f"Store connection reset by {frappe.session.user}",
+	)
+	return {"reset": True, "previous_shop": previous}
 
 
 def _consume_state(state: str | None) -> str | None:

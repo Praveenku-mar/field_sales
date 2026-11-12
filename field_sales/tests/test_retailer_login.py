@@ -4,14 +4,19 @@
 """Retailer logins: the invite APIs, the row-level scope of a retailer user, the
 session/page gates for the app's login page and My Orders view."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe import Redirect
 from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate, set_request
 
-from field_sales.api import create_retailer_login, revoke_retailer_login, send_retailer_password_reset
+from field_sales.api import (
+	_retailer_login_url,
+	create_retailer_login,
+	revoke_retailer_login,
+	send_retailer_password_reset,
+)
 from field_sales.frontend_api import get_session
 from field_sales.permissions import get_own_retailer, is_retailer_user
 from field_sales.utils.anonymise import anonymise
@@ -21,6 +26,42 @@ PRICE = 100
 
 
 class TestRetailerLogin(IntegrationTestCase):
+	def test_invite_login_url_uses_trusted_request_origin(self):
+		request = MagicMock(host="sales.example.com", scheme="https", headers={})
+		with (
+			patch.object(frappe.local, "request", request, create=True),
+			patch.dict(frappe.local.conf, {"field_sales_public_hosts": ["sales.example.com"]}),
+		):
+			self.assertEqual(
+				_retailer_login_url(), "https://sales.example.com/login?redirect-to=%2Ffieldsales"
+			)
+
+	def test_invite_login_url_prefers_trusted_forwarded_origin(self):
+		request = MagicMock(
+			host="fieldsale.local:8000",
+			scheme="http",
+			headers={
+				"X-Forwarded-Host": "sales.example.com",
+				"X-Forwarded-Proto": "https",
+			},
+		)
+		with (
+			patch.object(frappe.local, "request", request, create=True),
+			patch.dict(frappe.local.conf, {"field_sales_public_hosts": ["sales.example.com"]}),
+		):
+			self.assertEqual(
+				_retailer_login_url(), "https://sales.example.com/login?redirect-to=%2Ffieldsales"
+			)
+
+	def test_invite_login_url_falls_back_for_malformed_request_host(self):
+		request = MagicMock(
+			host="evil.com/path?x=<script>", scheme="https", headers={}
+		)
+		with patch.object(frappe.local, "request", request, create=True):
+			self.assertEqual(
+				_retailer_login_url(), frappe.utils.get_url("/login?redirect-to=%2Ffieldsales")
+			)
+
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# No store pushes or emails from these tests; everything rolls back after each test.
@@ -361,14 +402,14 @@ class TestRetailerLogin(IntegrationTestCase):
 	def test_has_app_access(self):
 		self.assertTrue(self.as_user(self.retailer_user, has_app_access))
 
-	def test_login_page_loads_for_guest(self):
-		set_request(method="GET", path="/fieldsales/login")
-		frappe.set_user("Guest")
-		context = frappe._dict()
-		# The page commits the CSRF token; inside a test that would break rollback.
-		with patch("frappe.db.commit"):
-			get_context(context)  # no redirect, no PermissionError
-		self.assertTrue(context.boot.csrf_token)
+	def test_old_login_link_goes_to_frappe_login(self):
+		# The app has no login screen of its own: old links land on Frappe's login.
+		for path, home in (("/fieldsales/login", "/fieldsales"), ("/fs/login", "/fs")):
+			set_request(method="GET", path=path)
+			frappe.set_user("Guest")
+			frappe.local.flags.redirect_location = None
+			self.assertRaises(Redirect, get_context, frappe._dict())
+			self.assertEqual(frappe.local.flags.redirect_location, f"/login?redirect-to={home}")
 
 	def test_guest_redirected_to_app_login(self):
 		set_request(method="GET", path="/fieldsales/dashboard")
@@ -377,17 +418,17 @@ class TestRetailerLogin(IntegrationTestCase):
 		self.assertRaises(Redirect, get_context, frappe._dict())
 		self.assertEqual(
 			frappe.local.flags.redirect_location,
-			"/fieldsales/login?redirect-to=/fieldsales/dashboard",
+			"/login?redirect-to=/fieldsales/dashboard",
 		)
 
-	def test_login_page_loads_for_user_without_app_access(self):
+	def test_old_login_link_redirects_a_signed_in_user_too(self):
+		# Frappe's login sends a signed-in user on to redirect-to, or lets them switch user.
 		plain = self.make_user("rlogin.plain@example.com", [])
 		set_request(method="GET", path="/fieldsales/login")
 		frappe.set_user(plain)
-		context = frappe._dict()
-		with patch("frappe.db.commit"):
-			get_context(context)
-		self.assertTrue(context.boot.csrf_token)
+		frappe.local.flags.redirect_location = None
+		self.assertRaises(Redirect, get_context, frappe._dict())
+		self.assertEqual(frappe.local.flags.redirect_location, "/login?redirect-to=/fieldsales")
 
 	def test_other_pages_refuse_user_without_app_access(self):
 		plain = self.make_user("rlogin.plain@example.com", [])

@@ -3,13 +3,20 @@
 
 import math
 
+import re
+
 import frappe
 from frappe import _
-from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
 from frappe.model.document import Document
 from frappe.utils import flt, formatdate, get_datetime, get_fullname, getdate
 
-from field_sales.utils.geo import DEFAULT_GEOFENCE_RADIUS_M, has_coords, haversine_m
+from field_sales.utils.geo import (
+	DEFAULT_GEOFENCE_RADIUS_M,
+	has_coords,
+	haversine_m,
+	is_valid_coords,
+	parse_accuracy,
+)
 
 # Written only by field_sales.api.check_in / check_out, never taken from the client.
 CHECK_IN_FIELDS = ("check_in_time", "check_out_time", "latitude", "longitude", "location_accuracy_m")
@@ -17,14 +24,44 @@ CHECK_IN_STATUSES = ("In Progress", "Completed")
 RETAILER_POSITION_FIELDS = ("retailer_latitude", "retailer_longitude")
 
 
+# Same rule as Field Order.client_temp_id.
+CLIENT_TEMP_ID = re.compile(r"[A-Za-z0-9._:-]{1,140}")
+
+
 class Visit(Document):
 	def validate(self):
+		self._validate_client_temp_id()
 		self._guard_check_in_fields()
+		self._validate_position()
 		self._validate_checkout_after_checkin()
 		self._validate_completed_requires_checkin()
 		self._compute_time_on_site()
 		self._compute_distance_and_geofence()
 		self._set_order_outcome()
+
+	def _validate_client_temp_id(self):
+		"""
+		The app's id for a visit it created, set once on insert: a retry after a timeout
+		finds the visit (``find_visit_by_client_temp_id``) or is refused as a duplicate here,
+		instead of creating a second visit. A cancelled visit may be planned again.
+		"""
+		if not self.is_new():
+			before = self.get_doc_before_save()
+			if before:
+				self.client_temp_id = before.client_temp_id
+			return
+		self.client_temp_id = (self.client_temp_id or "").strip() or None
+		if not self.client_temp_id:
+			return
+		if not CLIENT_TEMP_ID.fullmatch(self.client_temp_id):
+			frappe.throw(_("Client Temp ID may hold only letters, digits and . _ : -"))
+		existing = frappe.db.get_value(
+			"Visit", {"client_temp_id": self.client_temp_id, "status": ("!=", "Cancelled")}, "name"
+		)
+		if existing:
+			frappe.throw(
+				_("This visit was already created as {0}").format(existing), frappe.DuplicateEntryError
+			)
 
 	def after_insert(self):
 		self._notify_rep()
@@ -64,16 +101,16 @@ class Visit(Document):
 				formatdate(self.visit_date),
 				frappe.utils.escape_html(get_fullname(frappe.session.user)),
 			)
-		enqueue_create_notification(
+		from field_sales.push.notify import notify_users
+
+		notify_users(
 			[user],
-			{
-				"type": "Alert",
-				"document_type": "Visit",
-				"document_name": self.name,
-				"from_user": frappe.session.user,
-				"subject": subject,
-				"email_content": subject,
-			},
+			"visit_rescheduled" if rescheduled else "visit_assigned",
+			"Visit",
+			self.name,
+			subject,
+			from_user=frappe.session.user,
+			params={"date": str(self.visit_date)},
 			dedupe_on=["document_type", "document_name", "subject"],
 		)
 
@@ -115,6 +152,27 @@ class Visit(Document):
 		if fieldname in ("check_in_time", "check_out_time"):
 			return get_datetime(value) if value else None
 		return flt(value)
+
+	def _validate_position(self):
+		"""
+		The check-in point is a real, finite point on the globe and its accuracy is sane
+		(``parse_accuracy``). The API checks this already; this also covers System Manager
+		edits and data import. Only changed values are checked, so an old row still saves.
+		"""
+
+		def changed(*fields):
+			return self.is_new() or any(self.has_value_changed(f) for f in fields)
+
+		for lat_field, lon_field in (("latitude", "longitude"), ("retailer_latitude", "retailer_longitude")):
+			lat, lon = self.get(lat_field), self.get(lon_field)
+			if (
+				changed(lat_field, lon_field)
+				and has_coords(lat, lon)
+				and not is_valid_coords(flt(lat), flt(lon))
+			):
+				frappe.throw(_("Invalid location: {0}, {1}").format(lat, lon))
+		if self.location_accuracy_m not in (None, "") and changed("location_accuracy_m"):
+			self.location_accuracy_m = parse_accuracy(self.location_accuracy_m)
 
 	def _validate_checkout_after_checkin(self):
 		"""Check-out time, when present, must be strictly after check-in time."""

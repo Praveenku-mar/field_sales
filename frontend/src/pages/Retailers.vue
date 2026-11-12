@@ -1,9 +1,9 @@
 <template>
   <!-- Full height: the table fills what is left and scrolls inside its card -->
   <div class="flex h-full flex-col">
-    <PageHeader title="Customers">
+    <PageHeader title="Shops">
       <template #actions>
-        <Button label="New Customer" icon-left="lucide-plus" variant="solid" @click="newRetailerOpen = true" />
+        <Button label="New Shop" icon-left="lucide-plus" variant="solid" @click="newRetailerOpen = true" />
       </template>
     </PageHeader>
     <div class="flex min-h-0 flex-1 flex-col gap-3 px-4 sm:px-6 pb-4 sm:pb-6">
@@ -19,7 +19,7 @@
         v-model:page-length="pageSize"
         :row-route="(row) => ({ name: 'Retailer', params: { name: row.name } })"
         empty-icon="lucide-store"
-        empty-title="No customers found"
+        empty-title="No shops found"
         @load-more="list.next()"
       >
         <template #cell-retailer_name="{ row }">
@@ -63,7 +63,7 @@ const fields = [
   { fieldname: 'sync_status', label: 'Sync', options: ['', 'Draft', 'Pending', 'Synced', 'Failed'] },
 ]
 const columns = [
-  { key: 'retailer_name', label: 'Customer' },
+  { key: 'retailer_name', label: 'Shop' },
   { key: 'retailer_type', label: 'Type' },
   { key: 'sales_rep_name', label: 'Sales Rep' },
   { key: 'phone', label: 'Phone' },

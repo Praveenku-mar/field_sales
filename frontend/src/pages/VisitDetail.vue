@@ -141,7 +141,7 @@ const orders = createResource({ url: 'field_sales.api.get_visit_orders', params:
 const canOrder = computed(() => ['In Progress', 'Completed'].includes(d.value.status))
 
 const details = computed(() => [
-  { label: 'Customer', value: d.value.retailer_name, route: d.value.retailer && { name: 'Retailer', params: { name: d.value.retailer } } },
+  { label: 'Shop', value: d.value.retailer_name, route: d.value.retailer && { name: 'Retailer', params: { name: d.value.retailer } } },
   { label: 'City', value: d.value.city },
   { label: 'Sales Rep', value: d.value.sales_rep_name },
   { label: 'Date', value: formatDate(d.value.visit_date) },
@@ -154,11 +154,11 @@ const geo = computed(() => [
     value: !d.value.check_in_time
       ? 'Not checked in'
       : d.value.within_geofence
-        ? `Inside (${Math.round(d.value.distance_from_retailer_m || 0)} m from the customer)`
-        : `Outside — ${Math.round(d.value.distance_from_retailer_m || 0)} m from the customer`,
+        ? `Inside (${Math.round(d.value.distance_from_retailer_m || 0)} m from the shop)`
+        : `Outside — ${Math.round(d.value.distance_from_retailer_m || 0)} m from the shop`,
   },
   { label: 'GPS accuracy', value: d.value.location_accuracy_m ? `± ${Math.round(d.value.location_accuracy_m)} m` : null },
-  { label: 'Map shows', value: d.value.latitude ? 'Where the rep checked in' : 'The customer (no check-in yet)' },
+  { label: 'Map shows', value: d.value.latitude ? 'Where the rep checked in' : 'The shop (no check-in yet)' },
 ])
 const outcome = computed(() => [
   { label: 'Order Taken', value: d.value.order_taken ? 'Yes' : 'No' },
@@ -186,7 +186,7 @@ const banner = computed(() => {
     return { text: `Check-in opens on ${formatDate(d.value.visit_date)}.`, class: 'border border-[#e1e3e5] bg-[#f1f2f4] text-[#616161]' }
   }
   if (d.value.check_in_time && !d.value.within_geofence) {
-    return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the customer.`, class: 'border border-[#fbd88e] bg-[#fef3d6] text-[#744210]' }
+    return { text: `Checked in ${Math.round(d.value.distance_from_retailer_m || 0)} m away from the shop.`, class: 'border border-[#fbd88e] bg-[#fef3d6] text-[#744210]' }
   }
   return null
 })

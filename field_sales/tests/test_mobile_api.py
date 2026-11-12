@@ -14,6 +14,7 @@ from field_sales.api.mobile import (
 	get_order_detail,
 	get_orders_list,
 	get_product_detail_stock,
+	get_product_sync_status,
 	get_products_list,
 	get_team_list,
 	get_visit_detail,
@@ -103,6 +104,39 @@ class TestMobileAPI(FrappeTestCase):
 			self.assertIn("city", first)
 			self.assertNotIn("address_line1", first)
 
+	def test_orders_payment_status_filter(self):
+		"""payment_status narrows the list; unknown values are ignored, not injected."""
+		res = get_orders_list(limit=100, payment_status="Paid")
+		self.assertTrue(all(r["payment_status"] == "Paid" for r in res["items"]))
+		unfiltered = get_orders_list(limit=5)
+		bogus = get_orders_list(limit=5, payment_status="' OR 1=1 --")
+		self.assertEqual(
+			[r["name"] for r in bogus["items"]],
+			[r["name"] for r in unfiltered["items"]],
+		)
+
+	def test_customers_retailer_type_filter(self):
+		"""retailer_type narrows the list and is returned on each card."""
+		res = get_customers_list(limit=100, retailer_type="Kirana")
+		for row in res["items"]:
+			self.assertEqual(row["retailer_type"], "Kirana")
+		unfiltered = get_customers_list(limit=5)
+		bogus = get_customers_list(limit=5, retailer_type="Nope")
+		self.assertEqual(
+			[r["name"] for r in bogus["items"]],
+			[r["name"] for r in unfiltered["items"]],
+		)
+
+	def test_customers_preset_matches_dashboard_count(self):
+		"""A Retailer preset lists exactly the customers its dashboard card counts."""
+		for key in ("not_visited_30d", "pending_retailers"):
+			listed = get_customers_list(limit=500, preset=key)
+			count = get_mobile_count("Retailer", preset=key)["count"]
+			self.assertEqual(len(listed["items"]), min(count, 500), key)
+		for bogus in ("draft_orders", "' OR 1=1 --"):
+			with self.assertRaises(frappe.ValidationError):
+				get_customers_list(limit=5, preset=bogus)
+
 	def test_products_keyset_pagination(self):
 		"""Products list returns card fields with price and available quantity."""
 		res = get_products_list(limit=3)
@@ -187,3 +221,52 @@ class TestMobileAPI(FrappeTestCase):
 			self.assertIsInstance(act["orders_30d"], int)
 			self.assertIsInstance(act["units_30d"], float)
 			self.assertIsInstance(act["value_30d"], float)
+
+	def test_products_location_stock_overlay(self):
+		"""get_products_list overlays location-specific stock when location_id is supplied."""
+		from field_sales.sync.stock import get_sell_locations
+		locations = get_sell_locations()
+		if locations:
+			loc_id = locations[0]["location_id"]
+			res = get_products_list(limit=10, location_id=loc_id)
+			self.assertIn("items", res)
+			for item in res["items"]:
+				if item.get("track_inventory"):
+					self.assertIn("available_qty", item)
+					self.assertEqual(item.get("location_id"), loc_id)
+
+	def test_products_tab_filters_and_barcode(self):
+		"""get_products_list supports tabs ('Active', 'low', 'all') and exact/EAN barcode lookup."""
+		active_res = get_products_list(tab="Active", limit=5)
+		self.assertIn("items", active_res)
+		for item in active_res["items"]:
+			self.assertEqual(item["status"], "Active")
+
+		low_res = get_products_list(tab="low", limit=5)
+		self.assertIn("items", low_res)
+		for item in low_res["items"]:
+			self.assertEqual(item["status"], "Active")
+			self.assertLessEqual(item["available_qty"], 5)
+
+		# Barcode search
+		p_rows = frappe.get_all("Platform Product", fields=["name", "barcode"], limit=1)
+		if p_rows and p_rows[0].get("barcode"):
+			code = p_rows[0]["barcode"]
+			b_res = get_products_list(barcode=code)
+			self.assertTrue(any(p["name"] == p_rows[0]["name"] for p in b_res["items"]))
+
+	def test_product_sync_status_and_permissions(self):
+		"""get_product_sync_status returns sync status for managers and blocks unauthorized users."""
+		# Administrator / Sales Manager has permission
+		frappe.set_user("Administrator")
+		status = get_product_sync_status()
+		self.assertIn("is_running", status)
+		self.assertIn("last_sync", status)
+		if status["last_sync"]:
+			self.assertIn("status", status["last_sync"])
+			self.assertIn("timestamp", status["last_sync"])
+
+		# Unauthorized rep role without Sales Manager is blocked
+		frappe.set_user("guest@example.com")
+		with self.assertRaises(frappe.PermissionError):
+			get_product_sync_status()

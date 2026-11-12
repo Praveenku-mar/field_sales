@@ -218,13 +218,10 @@ has_permission = {
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	# Push bell notifications made by push.notify.notify_users to the mobile app.
+	"Notification Log": {"after_insert": "field_sales.push.notify.on_notification_log_insert"},
+}
 
 # Scheduled Tasks
 # ---------------

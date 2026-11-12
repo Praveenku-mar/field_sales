@@ -30,6 +30,7 @@ from field_sales.permissions import (
 	sales_rep_query,
 	visit_query,
 )
+from field_sales.push.events import LOW_STOCK_QTY
 from field_sales.utils.search import escape_like
 
 DEFAULT_PAGE_SIZE = 50
@@ -580,7 +581,8 @@ def get_products_list(
 	if tab == "low":
 		where.append("`tabPlatform Product`.`status` = 'Active'")
 		where.append("`tabPlatform Product`.`track_inventory` = 1")
-		where.append("`tabPlatform Product`.`available_qty` <= 5")
+		where.append("`tabPlatform Product`.`available_qty` <= %(f_low_qty)s")
+		params["f_low_qty"] = LOW_STOCK_QTY
 	elif tab == "all":
 		pass
 	elif status and status.strip() in ("Active", "Archived", "Draft"):
@@ -759,15 +761,6 @@ def get_commission_statements_list(
 			params["f_rep"] = sales_rep.strip()
 
 	decoded_cursor = decode_cursor(cursor, ("period_start", "name"))
-	return _execute_keyset_query(
-		doctype="Commission Statement",
-		fields=COMMISSION_CARD_FIELDS,
-		order_by=list(COMMISSION_KEYS),
-		cursor_dict=decoded_cursor,
-		where_clauses=where,
-		params=params,
-		limit=limit,
-	)
 	return _execute_keyset_query(
 		doctype="Commission Statement",
 		fields=COMMISSION_CARD_FIELDS,
@@ -1168,8 +1161,10 @@ def get_mobile_count(
 		presets = get_attention_presets() or {}
 		cards = get_card_presets() or {}
 		p_data = presets.get(preset) or cards.get(preset)
-		if p_data and p_data.get("filters"):
-			filter_list.extend(p_data["filters"])
+		# Same rule as the list (_preset_conditions): a preset counts only its own doctype.
+		if not p_data or p_data.get("doctype") != doctype:
+			frappe.throw(_("Unknown list preset: {0}").format(preset), frappe.ValidationError)
+		filter_list.extend(p_data.get("filters") or [])
 
 	filter_list.extend(_count_filters(doctype, filters))
 
@@ -1256,7 +1251,12 @@ def mobile_search(
 			results.extend(rows)
 
 	# 3. Platform Products
-	if (not doctype or doctype == "Platform Product") and len(results) < limit and not is_retailer_user(user):
+	if (
+		(not doctype or doctype == "Platform Product")
+		and len(results) < limit
+		and not is_retailer_user(user)
+		and frappe.has_permission("Platform Product", "read")
+	):
 		rows = frappe.db.sql(
 			"""
 			SELECT name, product_title as title, sku as subtitle, status as badge, 'Platform Product' as doctype

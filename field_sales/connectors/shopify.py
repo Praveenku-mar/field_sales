@@ -175,6 +175,16 @@ ORDER_METAFIELDS = {
 # Draft orders get the fields too; Shopify does not copy them when a draft is completed.
 METAFIELD_OWNER_TYPES = ("ORDER", "DRAFTORDER")
 
+# A retry's search for a draft made by an attempt whose response was lost: the customer's
+# recent Field Sales drafts, matched on the Field Order No metafield (or the note of older ones).
+DRAFT_ORDER_SEARCH = """
+query($q: String!) {
+  draftOrders(first: 25, sortKey: UPDATED_AT, reverse: true, query: $q) {
+    nodes { %s note2 metafield(namespace: "%s", key: "field_order_no") { value } }
+  }
+}
+""" % (DRAFT_ORDER_FIELDS, METAFIELD_NAMESPACE)
+
 METAFIELD_DEFINITION_CREATE = """
 mutation($definition: MetafieldDefinitionInput!) {
   metafieldDefinitionCreate(definition: $definition) { createdDefinition { id } userErrors { field message code } }
@@ -622,8 +632,10 @@ class ShopifyConnector(BaseConnector):
 		  non-taxable line item to keep the total equal.
 
 		Retries never duplicate: a linked draft is reused (or its completed
-		order returned), and an order already created for this Field Order is
-		found by its source identifier (the Field Order name).
+		order returned); on a retry without one, a draft an earlier attempt made
+		but never reported is found by its Field Order No (``_find_draft``); and
+		an order already created for this Field Order is found by its source
+		identifier (the Field Order name).
 
 		The order (or draft) carries the Field Order No and Sales Rep fields
 		(``ORDER_METAFIELDS``) and a single "field-sales" tag.
@@ -643,6 +655,9 @@ class ShopifyConnector(BaseConnector):
 			)
 
 		draft = self._get_draft(field_order.external_draft_id, field_order) if field_order.external_draft_id else None
+		if not draft and cint(field_order.sync_attempts) > 1:
+			# A retry: an earlier attempt may have created the draft and lost the response.
+			draft = self._find_draft(field_order, retailer)
 		if draft and draft.get("status") == "COMPLETED":
 			return _order_result(draft)
 
@@ -792,6 +807,21 @@ class ShopifyConnector(BaseConnector):
 		if draft.get("status") == "COMPLETED":
 			return _order_result(draft)["order_id"]
 		self._graphql(DRAFT_ORDER_DELETE, {"id": draft["id"]}, operation="Other", ref=field_order)
+		return None
+
+	def _find_draft(self, field_order, retailer) -> dict | None:
+		"""A draft already made for this Field Order whose id never reached us, or ``None``."""
+		data = self._graphql(
+			DRAFT_ORDER_SEARCH,
+			{"q": f"customer_id:{retailer.external_customer_id} tag:field-sales"},
+			operation="Create Order",
+			ref=field_order,
+		)
+		note_prefix = f"Field Order {field_order.name} "
+		for node in (data.get("draftOrders") or {}).get("nodes") or []:
+			field_order_no = (node.get("metafield") or {}).get("value")
+			if field_order_no == field_order.name or (node.get("note2") or "").startswith(note_prefix):
+				return node
 		return None
 
 	def _delete_draft(self, draft_gid: str, field_order) -> None:

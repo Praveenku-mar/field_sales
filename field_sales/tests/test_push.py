@@ -196,6 +196,42 @@ class TestPush(IntegrationTestCase):
 		self.assertEqual(json.loads(settings.get_password("service_account_json")), key)
 		self.assertFalse(frappe.db.exists("File", {"file_url": url}))
 
+	def test_refused_key_file_is_removed_after_the_rollback(self):
+		settings = frappe.get_doc("Mobile Push Settings")
+		url = self.upload(json.dumps({"project_info": {}}), "google-services.json")
+		file_name = frappe.db.get_value("File", {"file_url": url})
+		file_path = frappe.get_doc("File", file_name).get_full_path()
+		settings.service_account_file = url
+		with self.assertRaises(frappe.ValidationError):
+			settings.save(ignore_permissions=True)
+		with patch.object(frappe.db, "commit"):
+			frappe.db.rollback()  # the request's rollback runs the cleanup
+		self.assertFalse(frappe.db.exists("File", file_name))
+		self.assertFalse(os.path.exists(file_path))
+
+	def test_expired_access_token_is_refreshed_once(self):
+		token = "fcm-token-expired-access-000001"
+		self.register(self.rep_user, token)
+		self.responses = [(401, {"error": {"status": "UNAUTHENTICATED"}}, {})]
+		result = fcm.send_to_user(self.rep_user, "t", "b", {})
+		self.assertEqual(result["sent"], 1)
+		self.assertEqual(fcm._access_token.call_count, 2)
+		self.assertEqual(len(self.sent_to(token)), 2)
+
+	def test_no_access_token_counts_every_phone_failed(self):
+		self.register(self.rep_user, "fcm-token-no-access-000000001")
+		self.register(self.rep_user, "fcm-token-no-access-000000002")
+		with patch.object(fcm, "_access_token", side_effect=ValueError("invalid_grant")):
+			result = fcm.send_to_user(self.rep_user, "t", "b", {})
+		self.assertEqual(result, {"sent": 0, "failed": 2, "disabled": 0})
+		self.assertEqual(self.sent, [])
+
+	def test_low_stock_with_nobody_to_tell_is_not_marked_reported(self):
+		product = "LOW-STOCK-NOBODY"
+		with patch(f"{APP}.sync.notify.users_with_roles", return_value=[]):
+			events.notify_low_stock([(product, 1)])
+		self.assertFalse(frappe.cache.get_value(f"field_sales:low_stock_notified:{product}"))
+
 	def test_google_services_json_is_refused_as_a_key(self):
 		app_config = {"project_info": {"project_id": "fs-push-test"}, "client": []}
 		settings = frappe.get_doc("Mobile Push Settings")

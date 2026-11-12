@@ -123,7 +123,7 @@ Store access goes through a platform-neutral connector layer; only `connectors/s
 - Commission entries keep the rate they were created with; editing a plan doesn't change existing entries. Tiered Slab rates are provisional until the statement is built.
 - Field Order tax is calculated before the discount (invoice prints the Field Order's own amounts). TODO: verify with accounting whether tax should follow the discount.
 - Draft mode: the store order (and commission, confirmation email, metafields) only exists once the draft is completed; Shopify doesn't copy draft metafields to the order, so `link_completed_drafts()` sets them.
-- Retry de-duplication finds an existing order by `source_identifier` (Field Order name), falling back to the legacy `field-order-<name>` tag.
+- Retry de-duplication finds an existing order by `source_identifier` (Field Order name), falling back to the legacy `field-order-<name>` tag. In Draft mode a retry without a stored draft id (the first attempt's response was lost) looks for the customer's `field-sales` drafts and reuses the one whose Field Order No metafield (or older note) matches (`shopify.py → _find_draft()`, only when `sync_attempts > 1`).
 - PDF generation fetches print CSS from the site's `host_name`; a public/unreachable `host_name` (e.g. a tunnel URL) makes wkhtmltopdf hang — capped at 60 s in `sync/confirmation.py`.
 - Shopify requests use a (5 s connect, 30 s read) timeout; a broken IPv6 route otherwise stalls each call.
 - Webhook signatures are verified with the app's client secret; webhooks created in Shopify admin may use a different key and fail verification.

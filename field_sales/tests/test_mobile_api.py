@@ -137,6 +137,12 @@ class TestMobileAPI(FrappeTestCase):
 			with self.assertRaises(frappe.ValidationError):
 				get_customers_list(limit=5, preset=bogus)
 
+	def test_count_refuses_a_preset_of_another_doctype(self):
+		"""A preset counts only its own doctype, as the list does (no SQL error, no unfiltered count)."""
+		for doctype, preset in (("Field Order", "not_visited_30d"), ("Retailer", "no-such-preset")):
+			with self.assertRaises(frappe.ValidationError):
+				get_mobile_count(doctype, preset=preset)
+
 	def test_products_keyset_pagination(self):
 		"""Products list returns card fields with price and available quantity."""
 		res = get_products_list(limit=3)

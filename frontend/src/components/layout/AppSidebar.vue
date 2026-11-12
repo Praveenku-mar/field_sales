@@ -1,9 +1,9 @@
 <template>
   <Sidebar v-model:collapsed="collapsed" width="240px" class="border-r border-[#e1e3e5] bg-white">
     <SidebarHeader
-      title="Field Sales"
+      title="Agamsale"
       :subtitle="storeSubtitle"
-      logo="/assets/field_sales/images/logo.svg"
+      logo="/assets/field_sales/images/agamsale-logo.png"
       class="px-2"
     />
 
@@ -76,7 +76,7 @@ const storeSubtitle = computed(() => {
   if (session.store?.name) {
     return session.store.name.includes('.') ? session.store.name : `${session.store.name}.myshopify.com`
   }
-  return 'Shopify Field Sales'
+  return 'Shopify Agamsale'
 })
 
 const navItems = computed(() => NAV_ITEMS.filter((item) => session.canSee(item)))

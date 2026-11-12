@@ -118,7 +118,7 @@ def send_test_notification(user: str | None = None) -> dict:
 		)
 	if not frappe.db.exists("Mobile Device", {"user": user, "enabled": 1}):
 		frappe.throw(
-			_("{0} has no phone registered. Sign in to the Field Sales mobile app as {0} and allow notifications first.").format(
+			_("{0} has no phone registered. Sign in to the Agamsale mobile app as {0} and allow notifications first.").format(
 				user
 			)
 		)

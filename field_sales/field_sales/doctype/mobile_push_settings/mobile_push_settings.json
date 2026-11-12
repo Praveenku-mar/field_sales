@@ -19,7 +19,7 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled",
-   "description": "Send bell notifications to the Field Sales mobile app as push notifications"
+   "description": "Send bell notifications to the Agamsale mobile app as push notifications"
   },
   {
    "fieldname": "service_account_file",

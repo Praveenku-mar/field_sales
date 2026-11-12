@@ -1,7 +1,7 @@
 app_name = "field_sales"
-app_title = "Field Sales"
+app_title = "Agamsale"
 app_publisher = "Agamnxt Technologies"
-app_description = "Field Sales is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
+app_description = "Agamsale is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
 app_email = "praveenkumar@agamnxt.com"
 app_license = "mit"
 
@@ -19,7 +19,7 @@ use_json_request_body = True
 # 	{
 # 		"name": "field_sales",
 # 		"logo": "/assets/field_sales/logo.png",
-# 		"title": "Field Sales",
+# 		"title": "Agamsale",
 # 		"route": "/field_sales",
 # 		"has_permission": "field_sales.api.permission.has_app_permission",
 # 	}
@@ -89,8 +89,8 @@ use_json_request_body = True
 add_to_apps_screen = [
 	{
 		"name": "field_sales",
-		"logo": "/assets/field_sales/images/logo.svg",
-		"title": "Field Sales",
+		"logo": "/assets/field_sales/images/agamsale-logo.png",
+		"title": "Agamsale",
 		"route": "/fieldsales",
 		"has_permission": "field_sales.www.fieldsales.has_app_access",
 	}

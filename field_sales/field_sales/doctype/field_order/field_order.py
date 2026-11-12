@@ -201,10 +201,14 @@ class FieldOrder(Document):
 		instead of creating a second order.
 		"""
 		if not self.is_new():
+			# Keep the stored key, never recompute it: a duplicate made before the unique key
+			# existed holds none (patch client_temp_key) and must stay savable.
 			before = self.get_doc_before_save()
 			if before:
 				self.client_temp_id = before.client_temp_id
-			self.client_temp_key = self.client_temp_id
+				self.client_temp_key = before.client_temp_key
+			else:
+				self.client_temp_key = frappe.db.get_value("Field Order", self.name, "client_temp_key")
 			return
 		self.client_temp_id = (self.client_temp_id or "").strip() or None
 		if not self.client_temp_id:

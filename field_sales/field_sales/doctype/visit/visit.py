@@ -49,7 +49,16 @@ class Visit(Document):
 			before = self.get_doc_before_save()
 			if before:
 				self.client_temp_id = before.client_temp_id
-			self.client_temp_key = None if self.status == "Cancelled" else self.client_temp_id
+			stored = before.client_temp_key if before else frappe.db.get_value("Visit", self.name, "client_temp_key")
+			if self.status == "Cancelled":
+				self.client_temp_key = None  # a cancelled visit frees its id
+			elif before and before.status == "Cancelled":
+				# Un-cancelled: claims the id again (refused by the unique key if it was reused meanwhile).
+				self.client_temp_key = self.client_temp_id
+			else:
+				# Keep the stored key, never recompute it: a duplicate made before the unique key
+				# existed holds none (patch client_temp_key) and must stay savable.
+				self.client_temp_key = stored
 			return
 		self.client_temp_id = (self.client_temp_id or "").strip() or None
 		if not self.client_temp_id:

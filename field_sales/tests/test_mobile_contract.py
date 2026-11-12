@@ -361,6 +361,58 @@ class TestMobileContract(IntegrationTestCase):
 			frappe.db.get_value("Visit", reused_visit.name, "client_temp_key"), "reuse-visit-1"
 		)
 
+	def test_legacy_duplicate_stays_savable(self):
+		"""Duplicates made before the unique key existed (left keyless by the patch) can still be saved."""
+		order_values = {
+			"doctype": "Field Order",
+			"retailer": self.retailer,
+			"sales_rep": self.rep,
+			"order_date": nowdate(),
+			"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
+		}
+		visit_values = {
+			"doctype": "Visit",
+			"retailer": self.retailer,
+			"sales_rep": self.rep,
+			"visit_date": nowdate(),
+			"status": "Planned",
+		}
+		for doctype, values in (("Field Order", order_values), ("Visit", visit_values)):
+			with self.subTest(doctype):
+				first = frappe.get_doc(values).insert(ignore_permissions=True).name
+				second = frappe.get_doc(values).insert(ignore_permissions=True).name
+				# As the patch leaves them: same id, only the oldest holds the key.
+				frappe.db.set_value(doctype, first, {"client_temp_id": "legacy-dup", "client_temp_key": "legacy-dup"})
+				frappe.db.set_value(doctype, second, {"client_temp_id": "legacy-dup", "client_temp_key": None})
+
+				doc = frappe.get_doc(doctype, second)
+				doc.save(ignore_permissions=True)
+				self.assertIsNone(frappe.db.get_value(doctype, second, "client_temp_key"))
+				self.assertEqual(frappe.db.get_value(doctype, first, "client_temp_key"), "legacy-dup")
+
+	def test_uncancelled_visit_claims_its_id_again(self):
+		values = {
+			"doctype": "Visit",
+			"retailer": self.retailer,
+			"sales_rep": self.rep,
+			"visit_date": nowdate(),
+			"status": "Planned",
+			"client_temp_id": "uncancel-visit-1",
+		}
+		visit = frappe.get_doc(values).insert(ignore_permissions=True)
+		visit.status = "Cancelled"
+		visit.save(ignore_permissions=True)
+		visit.status = "Planned"
+		visit.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("Visit", visit.name, "client_temp_key"), "uncancel-visit-1")
+
+		# Reused by a new visit while cancelled: un-cancelling the old one is refused.
+		visit.status = "Cancelled"
+		visit.save(ignore_permissions=True)
+		frappe.get_doc(values).insert(ignore_permissions=True)
+		visit.status = "Planned"
+		self.assertRaises(frappe.UniqueValidationError, visit.save, ignore_permissions=True)
+
 	def test_client_temp_key_race_backstop(self):
 		"""With the read check patched out, the 2nd concurrent insert raises UniqueValidationError."""
 		orig_get_value = frappe.db.get_value

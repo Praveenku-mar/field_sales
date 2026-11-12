@@ -177,3 +177,51 @@ class TestOrderCancel(IntegrationTestCase):
 		self.assertEqual(result["field_order"], self.order)
 		create.assert_not_called()
 		apply_state.assert_called_once()
+
+	# -- push interleaving defensive check (M2) ----------------------------------
+
+	def test_order_cancelled_during_push_fails_defensively(self):
+		from field_sales.sync import orders as sync_orders
+
+		self.set_store(docstatus=1, sync_status="Draft")
+		self.conn.settings.platform = "Shopify"
+		self.conn.settings.order_mode = "Confirmed"
+
+		def cancel_during_create(doc):
+			frappe.db.set_value("Field Order", doc.name, "docstatus", 2)
+			return {"order_id": "STORE-O99", "order_name": "#99099"}
+
+		self.conn.create_order.side_effect = cancel_during_create
+
+		with (
+			patch.object(sync_orders, "get_connector", return_value=self.conn),
+			patch.object(sync_orders, "_ensure_store_customer"),
+			patch.object(sync_orders, "enqueue_create_entries") as create_entries,
+			patch.object(sync_orders, "enqueue_order_confirmation") as confirmation,
+			patch.object(sync_orders, "notify_order_synced") as synced,
+			patch.object(sync_orders, "enqueue_mark_store_paid") as mark_paid,
+			patch.object(frappe.db, "commit"),
+		):
+			sync_orders.push_order(self.order)
+
+		doc = frappe.get_doc("Field Order", self.order)
+		self.assertEqual(doc.sync_status, "Failed")
+		self.assertEqual(doc.external_order_id, "STORE-O99")
+		self.assertEqual(doc.store_order_name, "#99099")
+		self.assertIn("Cancelled while being sent", doc.sync_error)
+		self.assertIn("#99099", doc.sync_error)
+
+		log = frappe.db.get_value(
+			"Sync Log",
+			{"reference_name": self.order, "error_code": "CANCELLED_DURING_PUSH"},
+			["status", "error_code", "external_id"],
+			as_dict=True,
+		)
+		self.assertIsNotNone(log)
+		self.assertEqual(log.status, "Failed")
+		self.assertEqual(log.external_id, "STORE-O99")
+
+		create_entries.assert_not_called()
+		confirmation.assert_not_called()
+		synced.assert_not_called()
+		mark_paid.assert_not_called()

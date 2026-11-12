@@ -49,9 +49,11 @@ class Visit(Document):
 			before = self.get_doc_before_save()
 			if before:
 				self.client_temp_id = before.client_temp_id
+			self.client_temp_key = None if self.status == "Cancelled" else self.client_temp_id
 			return
 		self.client_temp_id = (self.client_temp_id or "").strip() or None
 		if not self.client_temp_id:
+			self.client_temp_key = None
 			return
 		if not CLIENT_TEMP_ID.fullmatch(self.client_temp_id):
 			frappe.throw(_("Client Temp ID may hold only letters, digits and . _ : -"))
@@ -62,6 +64,7 @@ class Visit(Document):
 			frappe.throw(
 				_("This visit was already created as {0}").format(existing), frappe.DuplicateEntryError
 			)
+		self.client_temp_key = None if self.status == "Cancelled" else self.client_temp_id
 
 	def after_insert(self):
 		self._notify_rep()

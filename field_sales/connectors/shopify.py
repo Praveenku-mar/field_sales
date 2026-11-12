@@ -784,6 +784,16 @@ class ShopifyConnector(BaseConnector):
 		)
 		return data.get("draftOrder")
 
+	def delete_draft(self, draft_id: str, field_order=None) -> str | None:
+		"""``draftOrderDelete`` for an open draft; a completed one is left and its order id returned."""
+		draft = self._get_draft(draft_id, field_order)
+		if not draft:
+			return None
+		if draft.get("status") == "COMPLETED":
+			return _order_result(draft)["order_id"]
+		self._graphql(DRAFT_ORDER_DELETE, {"id": draft["id"]}, operation="Other", ref=field_order)
+		return None
+
 	def _delete_draft(self, draft_gid: str, field_order) -> None:
 		"""Best effort: a stale draft left behind is harmless, so a failure here is only logged."""
 		try:

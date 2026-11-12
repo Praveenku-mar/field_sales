@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, now_datetime, nowdate
 
 APP = __name__.split(".", 1)[0]
 devices = importlib.import_module(f"{APP}.push.devices")
@@ -107,11 +107,58 @@ class TestPush(IntegrationTestCase):
 		self.assertEqual(frappe.db.count("Mobile Device", {"fcm_token": token}), 1)
 
 		devices.set_enabled(self.rep_user, token, False)
+		# The old owner has been away longer than the handover window: the phone moves.
+		self.age_device(token)
 		result = self.register(self.manager_user, token)
 		row = frappe.db.get_value("Mobile Device", {"fcm_token": token}, ["user", "enabled"], as_dict=True)
 		self.assertEqual(row.user, self.manager_user)
 		self.assertTrue(row.enabled)
 		self.assertTrue(result["enabled"])
+
+	def age_device(self, token, days=2):
+		frappe.db.set_value(
+			"Mobile Device", {"fcm_token": token}, "last_seen", add_days(now_datetime(), -days), update_modified=False
+		)
+		frappe.db.set_value("User", self.rep_user, "last_active", None, update_modified=False)
+
+	def device(self, token):
+		return frappe.db.get_value(
+			"Mobile Device", {"fcm_token": token}, ["user", "enabled", "handover_to"], as_dict=True
+		)
+
+	def test_active_owners_token_is_not_taken_over(self):
+		token = "fcm-token-active-owner-000000001"
+		self.register(self.rep_user, token)
+		result = self.register(self.manager_user, token)
+		self.assertEqual(result, {"enabled": False, "handover_pending": True})
+		row = self.device(token)
+		# Still the owner's, but pushes stop until it is settled.
+		self.assertEqual((row.user, row.enabled, row.handover_to), (self.rep_user, 0, self.manager_user))
+		self.assertEqual(fcm.send_to_user(self.manager_user, "t", "b", {})["sent"], 0)
+		self.assertEqual(fcm.send_to_user(self.rep_user, "t", "b", {})["sent"], 0)
+
+	def test_owner_registering_again_takes_the_phone_back(self):
+		token = "fcm-token-owner-reclaims-0000001"
+		self.register(self.rep_user, token)
+		self.register(self.manager_user, token)
+		self.assertTrue(self.register(self.rep_user, token)["enabled"])
+		row = self.device(token)
+		self.assertEqual((row.user, row.enabled, row.handover_to), (self.rep_user, 1, None))
+
+	def test_owner_switched_off_phone_stays_off_after_an_attempt(self):
+		token = "fcm-token-owner-switched-off-001"
+		self.register(self.rep_user, token)
+		devices.set_enabled(self.rep_user, token, False)
+		self.register(self.manager_user, token)
+		self.assertIsNone(self.device(token).handover_to)
+		self.assertFalse(self.register(self.rep_user, token)["enabled"])
+
+	def test_disabled_owners_phone_moves_at_once(self):
+		token = "fcm-token-disabled-owner-0000001"
+		self.register(self.rep_user, token)
+		frappe.db.set_value("User", self.rep_user, "enabled", 0)
+		self.assertTrue(self.register(self.manager_user, token)["enabled"])
+		self.assertEqual(self.device(token).user, self.manager_user)
 
 	def test_only_the_newest_ten_devices_are_kept(self):
 		for i in range(12):

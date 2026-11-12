@@ -96,6 +96,7 @@ def _build_keyset_condition(
 	cursor: dict,
 	params: dict,
 	param_prefix: str = "_kc_",
+	nullable: frozenset[str] = frozenset(),
 ) -> str:
 	"""
 	Builds a keyset pagination WHERE condition supporting composite sort keys.
@@ -104,6 +105,9 @@ def _build_keyset_condition(
 	  (order_date < :d)
 	  OR (order_date = :d AND modified < :m)
 	  OR (order_date = :d AND modified = :m AND name < :n)
+
+	``nullable`` columns are compared as ``IFNULL(col, '')``, the value the cursor stores for
+	NULL: a plain comparison with NULL is never true, so those rows would be skipped.
 	"""
 	disjunctions = []
 	for i in range(len(order_by)):
@@ -113,17 +117,23 @@ def _build_keyset_condition(
 			col, _ = order_by[j]
 			pname = f"{param_prefix}eq_{j}_{col}"
 			params[pname] = cursor[col]
-			conjunctions.append(f"`{col}` = %({pname})s")
+			conjunctions.append(f"{_sort_expr(col, nullable)} = %({pname})s")
 		# The current column applies inequality according to its sort direction
 		col, direction = order_by[i]
 		op = "<" if direction.lower() == "desc" else ">"
 		pname = f"{param_prefix}cmp_{i}_{col}"
 		params[pname] = cursor[col]
-		conjunctions.append(f"`{col}` {op} %({pname})s")
+		conjunctions.append(f"{_sort_expr(col, nullable)} {op} %({pname})s")
 
 		disjunctions.append(" AND ".join(conjunctions))
 
 	return f"({' OR '.join(f'({d})' for d in disjunctions)})"
+
+
+def _sort_expr(col: str, nullable: frozenset[str], table: str = "") -> str:
+	"""A keyset sort column as SQL; a nullable one sorts and compares as ``''``."""
+	column = f"{table}`{col}`"
+	return f"IFNULL({column}, '')" if col in nullable else column
 
 
 def _format_field(doctype: str, field: str) -> str:
@@ -142,20 +152,25 @@ def _execute_keyset_query(
 	where_clauses: list[str],
 	params: dict,
 	limit: int,
+	nullable: frozenset[str] = frozenset(),
 ) -> dict:
 	"""
 	Executes a keyset query fetching (limit + 1) rows to determine has_more.
 	Generates next_cursor from the last item on the page.
+
+	:param nullable: sort columns that may be NULL (see ``_build_keyset_condition``).
 	"""
 	limit = clamp_limit(limit)
 	fetch_count = limit + 1
 
 	if cursor_dict:
-		keyset_sql = _build_keyset_condition(order_by, cursor_dict, params)
+		keyset_sql = _build_keyset_condition(order_by, cursor_dict, params, nullable=nullable)
 		where_clauses.append(keyset_sql)
 
 	where_str = " AND ".join(f"({w})" for w in where_clauses) if where_clauses else "1=1"
-	order_str = ", ".join(f"`tab{doctype}`.`{col}` {direction.upper()}" for col, direction in order_by)
+	order_str = ", ".join(
+		f"{_sort_expr(col, nullable, f'`tab{doctype}`.')} {direction.upper()}" for col, direction in order_by
+	)
 	fields_str = ", ".join(_format_field(doctype, f) for f in fields)
 
 	query = f"""
@@ -681,6 +696,8 @@ def get_team_list(
 		where_clauses=where,
 		params=params,
 		limit=limit,
+		# full_name is fetched from the User and may be empty.
+		nullable=frozenset({"full_name"}),
 	)
 
 
@@ -916,13 +933,16 @@ def get_customer_detail_records(customer_id: str) -> dict:
 	doc.check_permission("read")
 
 	# Outstanding balance via SQL aggregate, over the orders the user may see: every rep reads
-	# every retailer, but another team's orders are not theirs to total.
+	# every retailer, but another team's orders are not theirs to total. What is still owed on
+	# each unpaid order: a Partially Paid one counts only its remainder, and a row without a
+	# payment status (older orders) counts as Unpaid instead of dropping out of `!=`.
 	order_scope = field_order_query(frappe.session.user) or "1=1"
 	unpaid_orders = frappe.db.sql(
 		f"""
-		SELECT COALESCE(SUM(grand_total), 0) as balance
+		SELECT COALESCE(SUM(GREATEST(grand_total - IFNULL(amount_paid, 0), 0)), 0) as balance
 		FROM `tabField Order`
-		WHERE retailer = %(ret)s AND docstatus = 1 AND payment_status != 'Paid' AND ({order_scope})
+		WHERE retailer = %(ret)s AND docstatus = 1 AND IFNULL(payment_status, 'Unpaid') != 'Paid'
+			AND ({order_scope})
 		""",
 		{"ret": customer_id},
 		as_dict=True,

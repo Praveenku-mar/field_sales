@@ -319,6 +319,22 @@ class TestPush(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
+	def test_push_status_for_the_settings_tab(self):
+		module = importlib.import_module(f"{APP}.{APP}.doctype.mobile_push_settings.mobile_push_settings")
+		self.register(self.rep_user, "fcm-token-status-000000000001")
+		status = module.get_push_status()
+		self.assertEqual(status["source"], "site")
+		self.assertTrue(status["configured"])
+		self.assertGreaterEqual(status["registered_phones"], 1)
+		self.assertNotIn("private_key", frappe.as_json(status))
+
+		frappe.set_user(self.manager_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				module.get_push_status()
+		finally:
+			frappe.set_user("Administrator")
+
 	# -- bell → push ---------------------------------------------------------
 
 	def test_visit_assignment_is_pushed_without_the_shop_name(self):

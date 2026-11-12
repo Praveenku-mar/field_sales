@@ -88,6 +88,21 @@ def _discard_upload(file_name: str) -> None:
 
 
 @frappe.whitelist(methods=["GET"])
+def get_push_status() -> dict:
+	"""Safe settings summary for the SPA; never return the service-account key."""
+	frappe.only_for("System Manager")
+	from field_sales.push.fcm import get_config
+
+	config = get_config()
+	return {
+		"configured": bool(config),
+		"source": config["source"] if config else None,
+		"project_id": config["project_id"] if config else None,
+		"registered_phones": frappe.db.count("Mobile Device", {"enabled": 1}),
+	}
+
+
+@frappe.whitelist(methods=["GET"])
 def users_with_phones() -> list[dict]:
 	"""Users who have a phone registered for push: ``[{"user", "full_name", "phones"}]``, you first."""
 	frappe.only_for("System Manager")

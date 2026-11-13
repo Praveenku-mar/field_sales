@@ -8,7 +8,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
-from field_sales.connectors import ConnectorError
+from field_sales.commission.engine import enqueue_create_entries
+from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.payments.razorpay import cancel_link_for_cancelled_order
 from field_sales.permissions import get_allowed_reps, is_admin
@@ -52,6 +53,8 @@ PAYMENT_FIELDS = (
 	"payment_link_created_on",
 	"payment_link_expires_on",
 	"paid_on",
+	"manual_payment_method",
+	"manual_payment_reference",
 	"store_marked_paid_on",
 )
 
@@ -99,16 +102,82 @@ class FieldOrder(Document):
 		if self.payment_status in ("Paid", "Partially Paid"):
 			frappe.throw(
 				_(
-					"This order has a Razorpay payment of {0}. Refund it in the Razorpay Dashboard first, then cancel the order."
+					"This order has a payment of {0}. Reconcile or refund the payment before cancelling the order."
 				).format(frappe.utils.fmt_money(self.amount_paid, currency=site_currency())),
 				title=_("Order is paid"),
 			)
+		self._settle_store_order_before_cancel()
 
 	def on_cancel(self):
 		self.db_set("sync_status", "Draft")
+		self.db_set("client_temp_key", None, update_modified=False)
 		update_order_taken(self.visit)
 		if self.payment_status == "Link Sent":
 			cancel_link_for_cancelled_order(self)
+		if self.external_order_id:
+			# The store order is cancelled (checked in before_cancel): reconcile its commission
+			# entries, which become Cancelled (or get negative Adjustments on approved statements).
+			enqueue_create_entries(self.name)
+
+	def _settle_store_order_before_cancel(self):
+		"""
+		A Field Order that reached the store is cancelled only once nothing is left open there:
+		an open draft is deleted; a real order must be cancelled on the store first (that cancel
+		is what reverses its commission). Refused while a push is running, and when the store
+		cannot be checked.
+
+		Sync state is re-read under a row lock: push_order writes it with db_set (modified is
+		unchanged), so this document may predate a push that started after it was loaded.
+		"""
+		stored = frappe.db.get_value(
+			"Field Order",
+			self.name,
+			["sync_status", "external_order_id", "external_draft_id", "store_order_name", "store_draft_name"],
+			as_dict=True,
+			for_update=True,
+		)
+		if stored.sync_status == "Pending":
+			frappe.throw(
+				_("Order {0} is being sent to the store. Cancel it once that has finished.").format(self.name),
+				title=_("Sync in progress"),
+			)
+		if not (stored.external_order_id or stored.external_draft_id):
+			return
+
+		store_ref = stored.store_order_name or stored.store_draft_name or stored.external_order_id or stored.external_draft_id
+		try:
+			conn = get_connector()
+		except frappe.ValidationError:
+			frappe.throw(
+				_(
+					"Order {0} is on the store as {1}, but the Store Connection is off, so it cannot be checked "
+					"there. Turn the Store Connection on, then cancel."
+				).format(self.name, store_ref),
+				title=_("Store not connected"),
+			)
+
+		try:
+			order_id = stored.external_order_id or conn.delete_draft(stored.external_draft_id, self)
+			if not order_id:
+				return  # the open draft was deleted (or was already gone)
+			order = conn.get_order(order_id)
+		except ConnectorError as e:
+			frappe.throw(
+				_("Could not check order {0} on the store, so it was not cancelled: {1}").format(store_ref, e.message),
+				title=_("Store unavailable"),
+			)
+
+		if order and not order.get("cancelled"):
+			frappe.throw(
+				_(
+					"Order {0} is still open on the store ({1}). Cancel it there first, then cancel it here: "
+					"cancelling only here would leave the store order (and its commission) in place."
+				).format(self.name, store_ref),
+				title=_("Cancel it on the store first"),
+			)
+		if not stored.external_order_id:
+			# A draft completed on the store that link_completed_drafts() has not linked yet.
+			self.db_set("external_order_id", order_id, update_modified=False)
 
 	def on_trash(self):
 		update_order_taken(self.visit, exclude=self.name)
@@ -134,12 +203,18 @@ class FieldOrder(Document):
 		instead of creating a second order.
 		"""
 		if not self.is_new():
+			# Keep the stored key, never recompute it: a duplicate made before the unique key
+			# existed holds none (patch client_temp_key) and must stay savable.
 			before = self.get_doc_before_save()
 			if before:
 				self.client_temp_id = before.client_temp_id
+				self.client_temp_key = before.client_temp_key
+			else:
+				self.client_temp_key = frappe.db.get_value("Field Order", self.name, "client_temp_key")
 			return
 		self.client_temp_id = (self.client_temp_id or "").strip() or None
 		if not self.client_temp_id:
+			self.client_temp_key = None
 			return
 		if not CLIENT_TEMP_ID.fullmatch(self.client_temp_id):
 			frappe.throw(_("Client Temp ID may hold only letters, digits and . _ : -"))
@@ -150,6 +225,7 @@ class FieldOrder(Document):
 			frappe.throw(
 				_("This order was already created as {0}").format(existing), frappe.DuplicateEntryError
 			)
+		self.client_temp_key = self.client_temp_id
 
 	def _validate_visit(self):
 		"""

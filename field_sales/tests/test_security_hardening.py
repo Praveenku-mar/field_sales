@@ -6,8 +6,9 @@
 from unittest.mock import patch
 
 import frappe
+import frappe.client
 from frappe.tests import IntegrationTestCase
-from frappe.utils import get_first_day, get_last_day, nowdate
+from frappe.utils import flt, get_first_day, get_last_day, nowdate
 from frappe.utils.password import get_decrypted_password, update_password
 
 from field_sales import frontend_api
@@ -43,6 +44,9 @@ class TestSecurityHardening(IntegrationTestCase):
 			"Store Connection", {"enabled": 0, "platform": "Shopify", "enable_commission": 1}
 		)
 		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
+		# Commission adjustments need a site currency; don't depend on what the test site has.
+		# Always written: the defaults cache can still claim one after an earlier rollback.
+		frappe.db.set_default("currency", "INR")
 		if not frappe.db.exists("Role", "Field Sales Retailer"):
 			frappe.get_doc({"doctype": "Role", "role_name": "Field Sales Retailer", "desk_access": 0}).insert(
 				ignore_permissions=True
@@ -176,6 +180,70 @@ class TestSecurityHardening(IntegrationTestCase):
 		with self.assertRaisesRegex(frappe.AuthenticationError, "Invalid login credentials"):
 			self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
 
+	# -- mobile_login: Frappe's sign-in rules -------------------------------
+
+	def system_settings(self, **values):
+		"""Overlay System Settings values for ``frappe.get_system_settings``."""
+		real = frappe.get_system_settings
+		return patch("frappe.get_system_settings", side_effect=lambda key: values[key] if key in values else real(key))
+
+	def two_factor_for_reps(self):
+		"""2FA on (OTP App, set up already) for Field Sales Rep; Frappe commits the OTP secret, so commit is patched."""
+		from frappe.twofactor import set_default
+
+		frappe.db.set_value("Role", "Field Sales Rep", "two_factor_auth", 1)
+		set_default(self.rep_user + "_otplogin", 1)
+		return self.system_settings(enable_two_factor_auth=1, two_factor_method="OTP App")
+
+	def otp_for(self, tmp_id):
+		import pyotp
+
+		return pyotp.TOTP(frappe.safe_decode(frappe.cache.get(f"{tmp_id}_otp_secret"))).now()
+
+	def test_two_factor_login_needs_the_code_before_keys(self):
+		with self.two_factor_for_reps(), patch.object(frappe.db, "commit"):
+			first = self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
+			self.assertEqual(first["message"], "Verification")
+			self.assertTrue(first["tmp_id"])
+			self.assertNotIn("api_secret", first)
+			self.assertFalse(frappe.db.get_value("User", self.rep_user, "api_key"))
+
+			done = self.as_user("Guest", mobile_login, otp=self.otp_for(first["tmp_id"]), tmp_id=first["tmp_id"])
+			self.assertEqual(done["user"], self.rep_user)
+			self.assertTrue(done["api_key"] and done["api_secret"])
+
+			# The code is used up: the same tmp_id cannot sign in again.
+			with self.assertRaises(frappe.AuthenticationError):
+				self.as_user("Guest", mobile_login, otp="123456", tmp_id=first["tmp_id"])
+
+	def test_two_factor_login_refuses_a_wrong_code(self):
+		with self.two_factor_for_reps(), patch.object(frappe.db, "commit"):
+			first = self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
+			wrong = "000000" if self.otp_for(first["tmp_id"]) != "000000" else "111111"
+			with self.assertRaisesRegex(frappe.AuthenticationError, "Invalid login credentials"):
+				self.as_user("Guest", mobile_login, otp=wrong, tmp_id=first["tmp_id"])
+		self.assertFalse(frappe.db.get_value("User", self.rep_user, "api_key"))
+
+	def test_restricted_ip_is_refused(self):
+		frappe.db.set_value("User", self.rep_user, "restrict_ip", "10.99.99.")
+		frappe.clear_document_cache("User", self.rep_user)
+		with patch.object(frappe.local, "request_ip", "192.0.2.10", create=True):
+			with self.assertRaisesRegex(frappe.AuthenticationError, "IP Address"):
+				self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
+		self.assertFalse(frappe.db.get_value("User", self.rep_user, "api_key"))
+
+	def test_login_hours_are_enforced(self):
+		# login_after 24 is never reached, so every hour is outside the window.
+		frappe.db.set_value("User", self.rep_user, "login_after", 24)
+		with self.assertRaisesRegex(frappe.AuthenticationError, "not allowed at this time"):
+			self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
+		self.assertFalse(frappe.db.get_value("User", self.rep_user, "api_key"))
+
+	def test_password_login_can_be_switched_off(self):
+		with self.system_settings(disable_user_pass_login=1):
+			with self.assertRaisesRegex(frappe.AuthenticationError, "not allowed"):
+				self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
+
 	# -- API secret rotation ---------------------------------------------------
 
 	def test_password_set_rotates_api_secret(self):
@@ -227,6 +295,61 @@ class TestSecurityHardening(IntegrationTestCase):
 		statement.submit()
 		self.assertRaises(frappe.PermissionError, self.as_user, self.manager_user, mark_paid, statement.name)
 		self.assertEqual(frappe.db.get_value("Commission Statement", statement.name, "status"), "Approved")
+
+	def test_manager_cannot_submit_own_statement_from_the_form(self):
+		statement = self.statement(self.manager_rep)
+		doc = frappe.get_doc("Commission Statement", statement.name)
+		self.assertRaises(frappe.PermissionError, self.as_user, self.manager_user, doc.submit)
+		self.assertEqual(frappe.db.get_value("Commission Statement", statement.name, "docstatus"), 0)
+
+	def test_statement_amounts_and_status_are_not_taken_from_the_client(self):
+		statement = self.statement(self.rep)
+		values = statement.as_dict()
+		values.update({"net_payable": 999999, "gross_commission": 999999, "status": "Paid", "entries": []})
+		self.as_user(self.manager_user, frappe.client.save, values)
+		saved = frappe.get_doc("Commission Statement", statement.name)
+		self.assertEqual(saved.net_payable, statement.net_payable)
+		self.assertEqual(saved.status, "Draft")
+		self.assertEqual(len(saved.entries), len(statement.entries))
+
+	def test_statement_cannot_be_made_by_hand(self):
+		doc = frappe.get_doc(
+			{
+				"doctype": "Commission Statement",
+				"sales_rep": self.rep,
+				"period_start": get_first_day(nowdate()),
+				"period_end": get_last_day(nowdate()),
+				"net_payable": 500,
+			}
+		)
+		self.assertRaises(frappe.PermissionError, self.as_user, self.manager_user, doc.insert)
+
+	def test_approved_statement_status_cannot_be_updated_by_hand(self):
+		statement = self.statement(self.rep)
+		self.as_user(self.manager_user, approve_statement, statement.name)
+		doc = frappe.get_doc("Commission Statement", statement.name)
+		doc.status, doc.paid_on, doc.payment_reference = "Paid", nowdate(), "FAKE"
+		self.as_user(self.manager_user, doc.save)  # Update after submit
+		saved = frappe.db.get_value("Commission Statement", statement.name, ["status", "paid_on"], as_dict=True)
+		self.assertEqual((saved.status, saved.paid_on), ("Approved", None))
+
+	# -- own terms on the Sales Rep record ---------------------------------------
+
+	def test_manager_cannot_change_own_commission_terms(self):
+		for field, value in (("commission_active", 1), ("max_discount_pct", 50)):
+			with self.subTest(field):
+				doc = frappe.get_doc("Sales Rep", self.manager_rep)
+				doc.set(field, value)
+				self.assertRaises(frappe.PermissionError, self.as_user, self.manager_user, doc.save)
+
+	def test_manager_may_edit_own_contact_details_and_team_terms(self):
+		own = frappe.get_doc("Sales Rep", self.manager_rep)
+		own.mobile = "9876500000"
+		self.as_user(self.manager_user, own.save)
+		team = frappe.get_doc("Sales Rep", self.rep)
+		team.max_discount_pct = 10
+		self.as_user(self.manager_user, team.save)
+		self.assertEqual(frappe.db.get_value("Sales Rep", self.rep, "max_discount_pct"), 10)
 
 	def test_mark_paid_on_another_teams_statement_is_refused(self):
 		statement = self.statement(self.other_rep)
@@ -399,6 +522,15 @@ class TestSecurityHardening(IntegrationTestCase):
 		self.assertEqual([r.order_id for r in result["items"]], [order.name])
 		self.assertEqual(result["items"][0].payment_reference, "pay_harden")
 
+	def test_retailer_payments_list_shows_manual_reference(self):
+		order = self.order_doc()
+		order.insert()
+		order.db_set({"docstatus": 1, "payment_status": "Paid", "manual_payment_reference": "UTR-123"})
+		login = self.make_user("harden.manual.payer@example.com", ["Field Sales Retailer"])
+		frappe.db.set_value("Retailer", self.retailer, "user", login)
+		result = self.as_user(login, mobile.get_retailer_payments_list)
+		self.assertEqual(result["items"][0].payment_reference, "UTR-123")
+
 	def test_retailer_summary_is_scoped_to_the_team(self):
 		order = self.order_doc(retailer=self.other_retailer, sales_rep=self.other_rep)
 		order.insert()
@@ -416,3 +548,29 @@ class TestSecurityHardening(IntegrationTestCase):
 		self.assertEqual(mine["customer"]["outstanding_balance"], 0)
 		theirs = self.as_user(self.other_manager_user, mobile.get_customer_detail_records, self.other_retailer)
 		self.assertEqual(theirs["customer"]["outstanding_balance"], order.grand_total)
+
+	def test_team_list_pages_through_reps_without_a_name(self):
+		reps = (self.manager_rep, self.rep, self.other_rep)
+		frappe.db.set_value("Sales Rep", {"name": ("in", reps)}, "full_name", None, update_modified=False)
+		seen, cursor = [], None
+		for _page in range(200):
+			page = mobile.get_team_list(cursor=cursor, limit=1)
+			seen += [row.name for row in page["items"]]
+			cursor = page["next_cursor"]
+			if not page["has_more"]:
+				break
+		self.assertEqual(len(seen), len(set(seen)))
+		self.assertTrue(set(reps) <= set(seen))
+
+	def test_customer_outstanding_counts_what_is_still_owed(self):
+		def submitted(**payment):
+			order = self.order_doc()
+			order.insert()
+			order.db_set({"docstatus": 1, **payment})
+			return order.grand_total
+
+		partly = submitted(payment_status="Partially Paid", amount_paid=40)
+		no_status = submitted(payment_status=None)  # older rows have none: still owed
+		submitted(payment_status="Paid", amount_paid=PRICE)
+		result = mobile.get_customer_detail_records(self.retailer)
+		self.assertEqual(result["customer"]["outstanding_balance"], flt(partly - 40 + no_status, 2))

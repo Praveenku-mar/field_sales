@@ -63,6 +63,8 @@ PAYMENT_FIELDS = (
 	"amount_paid",
 	"razorpay_payment_id",
 	"paid_on",
+	"manual_payment_method",
+	"manual_payment_reference",
 	"razorpay_payment_link_id",
 	"razorpay_payment_link_url",
 	"payment_link_created_on",
@@ -717,7 +719,7 @@ def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None
 				_(doc.payment_status),
 			),
 		)
-		_notify_payment(doc)
+		notify_payment_received(doc)
 		if doc.payment_status == "Paid":
 			# Imported here: sync.orders imports sync.confirmation, which imports this module.
 			from field_sales.sync.orders import enqueue_mark_store_paid
@@ -746,7 +748,7 @@ def _stale_link(doc, link_entity: dict) -> bool:
 	)
 
 
-def _notify_payment(doc) -> None:
+def notify_payment_received(doc) -> None:
 	"""Bell notification and a realtime event for the order's rep and every Sales Manager."""
 	users = {doc.sales_rep, *users_with_roles(PAYMENT_NOTIFY_ROLES)} - {None, "", "Guest", "Administrator"}
 	users = [u for u in sorted(users) if frappe.db.get_value("User", u, "enabled")]

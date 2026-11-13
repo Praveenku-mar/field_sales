@@ -540,13 +540,19 @@ def get_order_payment_info(field_order: str) -> dict:
 		"razorpay_enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
 		"payment_links_available": payment_links_disabled_reason() is None,
 		"can_create_link": bool(doc.has_permission("write")),
+		"can_mark_paid": bool(
+			doc.has_permission("write")
+			and doc.docstatus == 1
+			and flt(doc.grand_total) > 0
+			and doc.payment_status not in ("Paid", "Partially Paid")
+		),
 		"whatsapp_number": whatsapp,
 	}
 
 
 def _check_access():
 	if frappe.session.user == "Guest" or not has_app_access():
-		frappe.throw(_("You do not have access to Field Sales"), frappe.PermissionError)
+		frappe.throw(_("You do not have access to Agamsale"), frappe.PermissionError)
 
 
 def _preset_args(key: str) -> dict:

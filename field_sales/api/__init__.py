@@ -437,7 +437,7 @@ def _check_retailer_login_user(user: str) -> None:
 		frappe.throw(_("The account {0} cannot be a retailer login").format(user), frappe.PermissionError)
 	roles = set(frappe.get_roles(user))
 	if STAFF_ROLES & roles:
-		frappe.throw(_("{0} works in Field Sales and cannot be a retailer login").format(user))
+		frappe.throw(_("{0} works in Agamsale and cannot be a retailer login").format(user))
 	if roles - RETAILER_LOGIN_ROLES:
 		frappe.throw(
 			_("{0} has roles beyond Field Sales Retailer and cannot be a retailer login").format(user),
@@ -966,11 +966,14 @@ def retry_all_sync_failures() -> dict:
 @frappe.whitelist()
 def get_sync_failure_count(filters: str | list | dict | None = None) -> dict:
 	"""Number card "Sync Failures": failed orders + retailers in the user's scope; opens the page."""
-	count = len(
-		frappe.get_list("Field Order", filters={"docstatus": 1, "sync_status": "Failed"}, pluck="name", limit_page_length=0)
-	) + len(frappe.get_list(
-		"Retailer", filters=[["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")], pluck="name", limit_page_length=0
-	))
+	def rows_counted(doctype, filters):
+		# COUNT(*) in the database (permission rules still apply), not every name in memory.
+		rows = frappe.get_list(doctype, filters=filters, fields=[{"COUNT": "*", "as": "count"}])
+		return rows[0].count if rows else 0
+
+	count = rows_counted("Field Order", {"docstatus": 1, "sync_status": "Failed"}) + rows_counted(
+		"Retailer", [["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")]
+	)
 
 	result = {"value": count, "fieldtype": "Int"}
 	if set(MONITOR_ROLES) & set(frappe.get_roles()):
@@ -1155,22 +1158,91 @@ def _login_failed(usr: str) -> NoReturn:
 	frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
 
 
+class _MobileLoginAttempt:
+	"""
+	The parts of Frappe's ``LoginManager`` its sign-in checks use (``user``, ``fail``), without
+	the session and cookies ``LoginManager()`` sets up: the app signs in with API keys.
+	"""
+
+	__slots__ = ("lockout_id", "user")
+
+	def __init__(self, user: str, lockout_id: str):
+		self.user = user
+		self.lockout_id = lockout_id
+
+	def fail(self, message=None, user=None) -> NoReturn:
+		"""Called by ``frappe.twofactor.confirm_otp_token`` for a wrong code: counts as a failed login."""
+		_login_failed(self.lockout_id)
+
+
+def _frappe_login_trackers(user: str | None) -> list:
+	"""
+	Frappe's own failed-login trackers for ``user`` and the request IP (System Settings
+	"Allow Consecutive Login Attempts" / "Allow Login After Fail"); none when that is off.
+	"""
+	from frappe.auth import get_login_attempt_tracker
+
+	if not frappe.utils.cint(frappe.get_system_settings("allow_consecutive_login_attempts")):
+		return []
+	keys = (user, getattr(frappe.local, "request_ip", None))
+	return [get_login_attempt_tracker(key, raise_locked_exception=False) for key in keys if key]
+
+
+def _cached_2fa_login(tmp_id: str) -> tuple[str, str]:
+	"""The user and password the first step of a 2FA login cached under ``tmp_id`` (Frappe's keys)."""
+	usr = frappe.safe_decode(frappe.cache.get(f"{tmp_id}_usr") or b"")
+	pwd = frappe.safe_decode(frappe.cache.get(f"{tmp_id}_pwd") or b"")
+	if not usr or not pwd:
+		frappe.throw(_("The verification code has expired. Sign in again."), frappe.AuthenticationError)
+	return usr, pwd
+
+
+def _forget_2fa_login(tmp_id: str) -> None:
+	"""A verified code is used up: its cached login cannot be replayed."""
+	frappe.cache.delete(*(f"{tmp_id}{suffix}" for suffix in ("_usr", "_pwd", "_otp_secret", "_token")))
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 @rate_limit(limit=10, seconds=10 * 60, ip_based=True)
-def mobile_login(usr: str, pwd: str) -> dict:
+def mobile_login(
+	usr: str | None = None,
+	pwd: str | None = None,
+	otp: str | None = None,
+	tmp_id: str | None = None,
+) -> dict:
 	"""
 	Mobile & Web App Authentication endpoint.
 	Validates credentials, verifies Field Sales app access, and returns API credentials.
 
 	- Rate limited per IP, and locked per user after ``LOGIN_MAX_FAILURES`` failures for
 	  ``LOGIN_LOCKOUT_SECONDS`` (counted in the cache, so a rolled-back request still counts).
+	  Frappe's own login-attempt lockout (System Settings) applies as well.
 	- Wrong password, unknown user, locked, disabled or no Field Sales role all get the same
 	  "Invalid login credentials", so the answer does not tell which accounts exist.
+	- The same rules as Frappe's ``/login``: "Disable Username/Password Login", the user's
+	  Restrict IP and login hours, password expiry (answers ``{"message": "Password Reset"}``
+	  and emails a reset link) and two-factor authentication.
+	- Two-factor: the first call (``usr``, ``pwd``) answers ``{"message": "Verification",
+	  "verification", "tmp_id"}`` and no keys; the second call sends ``otp`` and ``tmp_id``
+	  (no password) and gets the keys. A code works once.
 	- The first login of a user creates their API key and secret; later logins return the
 	  same pair (a password change or "sign out everywhere" rotates the secret).
 	"""
+	from frappe.auth import LoginManager, validate_ip_address
+	from frappe.twofactor import ExpiredLoginException, authenticate_for_2factor, confirm_otp_token, should_run_2fa
+
 	from field_sales.utils.credentials import issue_api_secret
 	from field_sales.www.fieldsales import has_app_access
+
+	if frappe.get_system_settings("disable_user_pass_login"):
+		frappe.throw(_("Login with username and password is not allowed."), frappe.AuthenticationError)
+
+	otp = (otp or "").strip()
+	tmp_id = (tmp_id or "").strip()
+	if otp:
+		if not tmp_id or len(tmp_id) > 64:
+			frappe.throw(_("The verification code has expired. Sign in again."), frappe.AuthenticationError)
+		usr, pwd = _cached_2fa_login(tmp_id)
 
 	usr = (usr or "").strip()
 	if not usr or not pwd:
@@ -1179,18 +1251,50 @@ def mobile_login(usr: str, pwd: str) -> dict:
 		frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
 
 	usr_key = _login_lockout_id(usr)
-	if frappe.utils.cint(frappe.cache.get(_login_failure_key(usr_key))) >= LOGIN_MAX_FAILURES:
+	trackers = _frappe_login_trackers(frappe.db.get_value("User", {"name": usr}, "name"))
+	if frappe.utils.cint(frappe.cache.get(_login_failure_key(usr_key))) >= LOGIN_MAX_FAILURES or not all(
+		t.is_user_allowed() for t in trackers
+	):
 		frappe.throw(_(LOGIN_FAILED_MESSAGE), frappe.AuthenticationError)
 
 	try:
 		user_name = check_password(usr, pwd)
 	except frappe.AuthenticationError:
+		for tracker in trackers:
+			tracker.add_failure_attempt()
 		_login_failed(usr_key)
 
 	user = frappe.db.get_value("User", user_name, ["name", "full_name", "enabled", "api_key"], as_dict=True)
 	if not user or not user.enabled or user.name == "Guest" or not has_app_access(user.name):
 		_login_failed(usr_key)
 
+	attempt = _MobileLoginAttempt(user.name, usr_key)
+	validate_ip_address(user.name)
+	# LoginManager's checks only read ``self.user``; LoginManager() itself would start a session.
+	LoginManager.validate_hour(attempt)
+
+	if should_run_2fa(user.name):
+		if not otp:
+			# Frappe caches the login under a new tmp_id and sends the code (email / SMS / app).
+			frappe.form_dict.pwd = pwd
+			authenticate_for_2factor(user.name)
+			return {
+				"message": "Verification",
+				"verification": frappe.local.response.pop("verification", None),
+				"tmp_id": frappe.local.response.pop("tmp_id", None),
+			}
+		try:
+			confirm_otp_token(attempt, otp=otp, tmp_id=tmp_id)  # a wrong code raises via attempt.fail()
+		except ExpiredLoginException:
+			frappe.throw(_("The verification code has expired. Sign in again."), frappe.AuthenticationError)
+		_forget_2fa_login(tmp_id)
+
+	if LoginManager.force_user_to_reset_password(attempt):
+		frappe.get_doc("User", user.name)._reset_password(send_email=True, password_expired=True)
+		return {"message": "Password Reset"}
+
+	for tracker in trackers:
+		tracker.add_success_attempt()
 	frappe.cache.delete(_login_failure_key(usr_key))
 	api_key = user.api_key
 	api_secret = frappe.utils.password.get_decrypted_password(

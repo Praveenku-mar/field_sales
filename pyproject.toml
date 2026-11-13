@@ -3,7 +3,7 @@ name = "field_sales"
 authors = [
     { name = "Agamnxt Technologies", email = "praveenkumar@agamnxt.com"}
 ]
-description = "Field Sales is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
+description = "Agamsale is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
 requires-python = ">=3.14"
 readme = "README.md"
 dynamic = ["version"]

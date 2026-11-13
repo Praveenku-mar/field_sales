@@ -98,6 +98,49 @@ class TestOrderMetafields(IntegrationTestCase):
 		self.assertEqual(queries, ['source_identifier:"FO-META-1"', 'tag:"field-order-FO-META-1"'])
 		self.assertEqual(found["name"], "#1005")
 
+	def test_find_draft_matches_the_field_order_no_or_an_older_note(self):
+		retailer = frappe._dict(external_customer_id="77")
+		other = {"id": "gid://shopify/DraftOrder/10", "note2": "Field Order FO-META-10 \u00b7 Rep x", "metafield": {"value": "FO-META-10"}}
+		by_note = {"id": "gid://shopify/DraftOrder/11", "note2": "Field Order FO-META-1 \u00b7 Rep x", "metafield": None}
+		by_field = {"id": "gid://shopify/DraftOrder/12", "note2": "", "metafield": {"value": "FO-META-1"}}
+		queries = []
+
+		def search(nodes):
+			def graphql(query, variables=None, **kwargs):
+				queries.append(variables["q"])
+				return {"draftOrders": {"nodes": nodes}}
+
+			return graphql
+
+		for nodes, expected in (([other, by_note], by_note), ([other, by_field], by_field), ([other], None)):
+			with patch.object(ShopifyConnector, "_graphql", side_effect=search(nodes)):
+				self.assertEqual(self.conn._find_draft(self.order, retailer), expected)
+		self.assertEqual(set(queries), {"customer_id:77 tag:field-sales"})
+
+	def test_only_a_retry_looks_for_a_lost_draft(self):
+		frappe.db.set_single_value("Store Connection", "order_mode", "Draft")
+		conn = get_connector()
+		retailer = frappe._dict(name="RET-X", external_customer_id="77")
+		found = {"id": "gid://shopify/DraftOrder/12", "name": "#D12", "status": "OPEN", "order": None}
+		real_get_doc = frappe.get_doc
+
+		def get_doc(*args, **kwargs):
+			return retailer if args[:1] == ("Retailer",) else real_get_doc(*args, **kwargs)
+
+		for attempts, expect_search in ((1, False), (2, True)):
+			order = frappe._dict(name="FO-META-1", retailer="RET-X", external_draft_id=None, sync_attempts=attempts)
+			with (
+				patch.object(frappe, "get_doc", side_effect=get_doc),
+				patch.object(ShopifyConnector, "ensure_order_metafields"),
+				patch.object(ShopifyConnector, "_find_draft", return_value=found) as find,
+				patch.object(ShopifyConnector, "_create_draft", return_value={"id": "gid://shopify/DraftOrder/99"}) as create,
+			):
+				result = conn.create_order(order)
+			self.assertEqual(find.called, expect_search)
+			# A retry reuses the draft the lost attempt made instead of creating a second one.
+			self.assertEqual(result["draft_id"], "12" if expect_search else "99")
+			self.assertEqual(create.called, not expect_search)
+
 	def test_order_inputs_carry_metafields_and_one_tag(self):
 		retailer = frappe._dict(name="RET-X", external_customer_id="77", phone="9876543210")
 		# SimpleNamespace, not frappe._dict: a dict's .items method would hide the rows.

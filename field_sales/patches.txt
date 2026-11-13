@@ -16,6 +16,7 @@ field_sales.patches.v1_0.retailer_country_india
 field_sales.patches.v1_0.data_retention_defaults
 field_sales.patches.v1_0.retailer_role
 field_sales.patches.v1_0.sales_rep_roles
+field_sales.patches.v1_0.client_temp_key
 
 [post_fixture_sync]
 # Patches added in this section will be executed after fixtures and customizations

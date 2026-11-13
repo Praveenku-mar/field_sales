@@ -1,16 +1,18 @@
-{# DRAFT: needs legal review before publishing. Every [TO FILL] must be completed. #}
 {% extends "templates/web.html" %}
 
-{% set title = "Field Sales Privacy Policy" %}
-{% block header %}<h1>Field Sales Privacy Policy</h1>{% endblock %}
+{% set title = "Agamsale Privacy Policy" %}
+{% block header %}{% endblock %}
 
 {% block page_content %}
-<!-- DRAFT: needs legal review before publishing. Every [TO FILL] must be completed. -->
-<div class="fs-legal" style="max-width: 760px; line-height: 1.65;">
-	<p><em>Last updated: 23 October 2026</em></p>
+<div class="fs-legal" style="max-width: 760px; margin: 0 auto; line-height: 1.65;">
+	<h1>Agamsale Privacy Policy</h1>
+	<p class="text-muted"><em>Last updated: 12 November 2026</em></p>
+	<p><strong>Publication review required:</strong> hosting location, backup retention, incident
+		response details and the company postal address have not been confirmed. Confirm these details
+		before treating this policy as final.</p>
 
 	<p>
-		Field Sales ("the app") is provided by [TO FILL: legal name of the company] ("we", "us").
+		Agamsale ("the app") is provided by Agamnxt Technologies ("we", "us").
 		It helps a brand's field sales team visit retail shops, take orders and sync those orders
 		to the brand's online store. This policy explains what personal data the app processes for
 		a merchant (the brand that installs the app), why, where it is stored and for how long.
@@ -54,9 +56,10 @@
 
 	<h2>3. Where data is stored</h2>
 	<p>
-		Each merchant's data is stored in its own database on [TO FILL: hosting provider] in
-		[TO FILL: region/country]. Data is encrypted in transit (HTTPS) and at rest
-		[TO FILL: confirm disk and backup encryption with the hosting provider].
+		Each merchant's data is stored separately in the database for the Frappe site serving that
+		merchant. The hosting provider and hosting region must be confirmed before publication.
+		Connections to the app use HTTPS. Encryption at rest depends on the hosting configuration and
+		must be confirmed with the hosting provider before publication.
 		Store access tokens and API keys are stored encrypted.
 	</p>
 
@@ -70,9 +73,10 @@
 		<li>After the merchant uninstalls the app from Shopify, the store access tokens are deleted
 			immediately. When Shopify sends its shop deletion request (48 hours after uninstall),
 			retailer personal data is anonymised, product data and log contents are deleted, and
-			data exports are removed. Order amounts and dates are kept in anonymised form for the
-			merchant's accounting [TO FILL: confirm retention needed for accounting/tax law].</li>
-		<li>Backups: [TO FILL: backup retention period of the hosting provider].</li>
+		data exports are removed. Order amounts and dates are kept in anonymised form. The merchant
+		should retain any records required for its accounting or tax obligations.</li>
+		<li>Backups: the retention period depends on the hosting provider and must be confirmed before
+		publication.</li>
 	</ul>
 
 	<h2>5. Sub-processors</h2>
@@ -81,12 +85,13 @@
 			records and orders.</li>
 		<li><strong>Razorpay</strong> (only if the merchant enables payments): payment links;
 			receives the retailer's name, email and phone number and the order amount.</li>
-		<li><strong>Email provider</strong>: [TO FILL: the outgoing email service configured for the
-			site] sends order confirmations, invoices and account emails.</li>
+		<li><strong>Email provider</strong>: the outgoing email service configured for the site sends
+			order confirmations, invoices and account emails. The merchant or site operator selects
+			this service.</li>
 		<li><strong>OpenStreetMap</strong>: map tiles and place search (Nominatim) in the map picker;
 			the browser sends the map area being viewed and the search text.</li>
-		<li><strong>Hosting provider</strong>: [TO FILL: name, location, link to its data processing
-			terms].</li>
+		<li><strong>Hosting provider</strong>: hosts the Frappe site and its database. Provider name,
+			location and data processing terms must be confirmed before publication.</li>
 	</ul>
 
 	<h2>6. Rights of retailers and other individuals</h2>
@@ -109,13 +114,14 @@
 	<p>
 		Access is limited by role (sales rep, sales manager, system manager); reps only see their
 		own and their team's data. Exports of personal data are recorded in an access log.
-		[TO FILL: password policy, staff access, incident response — see docs/data-protection.md.]
+		Account password controls are provided by the hosting Frappe site. Staff access and incident
+		response procedures must be confirmed by the operator before publication.
 	</p>
 
 	<h2>8. Contact</h2>
 	<p>
-		Questions or requests: <a href="mailto:praveenkumar@agamnxt.com">praveenkumar@agamnxt.com</a>.<br>
-		[TO FILL: postal address of the company]
+		Questions or requests: <a href="mailto:praveenkumar@agamnxt.com">praveenkumar@agamnxt.com</a>.
+		The company's postal address must be added before publication.
 	</p>
 </div>
 {% endblock %}

@@ -487,6 +487,10 @@
     <Dialog v-model="manualPaymentOpen" title="Mark as Paid">
       <form id="manual-payment-form" class="space-y-4" @submit.prevent="submitManualPayment">
         <p class="text-sm text-polaris-secondary">Record the full payment of {{ formatCurrency(pay.grand_total || d.grand_total) }} for this order.</p>
+        <!-- App Store installs never mark the Shopify order paid themselves (Shopify rule 1.1.2). -->
+        <p v-if="session.store.app_store" class="text-sm text-polaris-secondary">
+          This records the payment in Field Sales only. Mark the order paid in the Shopify admin too.
+        </p>
         <FormControl v-model="manualPayment.method" type="select" label="Payment Method" :options="manualPaymentOptions" required />
         <FormControl v-if="manualPayment.method === 'Bank Transfer / UPI'" v-model="manualPayment.reference" label="Payment Reference No." maxlength="140" required />
       </form>

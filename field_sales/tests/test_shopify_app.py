@@ -191,7 +191,8 @@ class TestOAuthInstall(ShopifyAppTestCase):
 		response, post, enqueue = self.callback(state)
 
 		self.assertEqual(response.status_code, 302)
-		self.assertEqual(response.headers["Location"], "/fieldsales")
+		# The app is embedded: the merchant lands in it inside the Shopify admin.
+		self.assertEqual(response.headers["Location"], f"https://{SHOP}/admin/apps/{APP_ID}")
 		sent = post.call_args.kwargs["data"]
 		self.assertEqual(post.call_args.args[0], f"https://{SHOP}/admin/oauth/access_token")
 		self.assertEqual((sent["code"], sent["expiring"], sent["client_id"]), ("auth-code", "1", APP_ID))

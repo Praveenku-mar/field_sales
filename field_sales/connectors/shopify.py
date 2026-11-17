@@ -129,6 +129,23 @@ mutation($input: DraftOrderInput!) {
 }
 """ % DRAFT_ORDER_FIELDS
 
+# Store customers, for importing them as Retailers (sync/customers.py import_customers).
+CUSTOMERS_QUERY = """
+query($cursor: String) {
+  customers(first: %d, after: $cursor, sortKey: ID) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      email
+      phone
+      firstName
+      lastName
+      defaultAddress { company address1 address2 city province zip countryCodeV2 phone }
+    }
+  }
+}
+""" % PAGE_SIZE
+
 # Financial statuses that mean the customer paid (all or part) on Shopify.
 STORE_PAID_STATUSES = {"paid", "partially_paid"}
 
@@ -538,6 +555,16 @@ class ShopifyConnector(BaseConnector):
 		"""``orders/*`` carry the order as ``id``; ``refunds/create`` carries it as ``order_id``."""
 		value = payload.get("order_id") or payload.get("id")
 		return from_gid(str(value)) if value else None
+
+	def get_customers(self, cursor: str | None = None) -> dict:
+		"""One page of Shopify customers (``customers`` connection, by id), normalized."""
+		data = self._graphql(CUSTOMERS_QUERY, {"cursor": cursor}, operation="Customer Sync")
+		connection = data.get("customers") or {}
+		page = connection.get("pageInfo") or {}
+		return {
+			"items": [_normalize_customer(c) for c in connection.get("nodes") or []],
+			"next_cursor": page.get("endCursor") if page.get("hasNextPage") else None,
+		}
 
 	def get_order(self, external_id: str) -> dict:
 		"""Current state of one order, normalized (see ``connectors.base``); empty if it is gone."""
@@ -1495,6 +1522,29 @@ def _normalize_order(order: dict | None) -> dict:
 		"lines": lines,
 		"refunds": refunds,
 		"store_payment": _store_payment(order),
+	}
+
+
+def _normalize_customer(customer: dict) -> dict:
+	"""A Shopify customer as the connector's normalized customer dict (default address)."""
+	address = customer.get("defaultAddress") or {}
+
+	def clean(value) -> str | None:
+		return (value or "").strip() or None
+
+	return {
+		"external_customer_id": from_gid(customer.get("id")),
+		"email": clean(customer.get("email")),
+		"first_name": clean(customer.get("firstName")) or "",
+		"last_name": clean(customer.get("lastName")) or "",
+		"company": clean(address.get("company")),
+		"phone": clean(customer.get("phone") or address.get("phone")),
+		"address_line1": clean(address.get("address1")),
+		"address_line2": clean(address.get("address2")),
+		"city": clean(address.get("city")),
+		"state": clean(address.get("province")),
+		"pincode": clean(address.get("zip")),
+		"country_code": (clean(address.get("countryCodeV2")) or "").upper() or None,
 	}
 
 

@@ -451,6 +451,7 @@
           </div>
         </div>
       </div>
+      <Timeline doctype="Field Order" :name="name" :version="d.modified || null" />
     </div>
 
     <!-- Add Multiple -->
@@ -556,6 +557,7 @@ import {
   toast,
 } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
+import Timeline from '@/components/Timeline.vue'
 import PaymentHistory from '@/components/PaymentHistory.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'

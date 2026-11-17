@@ -1,0 +1,292 @@
+<!doctype html>
+<!--
+  Source of field_sales/public/docs/field-sales-user-guide.pdf (linked on /help).
+  Rebuild the PDF after editing:
+    google-chrome --headless --no-pdf-header-footer \
+      --print-to-pdf=field_sales/public/docs/field-sales-user-guide.pdf \
+      docs/user-guide/field-sales-user-guide.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Field Sales User Guide: Web and Mobile</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 20mm 20mm;
+    @top-left { content: "Field Sales User Guide: Web and Mobile"; font: 7pt system-ui, sans-serif; color: #777; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font: 7pt system-ui, sans-serif; color: #777; }
+  }
+  body { font: 10.5pt/1.55 "Inter", "Segoe UI", system-ui, -apple-system, sans-serif; color: #1f1f1f; margin: 0; }
+  h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; font-weight: 400; color: #111; break-after: avoid; }
+  h1 { font-size: 24pt; margin: 0 0 6pt; }
+  h2 { font-size: 16pt; margin: 22pt 0 6pt; }
+  h3 { font-size: 12.5pt; margin: 14pt 0 4pt; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
+  li { margin: 0 0 2pt; }
+  code { font: 9pt ui-monospace, "DejaVu Sans Mono", monospace; background: #f1f0ec; padding: 1pt 3pt; border-radius: 3pt; }
+  .byline { margin: 0 0 18pt; color: #333; }
+  .date { font-size: 7.5pt; background: #f1f0ec; padding: 1.5pt 5pt; border-radius: 3pt; margin-right: 3pt; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9.5pt; }
+  tr { break-inside: avoid; }
+  th, td { border: 1px solid #dddcd6; padding: 5pt 7pt; text-align: left; vertical-align: top; }
+  th { background: #f6f5f1; font-weight: 400; color: #444; }
+  .note { border-left: 3px solid #c9c6bb; padding: 2pt 0 2pt 9pt; color: #333; }
+</style>
+</head>
+<body>
+
+<h1>Field Sales User Guide: Web and Mobile</h1>
+<p class="byline"><span class="date">Nov 17, 2026</span> · Praveenkumar</p>
+
+<h2>Overview</h2>
+<p>Field Sales lets sales reps visit retail shops with a GPS check-in, take orders against live Shopify stock, and push those orders to Shopify automatically. Managers track visits, orders, sync status and commission from one dashboard.</p>
+<p>There are two ways in:</p>
+<ul>
+  <li><strong>Web app</strong>: open Field Sales from <strong>Apps</strong> in your Shopify admin, or open <code>https://&lt;your-site&gt;/fieldsales</code> in a browser. Managers and admins do setup and oversight here. Reps can use it on a phone too.</li>
+  <li><strong>Mobile app</strong>: the Field Sales phone app (Android and iOS), built for reps and managers in the field, with offline support and push notifications. It uses the same site, account and data as the web app.</li>
+</ul>
+<p>Who does what:</p>
+<table>
+  <tr><th style="width:40%">Role</th><th>What they can do</th></tr>
+  <tr><td>System Manager (admin)</td><td>Everything, including the store connection, Sync Failures, Sync Log and all Settings tabs</td></tr>
+  <tr><td>Sales Manager</td><td>Sees their whole team. Plans and imports visits, creates reps, manages shop logins and commission, views Reports. Can move a shop's map pin</td></tr>
+  <tr><td>Sales Rep</td><td>Sees only their own shops, visits and orders. Takes orders, checks in and out, sees their own commission</td></tr>
+  <tr><td>Shop login (Field Sales Retailer)</td><td>Sees only <strong>My Orders</strong>, read-only. Can download invoices</td></tr>
+</table>
+<p>The web app calls customers <strong>Shops</strong> and the mobile app calls them <strong>Customers</strong>. They are the same records, and each one is pushed to Shopify as a customer.</p>
+
+<h2>Getting started</h2>
+<p>Everyone signs in with the same email and password on the web and on the phone. New reps get a welcome email with a link to set their password. New shop logins get a "Welcome to &lt;store name&gt;" email.</p>
+
+<h3>Sign in on the web</h3>
+<ol>
+  <li>Go to <code>https://&lt;your-site&gt;/fieldsales</code> (short form: <code>/fs</code>).</li>
+  <li>Sign in on the login page. You land back in Field Sales.</li>
+  <li>Optional, on a phone: open the user menu and tap <strong>Install app</strong> (or <strong>Add to Home Screen</strong>) to add a home-screen icon.</li>
+</ol>
+<p>Inside the Shopify admin there is no login: open Field Sales from <strong>Apps</strong> and it loads in place.</p>
+
+<h3>Sign in on the mobile app</h3>
+<ol>
+  <li>Install the app and open it.</li>
+  <li>Tap <strong>Configure server</strong> (or <strong>Change server</strong>), enter your site address, for example <code>yourcompany.example.com</code>, and tap <strong>Save server</strong>. The app adds <code>https://</code> itself, and the address must not include a path.</li>
+  <li>Enter your <strong>Email or Username</strong> and <strong>Password</strong>, then tap <strong>Sign In</strong>.</li>
+  <li>Optional: in <strong>Profile → Connected Instance &amp; Security</strong>, turn on <strong>Screen lock</strong> or <strong>Biometric unlock</strong> to lock the app when it is reopened.</li>
+</ol>
+<p>You stay signed in until you tap <strong>Log Out</strong> or the server ends the session. Signing out clears all offline data on the phone, so sync first (see the mobile app section).</p>
+
+<h3>Forgotten passwords and lockouts</h3>
+<ul>
+  <li>Five wrong attempts lock the account for 10 minutes. The app shows the same "Invalid login credentials" message for a wrong password, a locked account, or a user with no Field Sales role.</li>
+  <li><strong>Forgot password?</strong> in the mobile app only shows a note. Reset from the web login page instead, or ask a manager to click <strong>Send Reset Link</strong> on your Sales Rep page.</li>
+</ul>
+
+<h2>Web app: connect Shopify and sync</h2>
+<p>Field Sales connects to your store when you install it from the Shopify App Store: Shopify grants the access you approve, and there is no shop address, key or password to enter. After that, products and stock flow in from Shopify, and shops and orders flow out to it. Store options are in <strong>Settings → Store Connection</strong>.</p>
+
+<h3>First-time setup, in order</h3>
+<ol>
+  <li><strong>Install the app.</strong> Install Field Sales from the Shopify App Store and approve the requested access. It opens inside your Shopify admin, picks your first location as the default and starts the first product sync.</li>
+  <li><strong>Check locations.</strong> In <strong>Settings → Store Connection</strong>, click <strong>Fetch Locations</strong>, tick <strong>Sell from here</strong> for each location reps sell from, and click <strong>Set Default</strong> to change the default. Changing the default starts a product sync.</li>
+  <li><strong>Set the order mode.</strong> Under <strong>Create Shopify Order As</strong>, choose <strong>Draft Order</strong> (staff review each order in Shopify) or <strong>Confirmed Order</strong> (orders go straight to Shopify). Also pick a <strong>Product Sync Frequency</strong>: every 30 minutes, hourly or daily.</li>
+  <li><strong>Add an email account.</strong> In <strong>Settings → Email Account</strong>, click <strong>New Email Account</strong> and tick <strong>Default outgoing account</strong>. Without one, no invites or order confirmations are sent.</li>
+  <li><strong>Fill in the Invoice tab</strong>: company name, GSTIN, address, state, phone and email. These are printed on invoices.</li>
+  <li><strong>Add sales reps</strong> (see the next section).</li>
+  <li><strong>Plan visits</strong> for the reps.</li>
+</ol>
+<p>Click <strong>Save Changes</strong> after editing any tab. <strong>Discard</strong> undoes unsaved edits.</p>
+
+<h3>What syncs, and when</h3>
+<table>
+  <tr><th style="width:32%">Data</th><th style="width:28%">Direction</th><th>When</th></tr>
+  <tr><td>Products, prices, barcodes, stock</td><td>Shopify → Field Sales</td><td>On the sync schedule, plus live updates whenever Shopify changes a product or a stock level</td></tr>
+  <tr><td>Shops</td><td>Field Sales → Shopify (as customers)</td><td>When a shop is saved, or by clicking <strong>Sync to Shopify</strong> on the shop</td></tr>
+  <tr><td>Orders</td><td>Field Sales → Shopify</td><td>When a rep submits an order</td></tr>
+  <tr><td>Paid, fulfilled, cancelled and refunded events</td><td>Shopify → Field Sales</td><td>Live; they drive commission</td></tr>
+</table>
+<p>Products are read-only in Field Sales: edit names, prices and stock in Shopify. A manager can click <strong>Sync Products</strong> on the Products page to pull changes immediately.</p>
+
+<h3>Draft orders vs confirmed orders</h3>
+<ul>
+  <li><strong>Draft Order</strong>: each order arrives in Shopify as a draft (for example #D5). The Shopify order number, commission and the customer's confirmation email follow only after staff complete the draft in Shopify. Field Sales checks for completed drafts every 30 minutes.</li>
+  <li><strong>Confirmed Order</strong>: a real Shopify order is created as soon as the rep submits.</li>
+</ul>
+<p>Webhooks for live updates are set up by the app. Do not add them by hand under Shopify admin → <strong>Settings → Notifications</strong>, because those are signed with a different key and will be rejected.</p>
+
+<h2>Web app: day-to-day tasks</h2>
+<p>The sidebar holds every page your role can open: Notifications, Dashboard, Orders, Shops, Products, Visits, Sales Reps, Commission, Reports, Sync Failures, Sync Log and Settings. On a phone, a bottom bar shows Dashboard, Orders, Shops and Visits.</p>
+
+<h3>Dashboard</h3>
+<p>The page is titled <strong>Analytics</strong>. It shows total sales, orders, completed visits and pending syncs, plus <strong>Today's Operations</strong> and <strong>Exceptions requiring follow-up</strong>: missed visits, shops not visited in 30 days, draft orders, pending shops and out-of-stock products.</p>
+
+<h3>Shops</h3>
+<ol>
+  <li>Click <strong>New Shop</strong>. Enter <strong>Shop Name</strong>, <strong>Phone</strong>, <strong>Owner Name</strong>, <strong>Shop Type</strong>, address and <strong>Country</strong> (the country sets how the phone number is checked). Add the GSTIN for Indian shops.</li>
+  <li>Set the location with <strong>Use My Location</strong> or <strong>Select Location</strong> on a map. <strong>Geofence Radius (m)</strong> defaults to 50.</li>
+  <li>Choose the <strong>Sales Rep</strong> and save.</li>
+</ol>
+<p>On a shop's page you can <strong>Edit</strong>, <strong>Plan Visit Today</strong> or start a <strong>New Order</strong>. If the "Shopify Customer Sync" card shows Draft or Failed, click <strong>Sync to Shopify</strong>. Only managers can move a map pin after it is set.</p>
+
+<h3>Visits</h3>
+<ol>
+  <li>Click <strong>New Visit</strong>, then choose the shop, rep, date and purpose (Order Taking, Collection, Merchandising, Complaint or Follow-up).</li>
+  <li>On the visit date, the assigned rep opens the visit and clicks <strong>Check In</strong>. The browser asks for location access. A check-in more than the geofence radius from the shop is allowed but flagged ("You are N m away from the retailer").</li>
+  <li>Take an order with <strong>New Order</strong>, or record why no order was taken.</li>
+  <li>Click <strong>Check Out</strong>. Without an order, pick a <strong>Reason</strong>: Stock Available, Owner Absent, Price Issue, Shop Closed or Other (Other needs details).</li>
+</ol>
+<p>A rep can have only one visit in progress at a time. A missed visit is a planned visit whose date has passed; ask a manager to move it to today. Inside the Shopify admin the browser gives no location: click <strong>Open in Field Sales</strong> on the visit to check in from a new tab, or use the mobile app.</p>
+<p><strong>Importing visits</strong> (managers): on <strong>Visits → Import from Excel</strong>, click <strong>Download Template</strong> and fill one row per visit with the columns <strong>Sales Rep</strong>, <strong>Customer</strong> and <strong>Visit Date</strong> (DD-MM-YYYY), plus Purpose and Notes if needed. Then click <strong>Choose File</strong>, check the preview and click <strong>Create N visits</strong>. The limit is 500 rows per file, as .xlsx or .csv. Duplicate rows and visits that already exist are skipped and listed.</p>
+
+<h3>Orders</h3>
+<ol>
+  <li>Click <strong>New Order</strong>, then choose the <strong>Shop</strong>, <strong>Sales Rep</strong>, <strong>Order Date</strong> and <strong>Location</strong>, and click <strong>Create Draft</strong>.</li>
+  <li>Add items by searching, with <strong>Scan barcode</strong>, or with <strong>Add Row</strong> or <strong>Add Multiple</strong>. Set <strong>Discount %</strong> (capped by the rep's limit) and the tax rate: 0, 5, 12, 18 or 28%.</li>
+  <li>Click <strong>Save</strong>, then <strong>Submit</strong>. Submitting re-checks live Shopify stock. Use <strong>Preview</strong> to see the printed order.</li>
+</ol>
+<p>Order statuses run Draft → Pending → Synced, with Failed if Shopify rejects the order. Cancelled orders keep their record. From <strong>More actions</strong> you can <strong>Refresh Stock</strong>, <strong>Open in Shopify</strong>, <strong>Cancel Order</strong> (submitted orders) or <strong>Delete</strong> (drafts). Cancelling in Field Sales does not cancel the order in Shopify, and a paid order must be refunded before it can be cancelled.</p>
+<p><strong>Invoices and email</strong>: each synced order sends the shop one confirmation email with the invoice PDF attached. On the order page, use <strong>Download Invoice</strong> or <strong>Resend Email</strong>. The invoice prints as a GST "Tax Invoice" when a GSTIN is set on the Invoice tab, otherwise as "Invoice". To stop the emails, untick <strong>Send order confirmation</strong> in <strong>Settings → Invoice</strong>.</p>
+<p><strong>Payments</strong>: Field Sales does not take payments. Shops pay through Shopify or directly to your business. When a shop pays you in cash or by bank transfer / UPI, open the submitted order and click <strong>Mark as Paid</strong>, choose the payment method and, for a bank transfer or UPI, enter the reference number. This records the payment in Field Sales only, so the team can see which orders are paid; mark the order paid in your Shopify admin as well. Payments recorded in Shopify still drive commission.</p>
+
+<h3>Sales reps (managers)</h3>
+<p>Click <strong>New Sales Rep</strong> and fill in <strong>User (Email)</strong>, <strong>Full Name</strong>, <strong>Mobile</strong>, <strong>Territory</strong>, <strong>Reports To</strong>, <strong>Monthly Target</strong> and <strong>Max Discount % per Order</strong> (leave it empty to allow no discount). Pick the role <strong>Sales Rep</strong> or <strong>Sales Manager</strong>, tick <strong>Email an invite to set a password</strong>, and click <strong>Create</strong>. A rep's page has <strong>Send Reset Link</strong> and <strong>Set Password</strong>.</p>
+
+<h3>Commission</h3>
+<p>Reps see their own earnings on <strong>My Commission</strong>: Earned, Pending, Reversed and Net. Managers also get <strong>Team</strong>, <strong>Statements</strong> and <strong>Plans</strong>. Plans pay a flat %, a rate per product, tiered slabs or an amount per order, counted when the order is Paid or Fulfilled in Shopify. Statements are drafted on the 1st of each month; a manager clicks <strong>Approve</strong>, then <strong>Mark Paid</strong>. Companies that don't pay commission can turn it off in <strong>Settings → Commission</strong>.</p>
+
+<h3>Shop logins (My Orders)</h3>
+<p>A manager can give a shop its own login from the shop's <strong>Login Access</strong> card: enter an email and click <strong>Send Invite</strong>. The shop then sees only <strong>My Orders</strong>, where it can view its orders and payment status, <strong>Download Invoice</strong>, and pay through Shopify with <strong>Pay in Store Checkout</strong> when the order has a Shopify checkout link. Use <strong>Remove access</strong> to revoke the login.</p>
+
+<h3>Sync failures (admins)</h3>
+<p><strong>Sync Failures</strong> lists orders and shops that Shopify rejected, each with a <strong>Retry</strong> button. Failed orders are also retried automatically every 15 minutes, up to 5 times. <strong>Sync Log</strong> shows every sync attempt and its result.</p>
+
+<h3>Plans</h3>
+<p>You choose your Field Sales plan on Shopify's plan page, and charges appear on your Shopify bill. <strong>Settings</strong> shows your current plan. If a plan limits the number of reps or orders per month, Field Sales tells you when the limit is reached, with a link to change your plan.</p>
+
+<h2>Mobile app</h2>
+<p>The mobile app covers a rep's whole day: see customers, check in, take an order, check out. It keeps working without a signal. It asks for location access (for check-in), the camera (for barcode scanning) and, optionally, biometrics (for app lock).</p>
+
+<h3>Getting around</h3>
+<table>
+  <tr><th style="width:40%">Role</th><th>Bottom tabs</th></tr>
+  <tr><td>Sales Rep</td><td>Dashboard, Visits, Orders, Customers, Commission</td></tr>
+  <tr><td>Sales Manager / Admin</td><td>Dashboard, Team, Orders, Commission</td></tr>
+  <tr><td>Shop login</td><td>Dashboard, Orders, Payments, Profile</td></tr>
+</table>
+<p>Commission appears only when commission is turned on. The side menu adds Products, Notifications, Profile, and Help &amp; About. Managers also get Visit Import, Reports and Settings. The search button in the top bar searches customers, orders, products and reps; type at least 2 characters.</p>
+
+<h3>Customers</h3>
+<ul>
+  <li>Search by name, city, phone or ID, and filter by status or type.</li>
+  <li>Tap <strong>New Customer</strong>, fill in the name, phone, <strong>Address Line 1</strong> and <strong>City</strong> (all required), and tap <strong>Use My Location</strong> to save the GPS position. Then tap <strong>Create Customer</strong>.</li>
+  <li>A customer's page shows the last 30 days, recent visits and orders, and the buttons <strong>Plan Visit Today</strong> and <strong>New Order</strong>. If Shopify sync shows Draft or Failed, tap <strong>Sync to Shopify</strong>.</li>
+  <li>A rep can set a customer's location only once. After that, ask a Sales Manager to change it.</li>
+</ul>
+
+<h3>A visit, step by step</h3>
+<ol>
+  <li>Open <strong>Visits → Today</strong> and tap the visit. (Tap <strong>New Visit</strong> to plan one, then choose the customer, date and purpose and tap <strong>Schedule Visit</strong>.)</li>
+  <li>At the shop, tap <strong>Check In</strong>. The app reads your GPS position. Outside the shop's radius (50 m by default), the check-in still goes through but is marked <strong>Outside Geofence</strong>.</li>
+  <li>Tap <strong>Take Order</strong>, or tap <strong>Record No-Order Reason</strong> and pick a reason. Add <strong>Visit Notes</strong> if needed.</li>
+  <li>Tap <strong>Check Out</strong> and confirm. A <strong>Visit Summary</strong> shows the time spent on site.</li>
+</ol>
+<p>Check-in opens only on the visit's date, and only one visit can be in progress at a time. On the first visit to a customer with no location, an accurate GPS fix (within 100 m) saves the shop's position.</p>
+
+<h3>Taking an order</h3>
+<ol>
+  <li>Choose the customer and the <strong>Location</strong> to sell from. Set <strong>GST %</strong> and <strong>Discount %</strong>; the hint shows your maximum discount.</li>
+  <li>Add products by searching name, SKU or barcode, or tap the scan button and point the camera at the barcode. If the camera fails, type the code and tap <strong>Lookup</strong>.</li>
+  <li>Check the cart. Lines over the available stock show "Exceeds stock — only N available".</li>
+  <li>Tap <strong>Save Draft</strong> to finish later, or <strong>Submit</strong> to send the order. If prices changed in Shopify, tap <strong>Apply Updated Prices</strong>.</li>
+</ol>
+<p>In <strong>Orders</strong>, filter by All, Drafts, Synced, Pending or Failed. An order's page lets you <strong>Submit Order</strong>, <strong>Retry Shopify Sync</strong>, <strong>Download Invoice</strong> or <strong>Resend Email</strong>.</p>
+
+<h3>Dashboard, commission and profile</h3>
+<ul>
+  <li><strong>Dashboard</strong> shows sales, orders, completed visits and your <strong>Monthly Target</strong> progress for Today, This Week, This Month, Last Month or a custom range.</li>
+  <li><strong>Commission</strong> shows your Earned, Pending, Reversed and Net Payable amounts, plus your statements.</li>
+  <li><strong>Profile</strong> shows your target, maximum discount, commission plan and manager. It also holds <strong>Sync Account Data</strong>, <strong>Log Out</strong> and the app-lock switches.</li>
+</ul>
+
+<h3>Working with a poor connection</h3>
+<p>These actions are saved on the phone when you are offline and sent automatically, in order, when the connection returns: new orders (draft or submitted), new visits, check-ins, check-outs and no-order reasons.</p>
+<ul>
+  <li>A banner reads <strong>No Internet Connection</strong> or <strong>Server Unavailable</strong>. Tap <strong>Retry Connection</strong> to try again.</li>
+  <li>An offline check-in shows "Saved offline; the location is verified when it syncs".</li>
+  <li>Orders waiting to send show a <strong>Pending</strong> badge. If the server rejects one, it shows <strong>Failed</strong> with the reason.</li>
+  <li>A resent order is never created twice, even after repeated retries.</li>
+  <li><strong>Help &amp; About</strong> shows how many items are still waiting.</li>
+</ul>
+<p class="note">Do not log out or change the server while items are pending: signing out deletes everything stored on the phone, including the queue.</p>
+
+<h3>Push notifications</h3>
+<p>The mobile app pops up alerts on your phone, even when the app is closed, for the same things that appear in the bell. Shop logins get no push notifications.</p>
+<table>
+  <tr><th style="width:55%">You get a push when</th><th>Who gets it</th></tr>
+  <tr><td>A visit is assigned to you or rescheduled</td><td>The rep (not when you made the change yourself)</td></tr>
+  <tr><td>Your order is confirmed in the store (in draft mode, once staff complete the draft)</td><td>The order's rep</td></tr>
+  <tr><td>An order fails to sync to the store</td><td>The rep's manager</td></tr>
+  <tr><td>A shop fails to sync to the store</td><td>Admins</td></tr>
+  <tr><td>A payment is recorded or received</td><td>The order's rep and Sales Managers</td></tr>
+  <tr><td>A commission statement is approved or marked paid</td><td>The rep</td></tr>
+  <tr><td>A product drops to 5 or fewer in stock (once a day per product)</td><td>Sales Managers</td></tr>
+</table>
+<p>For privacy, a push never shows a shop name, phone number or amount. Tap it to open the record; the full message is in the bell.</p>
+
+<h3>On your phone</h3>
+<ol>
+  <li>Sign in to the mobile app. When push is switched on for your site, the app asks to send notifications: tap <strong>Allow</strong>.</li>
+  <li>To stop them on this phone, open <strong>Profile → Connected Instance &amp; Security</strong> and turn off <strong>Push notifications</strong>. Bell notifications keep working.</li>
+  <li>Signing out stops pushes to that phone straight away.</li>
+</ol>
+
+<h3>Setting it up (admins)</h3>
+<ul>
+  <li>On a server where push is already set up, every site has it automatically; there is nothing to do per site.</li>
+  <li>Otherwise, ask your developer to set the Firebase key once for the server. To use a separate key for one site, open <strong>Mobile Push Settings</strong> in Desk, upload the service account key file, tick <strong>Enabled</strong> and save.</li>
+  <li>To test, click <strong>Send Test Notification</strong> in Mobile Push Settings, pick a user under <strong>Send to</strong> (only users signed in to the app with notifications allowed are listed) and click <strong>Send</strong>.</li>
+  <li>Without any Firebase setup the app works fully: there are just no pushes, and the app does not ask for notification permission.</li>
+</ul>
+
+<h2>Uninstalling and your data</h2>
+<ul>
+  <li>Uninstalling Field Sales from your Shopify admin removes its access to your store at once, and syncing stops. Reinstalling reconnects it.</li>
+  <li>48 hours later Shopify asks us to delete your shop's data: customers' personal data is anonymised, and synced products and log contents are deleted. Order amounts and dates are kept anonymised for your records.</li>
+  <li>Requests from your shoppers to see or delete their data are handled automatically through Shopify.</li>
+</ul>
+
+<h2>Troubleshooting and FAQ</h2>
+<p>Most problems come from location permissions, stock limits, discount limits or the store connection. Find the message you see below.</p>
+<table>
+  <tr><th style="width:30%">Message or symptom</th><th style="width:32%">What it means</th><th>What to do</th></tr>
+  <tr><td>Invalid login credentials / Invalid credentials</td><td>Wrong password, account locked after 5 failed tries, or no Field Sales role</td><td>Wait 10 minutes and retry, reset the password, or ask a manager to check your role</td></tr>
+  <tr><td>No compatible Field Sales app is installed on this server</td><td>The mobile app points at the wrong site</td><td><strong>Profile → Change server</strong> and enter the correct address</td></tr>
+  <tr><td>This server needs a newer version of the app</td><td>The mobile app is out of date</td><td>Update the app</td></tr>
+  <tr><td>Location permission was denied</td><td>The phone or browser blocked GPS</td><td>Allow location for the app or browser. On the web, the site must use HTTPS</td></tr>
+  <tr><td>Could not get a GPS fix within 15 seconds</td><td>Weak GPS signal</td><td>Step outside or near a window and try again</td></tr>
+  <tr><td>Location is not available inside Shopify admin</td><td>Check-in was tried from the Shopify admin</td><td>Click <strong>Open in Field Sales</strong>, or use the mobile app on your phone</td></tr>
+  <tr><td>This visit is planned for &lt;date&gt; / Check-in is closed</td><td>Visits can only be checked into on their date</td><td>Ask a manager to move the visit to today</td></tr>
+  <tr><td>Check out of &lt;visit&gt; before checking in to another visit</td><td>Another visit is still in progress</td><td>Open that visit and <strong>Check Out</strong></td></tr>
+  <tr><td>Exceeds stock — only N available</td><td>Shopify has less stock than the quantity ordered</td><td>Lower the quantity or tap <strong>Refresh Stock</strong></td></tr>
+  <tr><td>Max discount for X is N% / cannot give a discount</td><td>The rep's discount limit was exceeded</td><td>Lower the discount, or ask a manager to raise <strong>Max Discount % per Order</strong></td></tr>
+  <tr><td>Live stock unavailable</td><td>Field Sales could not reach Shopify</td><td>Wait a minute and try again. If it continues, contact support</td></tr>
+  <tr><td>Order shows Failed</td><td>Shopify rejected the order</td><td>Read the reason on the order, fix it, then click <strong>Retry Shopify Sync</strong>. Failed orders also retry automatically every 15 minutes, up to 5 times</td></tr>
+  <tr><td>Order stays at Pending in draft mode</td><td>Draft orders wait for staff to complete them in Shopify</td><td>Complete the draft in Shopify; Field Sales picks it up within 30 minutes</td></tr>
+  <tr><td>Set a Default Location on Store Connection before syncing products</td><td>No sell-from location is chosen</td><td><strong>Settings → Store Connection → Fetch Locations</strong>, then <strong>Set Default</strong></td></tr>
+  <tr><td>Confirmation emails not arriving</td><td>No default outgoing email account, or the email went to spam</td><td>Check <strong>Settings → Email Account</strong> (tick <strong>Default outgoing account</strong>) and the spam folder, then click <strong>Resend Email</strong></td></tr>
+  <tr><td>Reinstall required</td><td>The Shopify connection expired</td><td>Open Field Sales from the Shopify admin to reconnect</td></tr>
+  <tr><td>Camera not available / Camera permission denied</td><td>Camera blocked, or the web page is not on HTTPS</td><td>Allow camera access, or type the barcode by hand</td></tr>
+  <tr><td>You do not have access to &lt;page&gt;</td><td>Your role cannot open that page</td><td>Ask an admin if you need access</td></tr>
+  <tr><td>Push notifications: "Not available in this version of the app"</td><td>This build of the app has no push support</td><td>Install the latest app version from your administrator</td></tr>
+  <tr><td>Push notifications: "Not switched on for this site yet"</td><td>The server has no Firebase key</td><td>An admin sets it up (see Push notifications). The app asks for permission by itself once it is on</td></tr>
+  <tr><td>Push notifications: "Blocked on this phone"</td><td>You tapped Don't allow, or turned notifications off for the app</td><td>Phone <strong>Settings → Apps → Field Sales → Notifications</strong> → allow</td></tr>
+  <tr><td>Send Test Notification: "&lt;user&gt; has no phone registered"</td><td>That user has not signed in to the mobile app with notifications allowed</td><td>Sign in to the app as that user, allow notifications, then pick them in the <strong>Send to</strong> list</td></tr>
+</table>
+<p><strong>Can I edit a product's price in Field Sales?</strong> No. Products are read-only; change them in Shopify and they sync back.</p>
+<p><strong>Does cancelling an order in Field Sales cancel it in Shopify?</strong> No. Cancel it in Shopify as well. A paid order must be refunded first.</p>
+<p><strong>Does Field Sales take payments?</strong> No. Payments go through Shopify or directly to your business; <strong>Mark as Paid</strong> only records a cash or bank payment in Field Sales.</p>
+<p><strong>Can reps work without a signal?</strong> Yes, in the mobile app. Orders, visits and check-ins are queued and sent automatically when the connection returns.</p>
+
+</body>
+</html>

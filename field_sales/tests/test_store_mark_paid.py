@@ -202,8 +202,16 @@ class TestStoreMarkPaid(IntegrationTestCase):
 	def test_draft_paid_in_agamsale_marks_the_new_store_order_paid(self):
 		conn, enqueue = self.link_draft()
 		self.assertEqual(frappe.db.get_value("Field Order", self.order.name, "external_order_id"), "5550001")
-		conn.get_store_payment.assert_not_called()  # already paid in Agamsale: nothing to read
+		conn.get_store_payment.assert_called_once_with("5550001")  # not paid on the store yet
 		enqueue.assert_called_once_with(self.order.name)
+
+	def test_draft_paid_in_agamsale_and_completed_as_paid_on_store(self):
+		total = frappe.db.get_value("Field Order", self.order.name, "grand_total")
+		payment = {"amount": total, "currency": "INR", "method": "manual", "reference": None, "paid_at": None}
+		_conn, enqueue = self.link_draft(store_payment=payment)
+		self.assertIsNotNone(self.marked_on())  # the merchant marked it paid when completing the draft
+		enqueue.assert_not_called()
+		self.assertFalse(frappe.db.exists("Payment Transaction", {"reference_order": self.order.name, "source": "Store Checkout"}))
 
 	def test_draft_paid_on_store_checkout_marks_the_field_order_paid(self):
 		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})

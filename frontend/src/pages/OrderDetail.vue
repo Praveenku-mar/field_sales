@@ -371,6 +371,19 @@
           <div v-if="canMarkPaid" class="p-4 pt-2">
             <Button class="w-full" label="Mark as Paid" icon-left="lucide-check-circle" @click="openManualPayment" />
           </div>
+          <!-- App Store installs: the merchant collects or records the payment in Shopify (rule 1.1.2) -->
+          <div v-if="shopifyPayAction" class="space-y-2 p-4 pt-1">
+            <p v-if="shopifyPayAction.note" class="rounded-lg bg-[#fff1e3] px-3 py-2 text-xs text-[#5e4200]">
+              {{ shopifyPayAction.note }}
+            </p>
+            <Button
+              class="w-full"
+              :variant="shopifyPayAction.note ? 'solid' : 'subtle'"
+              :label="shopifyPayAction.label"
+              icon-left="lucide-external-link"
+              @click="openInShopifyAdmin"
+            />
+          </div>
           <!-- Managers: refund what is left of the order's Razorpay payment -->
           <div v-if="pay.can_refund" class="p-4 pt-1">
             <Button class="w-full" theme="red" label="Refund" icon-left="lucide-undo-2" @click="refundOpen = true" />
@@ -495,7 +508,8 @@
         <p class="text-sm text-polaris-secondary">Record the full payment of {{ formatCurrency(pay.grand_total || d.grand_total) }} for this order.</p>
         <!-- App Store installs never mark the Shopify order paid themselves (Shopify rule 1.1.2). -->
         <p v-if="session.store.app_store" class="text-sm text-polaris-secondary">
-          This records the payment in Field Sales only. Mark the order paid in the Shopify admin too.
+          This records the payment in Field Sales only. Then click Mark Paid in Shopify on this page to
+          record it in the Shopify admin too.
         </p>
         <FormControl v-model="manualPayment.method" type="select" label="Payment Method" :options="manualPaymentOptions" required />
         <FormControl v-if="manualPayment.method === 'Bank Transfer / UPI'" v-model="manualPayment.reference" label="Payment Reference No." maxlength="140" required />
@@ -1241,6 +1255,29 @@ const manualPaymentOptions = [
 const HAS_PAYMENT = ['Paid', 'Partially Paid', 'Partially Refunded', 'Refunded']
 const canMarkPaid = computed(() => d.value.docstatus === 1 && pay.value.can_mark_paid &&
   pay.value.grand_total > 0 && !HAS_PAYMENT.includes(pay.value.payment_status))
+
+// App Store installs: Agamsale never records a payment on Shopify itself (rule 1.1.2), so the
+// order page sends the merchant to the order (or draft) in the Shopify admin: Collect payment →
+// Mark as paid / Send invoice. Once Shopify shows it paid, store_marked_paid_on is set
+// (payments/store_payments.py) and the notice goes away.
+const shopifyAdminUrl = computed(() => syncInfo.data?.order_url || syncInfo.data?.draft_url || null)
+const shopifyPayAction = computed(() => {
+  if (!session.store.app_store || !session.isManager || d.value.docstatus !== 1 || !shopifyAdminUrl.value) return null
+  const status = pay.value.payment_status || 'Unpaid'
+  if (status === 'Paid' && !pay.value.store_marked_paid_on) {
+    return {
+      label: 'Mark Paid in Shopify',
+      note: 'Paid in Field Sales but not yet in Shopify. In Shopify, open the order and use Collect payment → Mark as paid.',
+    }
+  }
+  if (!HAS_PAYMENT.includes(status)) return { label: 'Collect Payment in Shopify', note: null }
+  return null
+})
+function openInShopifyAdmin() {
+  // Inside the admin, open it in the admin itself; standalone, in a new tab.
+  if (embedded) window.open(shopifyAdminUrl.value, '_top')
+  else window.open(shopifyAdminUrl.value, '_blank', 'noopener')
+}
 
 function openManualPayment() {
   manualPayment.method = ''

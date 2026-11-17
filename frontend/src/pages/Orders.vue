@@ -62,6 +62,9 @@ import StatusPill from '@/components/StatusPill.vue'
 import { useDocList } from '@/composables/useDocList'
 import { useSellLocations } from '@/composables/useSellLocations'
 import { formatCurrency, formatDate, formatNumber, orderStatus } from '@/utils/format'
+import { useSessionStore } from '@/stores/session'
+
+const session = useSessionStore()
 
 const tabs = [
   { label: 'All', value: 'all' },
@@ -91,17 +94,25 @@ function buildFilters(m) {
   }
   if (m.location_id) filters.push(['location_id', '=', m.location_id])
   // Payment state only exists on submitted orders.
-  if (m.payment_status) filters.push(['docstatus', '=', 1], ['payment_status', '=', m.payment_status])
+  if (m.payment_status === TO_RECORD_IN_SHOPIFY) {
+    // App Store installs: paid in Field Sales, the Shopify order or draft not paid there yet.
+    filters.push(['docstatus', '=', 1], ['payment_status', '=', 'Paid'], ['sync_status', '=', 'Synced'], ['store_marked_paid_on', 'is', 'not set'])
+  } else if (m.payment_status) filters.push(['docstatus', '=', 1], ['payment_status', '=', m.payment_status])
   filters.push(...(byTab[m.tab] || [['docstatus', '!=', 2]]))
   return filters
 }
 
 const PAYMENT_STATUSES = ['Unpaid', 'Link Sent', 'Partially Paid', 'Paid', 'Link Expired', 'Link Cancelled', 'Partially Refunded', 'Refunded']
-const paymentFilter = {
+const TO_RECORD_IN_SHOPIFY = 'to_record_in_shopify'
+const paymentFilter = computed(() => ({
   fieldname: 'payment_status',
   label: 'Payment',
-  options: [{ label: 'All payments', value: '' }, ...PAYMENT_STATUSES.map((v) => ({ label: v, value: v }))],
-}
+  options: [
+    { label: 'All payments', value: '' },
+    ...PAYMENT_STATUSES.map((v) => ({ label: v, value: v })),
+    ...(session.store.app_store ? [{ label: 'To record in Shopify', value: TO_RECORD_IN_SHOPIFY }] : []),
+  ],
+}))
 
 // A location filter only helps when the shop sells from more than one.
 const sellLocations = useSellLocations()
@@ -109,7 +120,7 @@ const filterFields = computed(() => [
   ...(sellLocations.multiple.value
     ? [{ fieldname: 'location_id', label: 'Location', options: [{ label: 'All locations', value: '' }, ...sellLocations.options.value] }]
     : []),
-  paymentFilter,
+  paymentFilter.value,
 ])
 
 const route = useRoute()

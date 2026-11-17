@@ -43,7 +43,7 @@
 		<div>
 			<strong>User guide: web and mobile</strong>
 			<p>Step-by-step guide for managers and reps: setup, shops, visits, orders, commission, the
-				mobile app and troubleshooting. PDF, 10 pages.</p>
+				mobile app and troubleshooting. PDF, 11 pages.</p>
 		</div>
 		<a class="btn btn-primary btn-sm" href="/assets/field_sales/docs/field-sales-user-guide.pdf"
 			target="_blank" rel="noopener">Open the guide (PDF)</a>
@@ -197,17 +197,25 @@
 	</ul>
 
 	<h2 id="payments">Payments</h2>
-	<p>Agamsale does not take payments. Retailers pay through Shopify (for example the invoice or
-		checkout link Shopify sends for an order) or directly to your business.</p>
+	<p>Agamsale does not take payments. Payments are collected or recorded in Shopify, and Agamsale
+		follows.</p>
 	<ul>
-		<li>When a retailer pays you in cash or by bank transfer / UPI, open the submitted order and
-			click <strong>Mark as Paid</strong>. Choose the payment method and, for a bank transfer or
-			UPI, enter the reference number.</li>
-		<li>This records the payment in Agamsale only, so reps and managers can see which orders are
-			paid. It does not change the order in Shopify: mark the order paid in your Shopify admin as
-			well.</li>
-		<li>A payment recorded in Shopify keeps driving commission as usual (orders paid or fulfilled
-			in Shopify).</li>
+		<li><strong>Online:</strong> the retailer pays on Shopify's checkout with any payment provider
+			you have set up in Shopify (Settings → Payments, for example Razorpay or UPI). On a draft
+			order, open the order in Agamsale and use <strong>Pay in Store Checkout</strong>,
+			<strong>Copy Link</strong> or <strong>WhatsApp</strong> to send the checkout link. When
+			Shopify shows the order paid, Agamsale marks it Paid (for a draft, once it is completed;
+			within 30 minutes).</li>
+		<li><strong>Cash or bank transfer / UPI:</strong> open the submitted order and click
+			<strong>Mark as Paid</strong>, choose the method and, for a transfer, enter the reference.
+			This records the payment in Agamsale. Then click <strong>Mark Paid in Shopify</strong> on
+			the order: it opens the order in your Shopify admin, where you use <em>Collect payment →
+			Mark as paid</em>.</li>
+		<li><strong>Orders → Payment → To record in Shopify</strong> lists orders paid in Agamsale that
+			Shopify doesn't show as paid yet. An order leaves the list once Shopify shows it paid.</li>
+		<li>An unpaid order has <strong>Collect Payment in Shopify</strong>, which opens it in your
+			Shopify admin to send an invoice or record a payment.</li>
+		<li>Commission follows Shopify as usual (orders paid or fulfilled in Shopify).</li>
 	</ul>
 
 	<h2 id="failures">Sync failures and retrying</h2>

@@ -2,7 +2,7 @@
   <div>
     <PageHeader title="Settings">
       <template #meta>
-        <TabButtons v-model="tab" :options="TABS" />
+        <TabButtons v-model="tab" :options="tabs" />
         <StatusPill
           v-if="tab === 'store' && storeForm?.titleStatus"
           :status="storeForm.titleStatus.status"
@@ -105,6 +105,9 @@ const NOT_ADMIN = {
   razorpay: { icon: 'lucide-credit-card', title: 'Razorpay', what: 'the Razorpay settings', who: 'Sales Manager or System Manager' },
   'mobile-push': { icon: 'lucide-bell', title: 'Notification', what: 'the notification settings' },
 }
+// A Shopify App Store install shows no outside payment provider settings (Shopify rule 1.1.7):
+// payment links are off there and the store's own checkout takes payment.
+const tabs = computed(() => TABS.filter((t) => !(t.value === 'razorpay' && session.store.app_store)))
 // The form whose Save / Discard the header shows (the Email tab saves in its own dialog).
 const FORMS = { store: storeForm, invoice: invoiceForm, commission: commissionForm, razorpay: razorpayForm, 'mobile-push': mobilePushForm }
 const activeForm = computed(() => FORMS[tab.value]?.value || null)
@@ -123,7 +126,7 @@ function refreshStoreForm() {
 const route = useRoute()
 const router = useRouter()
 const tab = computed({
-  get: () => (route.query.tab in NOT_ADMIN ? route.query.tab : 'store'),
+  get: () => (tabs.value.some((t) => t.value === route.query.tab) ? route.query.tab : 'store'),
   set: (value) => router.replace({ query: value === 'store' ? {} : { tab: value } }),
 })
 </script>

@@ -114,7 +114,8 @@ def callback(
 		error_message=f"Missing scopes: {', '.join(missing)}" if missing else None,
 	)
 	frappe.db.commit()
-	return redirect(config.APP_HOME_PATH, code=302)
+	# The app is embedded: land in it inside the Shopify admin, not on this site (rule 2.3.3).
+	return redirect(config.embedded_app_url(shop), code=302)
 
 
 # ----------------------------------------------------------------------

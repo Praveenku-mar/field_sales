@@ -212,7 +212,13 @@ def mark_store_order_paid(field_order: str):
 
 	Only orders pushed as confirmed orders (no draft); done once (``store_marked_paid_on``).
 	A store error is in Sync Log (written by the connector) and retried by ``retry_store_payments()``.
+
+	Never on a Shopify App Store install: Shopify's rules (1.1.2) do not let an app record,
+	through its API, a payment taken outside Shopify checkout. There a cash / bank payment is
+	recorded in Agamsale only; the merchant marks the store order paid in the Shopify admin.
 	"""
+	if store_payments_off():
+		return
 	doc = frappe.get_doc("Field Order", field_order, for_update=True)
 	if (
 		doc.docstatus != 1
@@ -250,6 +256,14 @@ def mark_store_order_paid(field_order: str):
 	)
 
 
+def store_payments_off() -> bool:
+	"""A Shopify App Store install: Agamsale never marks store orders paid (see mark_store_order_paid)."""
+	from field_sales.connectors.shopify import is_oauth
+
+	settings = frappe.get_cached_doc("Store Connection")
+	return settings.platform == "Shopify" and is_oauth(settings)
+
+
 def retry_store_payments():
 	"""
 	Hourly: queue ``mark_store_order_paid`` again for confirmed orders paid on Razorpay in the
@@ -257,6 +271,8 @@ def retry_store_payments():
 	"""
 	if not frappe.db.get_single_value("Store Connection", "enabled"):
 		return  # e.g. uninstalled; each job would only find the connection disabled
+	if store_payments_off():
+		return
 
 	names = frappe.get_all(
 		"Field Order",

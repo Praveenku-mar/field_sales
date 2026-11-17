@@ -11,6 +11,7 @@ from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
+from field_sales.connectors.shopify import is_oauth
 from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason
 from field_sales.permissions import hierarchy_filters, is_retailer_user
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS
@@ -568,7 +569,7 @@ def _count(doctype: str, filters: dict | list) -> int:
 def _store_info() -> dict:
 	"""Store name for the sidebar header: the shop's domain without scheme or path."""
 	values = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["platform", "enabled", "store_url"], as_dict=True
+		"Store Connection", "Store Connection", ["platform", "enabled", "store_url", "shopify_auth_mode"], as_dict=True
 	) or {}
 	url = (values.get("store_url") or "").strip().lower()
 	host = url.split("://", 1)[-1].split("/", 1)[0]
@@ -576,4 +577,6 @@ def _store_info() -> dict:
 		"name": host.removesuffix(".myshopify.com") or None,
 		"platform": values.get("platform"),
 		"enabled": bool(values.get("enabled")),
+		# A Shopify App Store install: no outside payment provider settings in the app (Shopify 1.1.7).
+		"app_store": values.get("platform") == "Shopify" and is_oauth(values),
 	}

@@ -22,6 +22,7 @@ import hmac
 import re
 
 import frappe
+from frappe import _
 from frappe.utils import get_url
 
 OAUTH_MODE = "OAuth"
@@ -40,6 +41,11 @@ SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
 CALLBACK_PATH = "/api/method/field_sales.shopify.oauth.callback"
 WEBHOOK_PATH = "/api/method/field_sales.shopify.webhooks.receive"
 APP_HOME_PATH = "/fieldsales"
+
+
+def embedded_app_url(shop: str) -> str:
+	"""The app inside the Shopify admin (where the merchant lands after installing): ``https://{shop}/admin/apps/{client id}``."""
+	return f"https://{shop}/admin/apps/{client_id()}"
 
 
 def client_id() -> str:
@@ -72,10 +78,19 @@ def is_valid_shop(shop: str | None) -> bool:
 
 
 def public_url(path: str = "") -> str:
-	"""Absolute URL of ``path`` on this site as Shopify must call it."""
-	base = (frappe.conf.get("shopify_app_url") or "").strip().rstrip("/")
-	if not base:
-		base = get_url().rstrip("/")
+	"""
+	Absolute URL of ``path`` on this site as Shopify must call it (OAuth redirect, webhooks).
+
+	Always HTTPS: Shopify requires a valid TLS certificate (App Store rule 3.1.1) and must never be
+	told an http:// address. Set site_config ``shopify_app_url`` to the site's public
+	``https://`` address; the site's own URL is used only when it is already HTTPS.
+	"""
+	base = (frappe.conf.get("shopify_app_url") or "").strip().rstrip("/") or get_url().rstrip("/")
+	if not base.lower().startswith("https://"):
+		frappe.throw(
+			_("Set site_config shopify_app_url to this site's public https:// address: Shopify only calls apps over HTTPS."),
+			title=_("HTTPS required"),
+		)
 	return base + path
 
 

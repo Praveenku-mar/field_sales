@@ -30,6 +30,13 @@ redirect_urls = [
 [webhooks]
 api_version = "2026-10"
 
+# Uninstall: tokens dropped, connection disabled (field_sales.shopify.webhooks). Declared here so
+# Shopify sends it from the first install; register_webhooks() also subscribes it through the API
+# as a fallback, and a second delivery is harmless.
+[[webhooks.subscriptions]]
+topics = ["app/uninstalled"]
+uri = "https://fieldsales.example.com/api/method/field_sales.shopify.webhooks.receive"
+
 # Mandatory privacy compliance topics (can't be subscribed through the API).
 [[webhooks.subscriptions]]
 compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]

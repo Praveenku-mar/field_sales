@@ -208,10 +208,12 @@ def enqueue_mark_store_paid(field_order: str):
 
 def mark_store_order_paid(field_order: str):
 	"""
-	Mark a confirmed store order paid after the Field Order was paid on Razorpay.
+	Mark the store order paid after the Field Order was paid in Agamsale (Razorpay, cash, bank).
 
-	Only orders pushed as confirmed orders (no draft); done once (``store_marked_paid_on``).
-	A store error is in Sync Log (written by the connector) and retried by ``retry_store_payments()``.
+	Needs a store order: a confirmed order, or a draft once it is completed on the store
+	(``link_completed_drafts()`` fills ``external_order_id`` and queues this). Done once
+	(``store_marked_paid_on``). A store error is in Sync Log (written by the connector) and
+	retried by ``retry_store_payments()``.
 
 	Never on a Shopify App Store install: Shopify's rules (1.1.2) do not let an app record,
 	through its API, a payment taken outside Shopify checkout. There a cash / bank payment is
@@ -224,7 +226,6 @@ def mark_store_order_paid(field_order: str):
 		doc.docstatus != 1
 		or doc.payment_status != "Paid"
 		or not doc.external_order_id
-		or doc.external_draft_id
 		or doc.store_marked_paid_on
 	):
 		return
@@ -266,8 +267,8 @@ def store_payments_off() -> bool:
 
 def retry_store_payments():
 	"""
-	Hourly: queue ``mark_store_order_paid`` again for confirmed orders paid on Razorpay in the
-	last 7 days that the store does not show as paid yet (50 a run).
+	Hourly: queue ``mark_store_order_paid`` again for store orders (confirmed, or completed
+	drafts) paid in Agamsale in the last 7 days that the store does not show as paid yet (50 a run).
 	"""
 	if not frappe.db.get_single_value("Store Connection", "enabled"):
 		return  # e.g. uninstalled; each job would only find the connection disabled
@@ -280,7 +281,6 @@ def retry_store_payments():
 			"docstatus": 1,
 			"payment_status": "Paid",
 			"external_order_id": ("is", "set"),
-			"external_draft_id": ("is", "not set"),
 			"store_marked_paid_on": ("is", "not set"),
 			"paid_on": (">=", add_to_date(now_datetime(), days=-7)),
 		},
@@ -365,6 +365,7 @@ def link_completed_drafts():
 			conn.set_order_metafields(order_id, frappe.get_doc("Field Order", d.name))
 		except ConnectorError:
 			pass  # logged by the connector; the order itself is linked either way
+		_carry_draft_payment(conn, d.name, order_id)
 		enqueue_create_entries(d.name)
 		enqueue_order_confirmation(d.name)
 		log_sync(
@@ -378,6 +379,26 @@ def link_completed_drafts():
 		notify_order_synced(d.name)
 		frappe.db.commit()
 		notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
+
+
+def _carry_draft_payment(conn, field_order: str, order_id: str):
+	"""
+	A draft just became a store order: bring its payment across, whichever side took it.
+
+	- Paid on the store (the draft's checkout link, any gateway): the store's paid webhook came
+	  before the order was linked and was ignored, so read the payment now. Safe to repeat.
+	- Paid in Agamsale (Razorpay, cash, bank): mark the new store order paid (not on App Store
+	  installs, see ``mark_store_order_paid``).
+	"""
+	from field_sales.payments.store_payments import apply_store_payment
+
+	try:
+		apply_store_payment(conn, order_id)
+	except ConnectorError:
+		pass  # logged by the connector; the order is linked either way
+	paid = frappe.db.get_value("Field Order", field_order, ["payment_status", "store_marked_paid_on"], as_dict=True)
+	if paid.payment_status == "Paid" and not paid.store_marked_paid_on:
+		enqueue_mark_store_paid(field_order)
 
 
 def _ensure_store_customer(retailer: str):

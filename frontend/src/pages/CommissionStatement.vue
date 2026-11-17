@@ -42,6 +42,7 @@
         >
         </DataTable>
       </SectionCard>
+      <Timeline doctype="Commission Statement" :name="name" :version="d.status || null" />
     </div>
 
     <Dialog v-model="confirm.open" :title="confirm.title" :message="confirm.message" :icon="confirm.icon" :theme="confirm.theme">
@@ -72,6 +73,7 @@
 import { computed, reactive, ref } from 'vue'
 import { Button, Dialog, FormControl, createResource, toast } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
+import Timeline from '@/components/Timeline.vue'
 import NumberCard from '@/components/NumberCard.vue'
 import SectionCard from '@/components/SectionCard.vue'
 import InfoGrid from '@/components/InfoGrid.vue'

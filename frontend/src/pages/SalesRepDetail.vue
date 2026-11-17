@@ -87,6 +87,7 @@
           </div>
         </SectionCard>
       </div>
+      <Timeline doctype="Sales Rep" :name="name" :version="d.modified || null" />
     </div>
 
     <Dialog v-model="editOpen" title="Edit sales rep" size="lg">
@@ -241,6 +242,7 @@ import {
   toast,
 } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
+import Timeline from '@/components/Timeline.vue'
 import SectionCard from '@/components/SectionCard.vue'
 import InfoGrid from '@/components/InfoGrid.vue'
 import DataTable from '@/components/DataTable.vue'

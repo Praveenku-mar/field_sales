@@ -88,3 +88,50 @@ class TestAppConfig(IntegrationTestCase):
 			["customers/data_request", "customers/redact", "shop/redact"],
 		)
 		self.assertTrue(all(s["uri"].startswith("https://") for s in subs))
+
+
+class TestMobileStorePaymentAction(AppStoreSite, IntegrationTestCase):
+	"""The order page's Shopify payment button, web and mobile (frontend_api._store_payment_action)."""
+
+	def tearDown(self):
+		frappe.db.rollback()
+		frappe.clear_document_cache("Store Connection", "Store Connection")
+
+	def action(self, manager=True, retailer=False, **values):
+		doc = frappe._dict(
+			{"docstatus": 1, "payment_status": "Paid", "store_marked_paid_on": None, "external_order_id": "555", "external_draft_id": None, **values}
+		)
+		conn = frappe._dict(get_order_url=lambda order_id, draft_id=None: f"https://kovai-mart.myshopify.com/admin/{'orders/' + order_id if order_id else 'draft_orders/' + draft_id}")
+		with patch.object(frontend_api, "is_manager_or_admin", return_value=manager), patch.object(
+			frontend_api, "is_retailer_user", return_value=retailer
+		), patch.object(frontend_api, "get_connector", return_value=conn):
+			return frontend_api._store_payment_action(doc)
+
+	def test_paid_in_field_sales_sends_the_manager_to_mark_it_paid(self):
+		self.use(config.OAUTH_MODE)
+		got = self.action()
+		self.assertEqual((got["action"], got["url"]), ("mark_paid", "https://kovai-mart.myshopify.com/admin/orders/555"))
+		self.assertTrue(got["note"])
+
+	def test_unpaid_draft_offers_collect_payment_on_the_draft(self):
+		self.use(config.OAUTH_MODE)
+		got = self.action(payment_status="Unpaid", external_order_id=None, external_draft_id="777")
+		self.assertEqual((got["action"], got["url"]), ("collect", "https://kovai-mart.myshopify.com/admin/draft_orders/777"))
+
+	def test_nothing_when_not_needed_or_not_allowed(self):
+		self.use(config.OAUTH_MODE)
+		cases = {
+			"already paid in Shopify": {"store_marked_paid_on": "2026-11-17 10:00:00"},
+			"not sent to Shopify": {"external_order_id": None},
+			"draft order": {"docstatus": 0},
+			"partly paid": {"payment_status": "Partially Paid"},
+			"rep": {"manager": False},
+			"retailer login": {"retailer": True},
+		}
+		for label, values in cases.items():
+			with self.subTest(label):
+				self.assertIsNone(self.action(**values))
+
+	def test_direct_installs_get_no_button(self):
+		self.use(config.CLIENT_CREDENTIALS_MODE)
+		self.assertIsNone(self.action())

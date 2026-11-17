@@ -13,8 +13,8 @@ from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.connectors.shopify import is_oauth
 from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason
-from field_sales.permissions import hierarchy_filters, is_retailer_user
-from field_sales.sync.orders import MAX_AUTO_ATTEMPTS
+from field_sales.permissions import hierarchy_filters, is_manager_or_admin, is_retailer_user
+from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
@@ -548,11 +548,48 @@ def get_order_payment_info(field_order: str) -> dict:
 			and doc.payment_status not in ("Paid", "Partially Paid", "Partially Refunded", "Refunded")
 		),
 		"whatsapp_number": whatsapp,
+		# App Store installs: where a manager records or collects the payment in Shopify.
+		"store_payment_action": _store_payment_action(doc),
 		# Payment history: links, store checkout attempts, payments and refunds, newest first.
 		"transactions": payment_history(doc),
 		# The Refund button: managers, on what is left of the order's Razorpay payments.
 		**_refund_info(doc),
 	}
+
+
+def _store_payment_action(doc) -> dict | None:
+	"""
+	Shopify App Store installs (rule 1.1.2): Agamsale never records a payment on Shopify itself,
+	so a manager is sent to the order (or draft) in the Shopify admin: Collect payment → Mark as
+	paid / Send invoice. Once Shopify shows it paid, ``store_marked_paid_on`` is set
+	(payments/store_payments.py) and the action goes away. Used by the web order page and the
+	mobile app.
+
+	:return: ``{"action": "mark_paid" | "collect", "label", "note", "url"}`` or ``None``
+	"""
+	if doc.docstatus != 1 or is_retailer_user() or not is_manager_or_admin() or not store_payments_off():
+		return None
+	if not (doc.external_order_id or doc.external_draft_id):
+		return None
+	status = doc.payment_status or "Unpaid"
+	if status == "Paid" and not doc.store_marked_paid_on:
+		action = {
+			"action": "mark_paid",
+			"label": _("Mark Paid in Shopify"),
+			"note": _(
+				"Paid in Field Sales but not yet in Shopify. In Shopify, open the order and use"
+				" Collect payment → Mark as paid."
+			),
+		}
+	elif status not in ("Paid", "Partially Paid", "Partially Refunded", "Refunded"):
+		action = {"action": "collect", "label": _("Collect Payment in Shopify"), "note": None}
+	else:
+		return None
+	try:
+		url = get_connector().get_order_url(doc.external_order_id, doc.external_draft_id)
+	except (ConnectorError, frappe.ValidationError):
+		return None  # store connection off: nowhere to send the manager
+	return {**action, "url": url} if url else None
 
 
 def _refund_info(doc) -> dict:

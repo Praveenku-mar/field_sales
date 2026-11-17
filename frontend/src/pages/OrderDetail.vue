@@ -1257,26 +1257,15 @@ const canMarkPaid = computed(() => d.value.docstatus === 1 && pay.value.can_mark
   pay.value.grand_total > 0 && !HAS_PAYMENT.includes(pay.value.payment_status))
 
 // App Store installs: Agamsale never records a payment on Shopify itself (rule 1.1.2), so the
-// order page sends the merchant to the order (or draft) in the Shopify admin: Collect payment →
-// Mark as paid / Send invoice. Once Shopify shows it paid, store_marked_paid_on is set
-// (payments/store_payments.py) and the notice goes away.
-const shopifyAdminUrl = computed(() => syncInfo.data?.order_url || syncInfo.data?.draft_url || null)
-const shopifyPayAction = computed(() => {
-  if (!session.store.app_store || !session.isManager || d.value.docstatus !== 1 || !shopifyAdminUrl.value) return null
-  const status = pay.value.payment_status || 'Unpaid'
-  if (status === 'Paid' && !pay.value.store_marked_paid_on) {
-    return {
-      label: 'Mark Paid in Shopify',
-      note: 'Paid in Field Sales but not yet in Shopify. In Shopify, open the order and use Collect payment → Mark as paid.',
-    }
-  }
-  if (!HAS_PAYMENT.includes(status)) return { label: 'Collect Payment in Shopify', note: null }
-  return null
-})
+// server (frontend_api._store_payment_action, shared with the mobile app) sends a manager to the
+// order or draft in the Shopify admin: Collect payment → Mark as paid / Send invoice.
+const shopifyPayAction = computed(() => (d.value.docstatus === 1 ? pay.value.store_payment_action || null : null))
 function openInShopifyAdmin() {
+  const url = shopifyPayAction.value?.url
+  if (!url) return
   // Inside the admin, open it in the admin itself; standalone, in a new tab.
-  if (embedded) window.open(shopifyAdminUrl.value, '_top')
-  else window.open(shopifyAdminUrl.value, '_blank', 'noopener')
+  if (embedded) window.open(url, '_top')
+  else window.open(url, '_blank', 'noopener')
 }
 
 function openManualPayment() {

@@ -1,7 +1,7 @@
 # Copyright (c) 2026, Your Company and contributors
 # For license information, please see license.txt
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -113,7 +113,7 @@ class TestStoreMarkPaid(IntegrationTestCase):
 
 	def test_skips_orders_that_should_not_be_marked(self):
 		cases = {
-			"draft order": {"external_draft_id": "777"},
+			"draft not completed yet": {"external_draft_id": "777", "external_order_id": None},
 			"not pushed": {"external_order_id": None},
 			"partly paid": {"payment_status": "Partially Paid"},
 			"cancelled": {"docstatus": 2},
@@ -126,6 +126,14 @@ class TestStoreMarkPaid(IntegrationTestCase):
 					mark_store_order_paid(self.order.name)
 				self.assertEqual(self.calls, [])
 				frappe.db.rollback(save_point="skip")
+
+	def test_completed_draft_is_marked_like_a_confirmed_order(self):
+		frappe.db.set_value("Field Order", self.order.name, "external_draft_id", "777")
+		with self.shopify():
+			mark_store_order_paid(self.order.name)
+		(mutation,) = self.mutations()
+		self.assertEqual(mutation[1], {"input": {"id": "gid://shopify/Order/5550001"}})
+		self.assertIsNotNone(self.marked_on())
 
 	def test_store_connection_disabled_does_nothing(self):
 		frappe.db.set_single_value("Store Connection", "enabled", 0)
@@ -155,6 +163,79 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		with patch.object(orders, "enqueue_mark_store_paid") as enqueue:
 			retry_store_payments()
 		self.assertNotIn(self.order.name, [c.args[0] for c in enqueue.call_args_list])
+
+	def test_hourly_retry_includes_completed_drafts(self):
+		frappe.db.set_value("Field Order", self.order.name, "external_draft_id", "777")
+		with patch.object(orders, "enqueue_mark_store_paid") as enqueue:
+			retry_store_payments()
+		self.assertIn(self.order.name, [c.args[0] for c in enqueue.call_args_list])
+
+	# -- a draft completed on the store ------------------------------------------
+
+	def link_draft(self, store_payment=None):
+		"""Run ``link_completed_drafts`` for this order as draft 777, completed into order 5550001."""
+		frappe.db.set_value(
+			"Field Order",
+			self.order.name,
+			{"external_draft_id": "777", "external_order_id": None, "sync_status": "Synced", "last_sync_attempt": now_datetime()},
+		)
+		conn = MagicMock()
+		conn.settings.platform = "Shopify"
+		conn.get_completed_drafts.return_value = {"777": "5550001"}
+		conn.get_store_payment.return_value = store_payment
+		quiet = [
+			patch.object(orders, name)
+			for name in ("enqueue_create_entries", "enqueue_order_confirmation", "notify_order_synced", "notify_sync_result")
+		]
+		with patch.object(orders, "get_connector", return_value=conn), patch.object(frappe.db, "commit"), patch(
+			"field_sales.payments.store_payments.notify_payment_received"
+		), patch.object(orders, "enqueue_mark_store_paid") as enqueue:
+			for p in quiet:
+				p.start()
+			try:
+				orders.link_completed_drafts()
+			finally:
+				for p in quiet:
+					p.stop()
+		return conn, enqueue
+
+	def test_draft_paid_in_agamsale_marks_the_new_store_order_paid(self):
+		conn, enqueue = self.link_draft()
+		self.assertEqual(frappe.db.get_value("Field Order", self.order.name, "external_order_id"), "5550001")
+		conn.get_store_payment.assert_not_called()  # already paid in Agamsale: nothing to read
+		enqueue.assert_called_once_with(self.order.name)
+
+	def test_draft_paid_on_store_checkout_marks_the_field_order_paid(self):
+		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})
+		total = frappe.db.get_value("Field Order", self.order.name, "grand_total")
+		payment = {"amount": total, "currency": "INR", "method": "Razorpay", "reference": "991", "paid_at": "2026-11-17T05:00:00Z"}
+		conn, enqueue = self.link_draft(store_payment=payment)
+		conn.get_store_payment.assert_called_once_with("5550001")
+		order = frappe.db.get_value("Field Order", self.order.name, ["payment_status", "store_marked_paid_on"], as_dict=True)
+		self.assertEqual(order.payment_status, "Paid")
+		self.assertIsNotNone(order.store_marked_paid_on)  # paid on the store: nothing to mark there
+		enqueue.assert_not_called()
+		self.assertTrue(
+			frappe.db.exists(
+				"Payment Transaction", {"reference_order": self.order.name, "source": "Store Checkout", "method": "Razorpay"}
+			)
+		)
+
+	def test_draft_unpaid_everywhere_stays_unpaid(self):
+		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})
+		_conn, enqueue = self.link_draft(store_payment=None)
+		self.assertEqual(frappe.db.get_value("Field Order", self.order.name, "payment_status"), "Unpaid")
+		enqueue.assert_not_called()
+
+	def test_store_error_reading_the_payment_still_links_the_draft(self):
+		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})
+		frappe.db.set_value("Field Order", self.order.name, {"external_draft_id": "777"})
+		conn = MagicMock()
+		conn.get_store_payment.side_effect = ConnectorError("down", code="NETWORK_ERROR")
+		with patch.object(orders, "enqueue_mark_store_paid") as enqueue:
+			orders._carry_draft_payment(conn, self.order.name, "5550001")
+		enqueue.assert_not_called()
+		self.assertEqual(frappe.db.get_value("Field Order", self.order.name, "payment_status"), "Unpaid")
 
 	# -- order page sync card --------------------------------------------------
 

@@ -129,6 +129,9 @@ mutation($input: DraftOrderInput!) {
 }
 """ % DRAFT_ORDER_FIELDS
 
+# Financial statuses that mean the customer paid (all or part) on Shopify.
+STORE_PAID_STATUSES = {"paid", "partially_paid"}
+
 DRAFT_ORDER_QUERY = """
 query($id: ID!) { draftOrder(id: $id) { %s } }
 """ % DRAFT_ORDER_FIELDS
@@ -210,6 +213,8 @@ query($id: ID!) {
     cancelledAt
     currencyCode
     tags
+    totalReceivedSet { shopMoney { amount currencyCode } }
+    transactions(first: 20) { id gateway kind status processedAt }
     lineItems(first: %d) {
       nodes {
         id
@@ -1489,6 +1494,24 @@ def _normalize_order(order: dict | None) -> dict:
 		"cancelled": bool(order.get("cancelledAt")),
 		"lines": lines,
 		"refunds": refunds,
+		"store_payment": _store_payment(order),
+	}
+
+
+def _store_payment(order: dict) -> dict | None:
+	"""Paid / partially paid on Shopify: the amount received and the latest successful sale or capture."""
+	status = (order.get("displayFinancialStatus") or "").lower()
+	if order.get("cancelledAt") or status not in STORE_PAID_STATUSES:
+		return None
+	received = (order.get("totalReceivedSet") or {}).get("shopMoney") or {}
+	paid = [t for t in order.get("transactions") or [] if t.get("status") == "SUCCESS" and t.get("kind") in ("SALE", "CAPTURE")]
+	latest = max(paid, key=lambda t: t.get("processedAt") or "") if paid else {}
+	return {
+		"amount": flt(received.get("amount")),
+		"currency": received.get("currencyCode") or order.get("currencyCode"),
+		"method": latest.get("gateway"),
+		"reference": from_gid(latest.get("id")) if latest.get("id") else None,
+		"paid_at": latest.get("processedAt"),
 	}
 
 

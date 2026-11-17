@@ -61,6 +61,14 @@ const STATUS_TO_TONE = {
   Cancelled: 'critical',
   Reversed: 'critical',
   'Link Cancelled': 'critical',
+  'Partially Refunded': 'attention',
+  Refunded: 'critical',
+  // Payment history (Payment Transaction)
+  Captured: 'success',
+  Processed: 'success',
+  Authorized: 'attention',
+  Expired: 'attention',
+  Created: 'info',
 
   Planned: 'info',
   Approved: 'info',

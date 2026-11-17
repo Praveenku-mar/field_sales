@@ -50,6 +50,7 @@
   "payment_section",
   "payment_status",
   "amount_paid",
+  "amount_refunded",
   "paid_on",
   "manual_payment_method",
   "manual_payment_reference",
@@ -337,7 +338,7 @@
    "fieldname": "payment_status",
    "fieldtype": "Select",
    "label": "Payment Status",
-   "options": "Unpaid\nLink Sent\nPartially Paid\nPaid\nLink Expired\nLink Cancelled",
+   "options": "Unpaid\nLink Sent\nPartially Paid\nPaid\nLink Expired\nLink Cancelled\nPartially Refunded\nRefunded",
    "default": "Unpaid",
    "in_standard_filter": 1,
    "in_list_view": 1,
@@ -352,6 +353,15 @@
    "read_only": 1,
    "allow_on_submit": 1,
    "no_copy": 1
+  },
+  {
+   "fieldname": "amount_refunded",
+   "fieldtype": "Currency",
+   "label": "Amount Refunded",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "no_copy": 1,
+   "depends_on": "amount_refunded"
   },
   {
    "fieldname": "paid_on",
@@ -497,7 +507,7 @@
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-12 12:00:00.000000",
+ "modified": "2026-11-16 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

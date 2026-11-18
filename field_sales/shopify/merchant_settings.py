@@ -22,6 +22,7 @@ from frappe import _
 from frappe.utils import cint
 
 from field_sales.utils.guards import is_system_manager
+from field_sales.utils.db import safe_commit
 
 MANAGER_ROLES = {"System Manager", "Sales Manager"}
 
@@ -108,6 +109,7 @@ def _require_merchant() -> None:
 @frappe.whitelist(methods=["GET"])
 def get_store_settings() -> dict:
 	"""The merchant-facing part of Store Connection, shaped like a document for the Settings forms."""
+	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
 	settings = frappe.get_single("Store Connection")
 	values = {f: settings.get(f) for f in (*READ_FIELDS, *EDITABLE_FIELDS)}
@@ -125,6 +127,7 @@ def save_store_settings(values: dict | str) -> dict:
 	Save the editable fields (others in ``values`` are ignored) and the locations table.
 	Queues a product sync when the default location changes.
 	"""
+	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
 	values = frappe.parse_json(values) or {}
 	settings = frappe.get_single("Store Connection")
@@ -170,6 +173,7 @@ def _queue_product_sync() -> None:
 @frappe.whitelist(methods=["GET"])
 def fetch_locations() -> list[dict]:
 	"""The store's locations ``[{"id", "name"}]`` (for Fetch Locations)."""
+	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
 	from field_sales.connectors import get_connector
 
@@ -199,7 +203,7 @@ def setup_new_store() -> None:
 			{"location_id": settings.default_location_id, "location_name": first.get("name"), "sell_from": 1},
 		)
 	settings.save(ignore_permissions=True)
-	frappe.db.commit()
+	safe_commit()
 	enqueue_sync()
 
 
@@ -214,8 +218,15 @@ def get_email_accounts() -> list[dict]:
 	Email accounts (no passwords) for the Email settings tab: every account for a System
 	Manager, only those added from the tab (``_merchant_accounts``) for a merchant.
 	"""
+	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
 	filters = None if is_system_manager() else {"name": ("in", list(_merchant_accounts()) or [""])}
+	return _email_accounts(filters)
+
+
+def _email_accounts(filters: dict | None) -> list[dict]:
+	"""Email Account rows for the tab. A merchant (Sales Manager) cannot read Email Account, so
+	the rows are read here; the caller limits them to the merchant's own accounts."""
 	return frappe.get_all(
 		"Email Account",
 		filters=filters,
@@ -235,6 +246,7 @@ def save_email_account(values: dict | str, name: str | None = None) -> dict:
 	signs in needs its password in the same save: Frappe would otherwise sign in to the new server
 	with the stored password.
 	"""
+	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
 	values = frappe.parse_json(values) or {}
 	clean = {f: values[f] for f in EMAIL_FIELDS if f in values}

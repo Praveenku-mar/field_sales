@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import time
 
+from contextlib import suppress
 import frappe
 import requests
 from frappe import _
@@ -31,6 +32,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
 from field_sales.shopify import config
 from field_sales.shopify.oauth import InstallError, check_shop_allowed, save_installation
 from field_sales.shopify.session_token import InvalidSessionToken, decode
+from field_sales.utils.db import safe_commit
 
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 ID_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id_token"
@@ -80,7 +82,7 @@ def ensure_offline_token(shop: str, id_token: str) -> None:
 		raise ConnectError(_("Timed out waiting for another Shopify token request"))
 	try:
 		# A fresh snapshot: another request may have just saved the tokens.
-		frappe.db.commit()
+		safe_commit()
 		if is_connected(shop):
 			return
 		try:
@@ -98,12 +100,11 @@ def ensure_offline_token(shop: str, id_token: str) -> None:
 			f"Token exchange. Missing scopes: {', '.join(missing)}" if missing else "Token exchange",
 			duration_ms=int((time.monotonic() - start) * 1000),
 		)
-		frappe.db.commit()
+		safe_commit()
 	finally:
-		try:
+		# Timed out and taken over.
+		with suppress(Exception):
 			lock.release()
-		except Exception:
-			pass  # timed out and taken over
 
 
 def _exchange(shop: str, id_token: str) -> dict:
@@ -189,7 +190,7 @@ def get_embedded_user() -> str:
 				{"doctype": "Sales Rep", "user": email, "full_name": "Shopify Admin", "active": 1}
 			).insert(ignore_permissions=True)
 		frappe.db.set_single_value("Store Connection", "embedded_user", email)
-		frappe.db.commit()
+		safe_commit()
 	finally:
 		frappe.set_user(previous_user)
 	return email
@@ -252,11 +253,9 @@ def page_context() -> dict | None:
 
 def _try_exchange(shop: str, id_token: str) -> None:
 	"""Exchange on page load if possible; otherwise the app's first API call retries it."""
-	try:
+	with suppress((InvalidSessionToken, ConnectError)):
 		decode(id_token, require_connected=False)
 		ensure_offline_token(shop, id_token)
-	except (InvalidSessionToken, ConnectError):
-		pass
 
 
 def after_request(response=None, request=None):

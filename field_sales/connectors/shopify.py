@@ -23,6 +23,7 @@ import time
 import unicodedata
 from datetime import timedelta
 
+from contextlib import suppress
 import frappe
 import pycountry
 import requests
@@ -43,6 +44,7 @@ from field_sales.connectors.base import (
 )
 from field_sales.shopify import config as app_config
 from field_sales.utils.phone import to_e164
+from field_sales.utils.db import safe_commit
 
 # (connect, read) seconds. A short connect limit means an unreachable address (e.g. a broken
 # IPv6 route) is given up quickly and the next one (IPv4) is tried; replies still get 30 s.
@@ -858,10 +860,8 @@ class ShopifyConnector(BaseConnector):
 
 	def _delete_draft(self, draft_gid: str, field_order) -> None:
 		"""Best effort: a stale draft left behind is harmless, so a failure here is only logged."""
-		try:
+		with suppress(ConnectorError):
 			self._graphql(DRAFT_ORDER_DELETE, {"id": draft_gid}, operation="Other", ref=field_order)
-		except ConnectorError:
-			pass
 
 	def _create_draft(self, field_order, retailer) -> dict:
 		currency = self._get_currency(field_order)
@@ -1018,7 +1018,7 @@ class ShopifyConnector(BaseConnector):
 		frappe.db.set_single_value(
 			"Store Connection", {"access_token": "*" * len(token), "token_expiry": expiry}
 		)
-		frappe.db.commit()
+		safe_commit()
 
 		self._token, self._token_expiry = token, expiry
 		self._token_is_fresh = True
@@ -1044,7 +1044,7 @@ class ShopifyConnector(BaseConnector):
 			raise ConnectorError(_("Timed out waiting for another Shopify token refresh"), code="AUTH_FAILED")
 		try:
 			# End this transaction's snapshot so the reads below see a token another worker committed.
-			frappe.db.commit()
+			safe_commit()
 			current = get_decrypted_password(
 				"Store Connection", "Store Connection", "access_token", raise_exception=False
 			)
@@ -1112,12 +1112,11 @@ class ShopifyConnector(BaseConnector):
 
 			self._log_token_call("Success", start, response.status_code, log_request, response.text)
 			expiry = save_oauth_tokens(body)
-			frappe.db.commit()
+			safe_commit()
 		finally:
-			try:
+			# The lock timed out and was taken over; nothing to release.
+			with suppress(Exception):
 				lock.release()
-			except Exception:
-				pass  # the lock timed out and was taken over; nothing to release
 
 		self._token, self._token_expiry = body["access_token"], expiry
 		self._token_is_fresh = True
@@ -1130,7 +1129,7 @@ class ShopifyConnector(BaseConnector):
 		frappe.db.set_single_value(
 			"Store Connection", {"enabled": 0, "last_test_status": message[:140], "last_tested_on": now_datetime()}
 		)
-		frappe.db.commit()
+		safe_commit()
 		self._write_log("Token Refresh", status="Failed", error_code="REAUTH_REQUIRED", error_message=message)
 		raise ConnectorError(message, code="REAUTH_REQUIRED")
 

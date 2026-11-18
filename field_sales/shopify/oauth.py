@@ -38,6 +38,7 @@ from field_sales.connectors.shopify import (
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
 from field_sales.shopify import config
+from field_sales.utils.db import safe_commit
 
 STATE_TTL_SECONDS = 10 * 60
 STATE_KEY = "field_sales:shopify_oauth_state:{}"
@@ -113,7 +114,7 @@ def callback(
 		external_id=shop,
 		error_message=f"Missing scopes: {', '.join(missing)}" if missing else None,
 	)
-	frappe.db.commit()
+	safe_commit()
 	# The app is embedded: land in it inside the Shopify admin, not on this site (rule 2.3.3).
 	return redirect(config.embedded_app_url(shop), code=302)
 
@@ -299,5 +300,5 @@ def _fail(message: str, shop: str | None) -> Response:
 		error_code="INSTALL_REJECTED",
 		error_message=message,
 	)
-	frappe.db.commit()
+	safe_commit()
 	return Response(message, status=400, mimetype="text/plain")

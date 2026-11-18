@@ -99,8 +99,8 @@ def authenticate():
 
 	from field_sales.shopify import embedded
 
-	# frappe.set_user() (here, and inside the install / user setup below) empties
-	# frappe.local.form_dict, which holds this request's arguments; put them back after.
+	# Switching the user (here, and in the install and user setup below) empties the request's
+	# form data, which holds this request's arguments; they are put back afterwards.
 	form_dict = frappe.local.form_dict
 	try:
 		claims = decode(token, require_connected=False)

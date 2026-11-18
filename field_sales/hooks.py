@@ -14,17 +14,6 @@ use_json_request_body = True
 
 # required_apps = []
 
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "field_sales",
-# 		"logo": "/assets/field_sales/logo.png",
-# 		"title": "Agamsale",
-# 		"route": "/field_sales",
-# 		"has_permission": "field_sales.api.permission.has_app_permission",
-# 	}
-# ]
-
 # The dock, the rail down the left of the desk, is a document rather than a hook. Author it in
 # Manage Dock on a developer-mode site and press Export to App, and it is written to
 # `field_sales/dock/field_sales/field_sales.json` for git to carry. An app that ships none has no
@@ -139,17 +128,6 @@ website_route_rules = [
 
 # before_uninstall = "field_sales.uninstall.before_uninstall"
 # after_uninstall = "field_sales.uninstall.after_uninstall"
-
-# Disable / Enable
-# ----------------
-# Called when this app is logically disabled or re-enabled on a site,
-# without uninstalling it. Use this to hide/restore fields this app adds
-# to other apps' doctypes.
-
-# before_disable = "field_sales.uninstall.before_disable"
-# after_disable = "field_sales.uninstall.after_disable"
-# before_enable = "field_sales.install.before_enable"
-# after_enable = "field_sales.install.after_enable"
 
 # Integration Setup
 # ------------------

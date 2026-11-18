@@ -4,6 +4,7 @@
 """Endpoints for the Field Sales desktop app (frontend/). Lists go through
 frappe.get_list, so the Sales Rep hierarchy rules apply as they do in the desk."""
 
+from contextlib import suppress
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
@@ -110,6 +111,7 @@ def get_list_preset(key: str) -> dict:
 	preset = get_attention_presets().get(key) or get_card_presets().get(key)
 	if not preset:
 		frappe.throw(_("Unknown list preset: {0}").format(key), frappe.DoesNotExistError)
+	frappe.has_permission(preset["doctype"], "read", throw=True)
 	return {"key": key, **preset}
 
 
@@ -178,6 +180,12 @@ def get_sidebar_counts() -> dict:
 def get_notifications(limit: int = 50) -> list[dict]:
 	"""The current user's latest Notification Log rows, newest first (subject as plain text)."""
 	_check_access()
+	return _own_notifications(limit)
+
+
+def _own_notifications(limit: int) -> list[dict]:
+	"""The signed-in user's own Notification Log rows (``for_user``): retailer logins have no
+	Notification Log permission, so the rows are read here, limited to the user's own."""
 	rows = frappe.get_all(
 		"Notification Log",
 		filters={"for_user": frappe.session.user},
@@ -224,6 +232,7 @@ def get_dashboard() -> dict:
 
 	:return: ``{"currency", "today": {...}, "attention": {...}, "visits_today", "recent_orders", "team"}``
 	"""
+	frappe.has_permission("Field Order", "read", throw=True)
 	_check_access()
 	today = nowdate()
 
@@ -295,31 +304,7 @@ def get_product_activity(product: str) -> dict:
 		order_by="`tabField Order`.order_date desc",
 		limit_page_length=10,
 	)
-	from field_sales.permissions import field_order_query
-
-	perm = field_order_query()
-	where = ["fo.docstatus = 1", "foi.product = %(product)s", "fo.order_date >= %(since)s"]
-	if perm and perm != "1=0":
-		where.append(perm.replace("`tabField Order`", "fo"))
-
-	if perm == "1=0":
-		act = {"orders": 0, "units": 0, "value": 0.0}
-	else:
-		where_clause = " AND ".join(f"({w})" for w in where)
-		agg_rows = frappe.db.sql(
-			f"""
-			SELECT
-				COUNT(DISTINCT fo.name) as orders,
-				COALESCE(SUM(foi.qty), 0) as units,
-				COALESCE(SUM(foi.amount), 0) as value
-			FROM `tabField Order` fo
-			JOIN `tabField Order Item` foi ON foi.parent = fo.name
-			WHERE {where_clause}
-			""",
-			{"product": product, "since": since},
-			as_dict=True,
-		)
-		act = agg_rows[0] if agg_rows else {"orders": 0, "units": 0, "value": 0.0}
+	act = _product_sales(product, since)
 
 	external_product_id = frappe.db.get_value("Platform Product", product, "external_product_id")
 	variants = (
@@ -343,6 +328,36 @@ def get_product_activity(product: str) -> dict:
 	}
 
 
+def _product_sales(product: str, since) -> dict:
+	"""Submitted orders since ``since`` with ``product``, among the orders the user may see."""
+	from frappe.query_builder.functions import Coalesce, Count, Sum
+
+	from field_sales.permissions import NO_ROWS, scope_criterion
+
+	order = frappe.qb.DocType("Field Order")
+	item = frappe.qb.DocType("Field Order Item")
+	scope = scope_criterion("Field Order", order)
+	if scope is NO_ROWS:
+		return {"orders": 0, "units": 0, "value": 0.0}
+	query = (
+		frappe.qb.from_(order)
+		.join(item)
+		.on(item.parent == order.name)
+		.select(
+			Count(order.name).distinct().as_("orders"),
+			Coalesce(Sum(item.qty), 0).as_("units"),
+			Coalesce(Sum(item.amount), 0).as_("value"),
+		)
+		.where(order.docstatus == 1)
+		.where(item.product == product)
+		.where(order.order_date >= since)
+	)
+	if scope is not None:
+		query = query.where(scope)
+	rows = query.run(as_dict=True)
+	return rows[0] if rows else {"orders": 0, "units": 0, "value": 0.0}
+
+
 @frappe.whitelist()
 def get_order_sync_info(field_order: str) -> dict:
 	"""
@@ -361,14 +376,13 @@ def get_order_sync_info(field_order: str) -> dict:
 	) or (None, None, None)
 	order_url = draft_url = None
 	if doc.external_order_id or doc.external_draft_id:
-		try:
+		# Store disconnected: the panel shows the IDs without a link.
+		with suppress(ConnectorError):
 			conn = get_connector()
 			if doc.external_order_id:
 				order_url = conn.get_order_url(doc.external_order_id)
 			if doc.external_draft_id:
 				draft_url = conn.get_order_url(None, doc.external_draft_id)
-		except ConnectorError:
-			pass  # store disconnected: the panel shows the IDs without a link
 	return {
 		"location_name": doc.location_name
 		or (location_name if doc.location_id in (None, "", location_id) else doc.location_id),
@@ -388,6 +402,7 @@ def get_rep_month_stats(sales_rep: str | None = None) -> dict:
 
 	:return: ``{rep: {"completed_visits", "orders", "order_value", "achievement_pct", ...}}``
 	"""
+	frappe.has_permission("Sales Rep", "read", throw=True)
 	_check_access()
 	from field_sales.field_sales.report.rep_performance.rep_performance import (
 		get_rep_stats,

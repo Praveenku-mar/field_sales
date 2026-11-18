@@ -262,28 +262,53 @@ def save_email_account(values: dict | str, name: str | None = None) -> dict:
 		doc = frappe.get_doc("Email Account", name)
 		if not clean.get("password") and _connection_changed(doc, clean):
 			frappe.throw(_("Enter the password again to change the server or sign-in settings."))
-		doc.update(clean)
+		_set_email_fields(doc, clean)
 	else:
 		email_id = (values.get("email_id") or "").strip()
 		if not email_id:
 			frappe.throw(_("Email address is required"))
-		doc = frappe.get_doc(
-			{
-				"doctype": "Email Account",
-				"email_id": email_id,
-				"email_account_name": (values.get("email_account_name") or "").strip() or None,
-				"auth_method": "Basic",
-				"enable_incoming": 0,
-				**clean,
-				"enable_outgoing": 1,
-			}
-		)
+		doc = frappe.new_doc("Email Account")
+		doc.email_id = email_id
+		doc.email_account_name = (values.get("email_account_name") or "").strip() or None
+		doc.auth_method = "Basic"
+		doc.enable_incoming = 0
+		_set_email_fields(doc, clean)
+		doc.enable_outgoing = 1
 	if name:
 		doc.save(ignore_permissions=True)
 	else:
 		doc.insert(ignore_permissions=True)
 		_remember_merchant_account(doc.name)
 	return {"name": doc.name}
+
+
+def _set_email_fields(doc, values: dict) -> None:
+	"""
+	Copy the Email tab's fields onto the account, each one named here: nothing else from the
+	request reaches the document. The password is set only when one was typed.
+	"""
+	if "service" in values:
+		doc.service = values["service"]
+	if "smtp_server" in values:
+		doc.smtp_server = values["smtp_server"]
+	if "smtp_port" in values:
+		doc.smtp_port = values["smtp_port"]
+	if "use_tls" in values:
+		doc.use_tls = cint(values["use_tls"])
+	if "use_ssl_for_outgoing" in values:
+		doc.use_ssl_for_outgoing = cint(values["use_ssl_for_outgoing"])
+	if "login_id_is_different" in values:
+		doc.login_id_is_different = cint(values["login_id_is_different"])
+	if "login_id" in values:
+		doc.login_id = values["login_id"]
+	if "enable_outgoing" in values:
+		doc.enable_outgoing = cint(values["enable_outgoing"])
+	if "default_outgoing" in values:
+		doc.default_outgoing = cint(values["default_outgoing"])
+	if "always_use_account_email_id_as_sender" in values:
+		doc.always_use_account_email_id_as_sender = cint(values["always_use_account_email_id_as_sender"])
+	if values.get("password"):
+		doc.password = values["password"]
 
 
 def _merchant_accounts() -> set[str]:

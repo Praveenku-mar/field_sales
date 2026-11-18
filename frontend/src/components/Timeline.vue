@@ -86,6 +86,8 @@ const props = defineProps({
 const session = useSessionStore()
 const timeline = createResource({
   url: 'field_sales.chatter.get_chatter',
+  // get_chatter accepts GET only; frappe-ui resources send POST unless told otherwise.
+  method: 'GET',
   makeParams: () => ({ doctype: props.doctype, name: props.name }),
   auto: true,
 })

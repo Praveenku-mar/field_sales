@@ -152,10 +152,36 @@ def data_request(doc, payload: dict) -> dict:
 
 
 def customer_redact(doc, payload: dict) -> dict:
-	"""Anonymise the customer's Retailer(s) and the personal fields of their orders and visits."""
+	"""
+	Anonymise the customer's Retailer(s) and the personal fields of their orders and visits, and
+	delete the export files of the customer's earlier data requests (they hold the same data).
+	"""
 	retailers = _retailers_for(payload)
 	orders = _orders_for(retailers, _ids(payload.get("orders_to_redact")))
-	return _redact(retailers, orders)
+	result = _redact(retailers, orders)
+	result["exports_deleted"] = _delete_customer_exports(doc.shopify_customer_id)
+	return result
+
+
+def _delete_customer_exports(shopify_customer_id: str | None) -> int:
+	"""Delete the JSON exports attached to this customer's ``customers/data_request`` requests."""
+	if not shopify_customer_id:
+		return 0
+	requests = frappe.get_all(
+		"Privacy Request",
+		filters={"topic": "customers/data_request", "shopify_customer_id": shopify_customer_id},
+		pluck="name",
+	)
+	if not requests:
+		return 0
+	files = frappe.get_all(
+		"File",
+		filters={"attached_to_doctype": "Privacy Request", "attached_to_name": ("in", requests)},
+		pluck="name",
+	)
+	for name in files:
+		frappe.delete_doc("File", name, ignore_permissions=True, force=True)
+	return len(files)
 
 
 def shop_redact(doc, payload: dict) -> dict:

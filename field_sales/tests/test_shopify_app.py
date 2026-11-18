@@ -671,6 +671,28 @@ class TestPrivacy(ShopifyAppTestCase):
 		log = frappe.get_last_doc("Sync Log", filters={"operation": "Privacy Request"})
 		self.assertEqual(log.status, "Success")
 
+	def test_customer_redact_deletes_the_customers_earlier_exports(self):
+		def export_for(customer_id):
+			request = self.request("customers/data_request", customer_id=customer_id)
+			return frappe.get_doc(
+				{
+					"doctype": "File",
+					"file_name": f"privacy-export-{request.name}.json",
+					"attached_to_doctype": "Privacy Request",
+					"attached_to_name": request.name,
+					"is_private": 1,
+					"content": '{"retailers": [{"email": "asha@example.com"}]}',
+				}
+			).insert(ignore_permissions=True).name
+
+		mine, someone_elses = export_for("777"), export_for("888")
+		redact = self.request("customers/redact")
+		privacy.process(redact.name, {"customer": {"id": 777}})
+
+		self.assertFalse(frappe.db.exists("File", mine))
+		self.assertTrue(frappe.db.exists("File", someone_elses))
+		self.assertEqual(frappe.parse_json(frappe.db.get_value("Privacy Request", redact.name, "details"))["exports_deleted"], 1)
+
 	def test_shop_redact_removes_store_data(self):
 		self.connect_oauth()
 		total = frappe.db.get_value("Field Order", self.order.name, "grand_total")

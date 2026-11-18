@@ -434,6 +434,9 @@ def _replace_link(doc, settings, notify: bool = True) -> dict:
 @frappe.whitelist(methods=["GET"])
 def get_payment_config() -> dict:
 	"""Whether payment links can be created; never returns the keys."""
+	from field_sales.frontend_api import _check_access
+
+	_check_access()
 	return {
 		"enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
 		"available": payment_links_disabled_reason() is None,

@@ -203,6 +203,7 @@ permission_query_conditions = {
 	"Retailer": "field_sales.permissions.retailer_query",
 	"Commission Entry": "field_sales.permissions.commission_entry_query",
 	"Commission Statement": "field_sales.permissions.commission_statement_query",
+	"Payment Transaction": "field_sales.permissions.payment_transaction_query",
 }
 
 has_permission = {
@@ -212,6 +213,7 @@ has_permission = {
 	"Retailer": "field_sales.permissions.retailer_has_permission",
 	"Commission Entry": "field_sales.permissions.commission_entry_has_permission",
 	"Commission Statement": "field_sales.permissions.commission_statement_has_permission",
+	"Payment Transaction": "field_sales.permissions.payment_transaction_has_permission",
 }
 
 # Document Events

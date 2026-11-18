@@ -221,6 +221,11 @@ has_permission = {
 doc_events = {
 	# Push bell notifications made by push.notify.notify_users to the mobile app.
 	"Notification Log": {"after_insert": "field_sales.push.notify.on_notification_log_insert"},
+	# No moving another team's record to your own rep (permissions.check_owner_change).
+	**{
+		doctype: {"validate": "field_sales.permissions.check_owner_change"}
+		for doctype in ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+	},
 }
 
 # Scheduled Tasks

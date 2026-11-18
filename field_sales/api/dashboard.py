@@ -65,11 +65,13 @@ def get_dashboard(
 	in_period = ("between", [from_d, to_d])
 	submitted = {"docstatus": 1, "order_date": in_period}
 
-	totals = frappe.get_list(
+	rows = frappe.get_list(
 		"Field Order",
 		filters=submitted,
 		fields=[{"COUNT": "*", "as": "orders"}, {"SUM": "grand_total", "as": "value"}],
-	)[0]
+	)
+	# An aggregate returns one row; the fallback only guards a driver that returns none.
+	totals = rows[0] if rows else frappe._dict(orders=0, value=0)
 	presets = get_attention_presets()
 
 	return {

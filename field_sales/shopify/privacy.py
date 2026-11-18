@@ -27,6 +27,7 @@ from field_sales.connectors.shopify import clear_oauth_tokens
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.anonymise import anonymise as _redact
+from field_sales.utils.db import safe_commit
 
 RETAILER_EXPORT_FIELDS = [
 	"name", "retailer_name", "owner_name", "phone", "email", "gstin", "retailer_type", "status",
@@ -71,7 +72,7 @@ def process(privacy_request: str, payload: dict):
 			error_code=type(e).__name__,
 			error_message=f"{doc.topic}: {e}"[:500],
 		)
-		frappe.db.commit()
+		safe_commit()
 		raise
 
 	frappe.db.set_value(
@@ -121,7 +122,7 @@ def data_request(doc, payload: dict) -> dict:
 		else [],
 		"field_orders": _export_orders(orders),
 	}
-	file = frappe.get_doc(
+	file_doc = frappe.get_doc(
 		{
 			"doctype": "File",
 			"file_name": f"privacy-export-{doc.name}.json",
@@ -147,7 +148,7 @@ def data_request(doc, payload: dict) -> dict:
 		"retailers": retailers,
 		"field_orders": len(orders),
 		"visits": len(export["visits"]),
-		"file": file.name,
+		"file": file_doc.name,
 	}
 
 

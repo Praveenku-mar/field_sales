@@ -71,6 +71,22 @@ EMAIL_FIELDS = (
 	"always_use_account_email_id_as_sender",
 )
 EMAIL_LIST_FIELDS = ("name", "email_id", *EMAIL_FIELDS)
+# Where and how the account signs in. Frappe checks a saved account by signing in with its stored
+# password, so changing any of these without giving the password would send that password to the
+# new server: the password must come with the change.
+EMAIL_CONNECTION_FIELDS = (
+	"service",
+	"smtp_server",
+	"smtp_port",
+	"use_tls",
+	"use_ssl_for_outgoing",
+	"login_id_is_different",
+	"login_id",
+)
+EMAIL_CHECK_FIELDS = ("use_tls", "use_ssl_for_outgoing", "login_id_is_different")
+# Site default (JSON list) of the Email Accounts a merchant added from the Email tab: the only ones
+# a merchant may see and change. The site's other accounts are for System Managers.
+MERCHANT_EMAIL_ACCOUNTS_KEY = "field_sales_merchant_email_accounts"
 
 
 def _require_merchant() -> None:
@@ -194,10 +210,15 @@ def setup_new_store() -> None:
 
 @frappe.whitelist(methods=["GET"])
 def get_email_accounts() -> list[dict]:
-	"""Email accounts (no passwords) for the Email settings tab."""
+	"""
+	Email accounts (no passwords) for the Email settings tab: every account for a System
+	Manager, only those added from the tab (``_merchant_accounts``) for a merchant.
+	"""
 	_require_merchant()
+	filters = None if is_system_manager() else {"name": ("in", list(_merchant_accounts()) or [""])}
 	return frappe.get_all(
 		"Email Account",
+		filters=filters,
 		fields=list(EMAIL_LIST_FIELDS),
 		order_by="default_outgoing desc, modified desc",
 		limit=50,
@@ -209,6 +230,10 @@ def save_email_account(values: dict | str, name: str | None = None) -> dict:
 	"""
 	Create (``name`` empty) or update an outgoing email account with the allowed fields only.
 	Frappe checks the SMTP login on save, so a wrong password is refused with its message.
+
+	A merchant may change only an account added from this tab. Changing where or how an account
+	signs in needs its password in the same save: Frappe would otherwise sign in to the new server
+	with the stored password.
 	"""
 	_require_merchant()
 	values = frappe.parse_json(values) or {}
@@ -217,7 +242,14 @@ def save_email_account(values: dict | str, name: str | None = None) -> dict:
 		clean["password"] = values["password"]
 
 	if name:
+		if not is_system_manager() and name not in _merchant_accounts():
+			frappe.throw(
+				_("This email account was not added here. Ask a System Manager to change it."),
+				frappe.PermissionError,
+			)
 		doc = frappe.get_doc("Email Account", name)
+		if not clean.get("password") and _connection_changed(doc, clean):
+			frappe.throw(_("Enter the password again to change the server or sign-in settings."))
 		doc.update(clean)
 	else:
 		email_id = (values.get("email_id") or "").strip()
@@ -234,5 +266,34 @@ def save_email_account(values: dict | str, name: str | None = None) -> dict:
 				"enable_outgoing": 1,
 			}
 		)
-	doc.save(ignore_permissions=True) if name else doc.insert(ignore_permissions=True)
+	if name:
+		doc.save(ignore_permissions=True)
+	else:
+		doc.insert(ignore_permissions=True)
+		_remember_merchant_account(doc.name)
 	return {"name": doc.name}
+
+
+def _merchant_accounts() -> set[str]:
+	"""Names of the Email Accounts added from the Email tab."""
+	names = frappe.parse_json(frappe.db.get_default(MERCHANT_EMAIL_ACCOUNTS_KEY) or "[]")
+	return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
+
+
+def _remember_merchant_account(name: str) -> None:
+	names = _merchant_accounts() | {name}
+	frappe.db.set_default(MERCHANT_EMAIL_ACCOUNTS_KEY, frappe.as_json(sorted(names), indent=None))
+
+
+def _connection_changed(doc, values: dict) -> bool:
+	"""Whether ``values`` change where or how the saved account ``doc`` signs in."""
+	for field in EMAIL_CONNECTION_FIELDS:
+		if field not in values:
+			continue
+		new, old = values[field], doc.get(field)
+		if field in EMAIL_CHECK_FIELDS:
+			if cint(new) != cint(old):
+				return True
+		elif str(new or "").strip().lower() != str(old or "").strip().lower():
+			return True
+	return False

@@ -414,14 +414,8 @@
               />
             </div>
           </div>
+          <!-- The checkout opens from the Store Checkout row above; these share it with the retailer. -->
           <div v-if="storeCheckout && !pay.razorpay_payment_link_url" class="space-y-2 p-4 pt-1">
-            <Button
-              class="flex-1"
-              variant="solid"
-              label="Pay in Store Checkout"
-              icon-left="lucide-external-link"
-              @click="openStoreCheckout"
-            />
             <div class="flex gap-2">
               <Button class="flex-1" label="Copy Link" icon-left="lucide-copy" @click="copyStoreCheckout" />
               <Button class="flex-1" label="WhatsApp" icon-left="lucide-message-circle" @click="shareStoreCheckout" />
@@ -1337,10 +1331,6 @@ const storeCheckout = computed(() => {
   const o = pay.value
   return !!o.store_checkout_url && !HAS_PAYMENT.includes(o.payment_status)
 })
-
-function openStoreCheckout() {
-  window.open(pay.value.store_checkout_url, '_blank', 'noopener')
-}
 
 async function copyStoreCheckout() {
   const url = pay.value.store_checkout_url || ''

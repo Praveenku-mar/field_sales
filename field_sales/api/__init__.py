@@ -19,7 +19,7 @@ from frappe.utils.password import check_password
 
 from field_sales.api import mobile
 from field_sales.connectors import ConnectorError, get_connector
-from field_sales.field_sales.doctype.sales_rep.sales_rep import sync_sales_rep_roles
+from field_sales.field_sales.doctype.sales_rep.sales_rep import check_adoptable_user, sync_sales_rep_roles
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import (
 	RETAILER_ROLE,
@@ -31,7 +31,7 @@ from field_sales.permissions import (
 	is_manager_or_admin,
 	visit_query,
 )
-from field_sales.sync.customers import push_retailers
+from field_sales.sync.customers import enqueue_import, push_retailers
 from field_sales.sync.notify import MONITOR_ROLES
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.products import enqueue_sync
@@ -137,6 +137,17 @@ def enqueue_product_sync() -> dict:
 	if enqueue_sync():
 		return {"queued": True, "message": _("Sync started")}
 	return {"queued": False, "message": _("A product sync is already running")}
+
+
+@frappe.whitelist(methods=["POST"])
+def enqueue_customer_import() -> dict:
+	"""Queue an import of the store's customers as Retailers (``sync.customers.import_customers``)."""
+	frappe.only_for(["System Manager", "Sales Manager"])
+
+	get_connector()  # fails fast if Store Connection is disabled
+	if enqueue_import():
+		return {"queued": True, "message": _("Customer import started")}
+	return {"queued": False, "message": _("A customer import is already running")}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -283,15 +294,12 @@ def create_sales_rep(
 		new_user.insert(ignore_permissions=True)
 		user_created = True
 	else:
-		# An existing user becomes a rep: never a System Manager or a retailer login (their
-		# roles would be widened by a manager), unless a System Manager does it.
-		held = set(frappe.get_roles(user))
-		if not is_admin() and ({"System Manager", RETAILER_ROLE} & held or user in ("Administrator", "Guest")):
-			frappe.throw(
-				_("{0} cannot be made a Sales Rep here. Ask a System Manager.").format(user),
-				frappe.PermissionError,
-			)
+		# An existing user's roles change below: outside a System Manager, only a user who
+		# holds nothing beyond a rep's roles.
+		check_adoptable_user(user)
 		sync_sales_rep_roles(user, is_mgr, is_rep)
+	# Checked (or created) above, before its roles were set: SalesRep.validate lets it through.
+	frappe.flags.field_sales_checked_rep_user = user
 
 	rep.insert()
 	return {"name": rep.name, "user_created": user_created}

@@ -179,6 +179,30 @@ def retailer_query(user: str | None = None) -> str:
 	return ""
 
 
+def payment_transaction_query(user: str | None = None) -> str:
+	"""
+	Payment history of the orders in the user's hierarchy: rows linked by ``reference_order``,
+	and store checkout rows that only carry the store order id (``store_order_id``).
+	"""
+	user = user or frappe.session.user
+	if is_admin(user):
+		return ""
+	reps = get_allowed_reps(user)
+	if not reps:
+		return "1=0"
+	values = ", ".join(frappe.db.escape(rep) for rep in reps)
+	orders = f"select `name` from `tabField Order` where `sales_rep` in ({values})"
+	store_orders = (
+		f"select `external_order_id` from `tabField Order` where `sales_rep` in ({values})"
+		" and ifnull(`external_order_id`, '') != ''"
+	)
+	return (
+		f"(`tabPayment Transaction`.`reference_order` in ({orders})"
+		" or (ifnull(`tabPayment Transaction`.`reference_order`, '') = ''"
+		f" and `tabPayment Transaction`.`store_order_id` in ({store_orders})))"
+	)
+
+
 def hierarchy_filters(doctype: str, user: str | None = None) -> list:
 	"""
 	Filters limiting a list to the user's hierarchy, for doctypes whose read
@@ -240,7 +264,53 @@ def sales_rep_has_permission(doc, ptype: str | None = None, user: str | None = N
 	return _rep_in_allowed(doc.name, user)
 
 
+def payment_transaction_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	"""A payment row belongs to its order's rep (``reference_order``, else the store order id)."""
+	user = user or frappe.session.user
+	if is_admin(user):
+		return True
+	order = doc.reference_order
+	if not order and doc.store_order_id:
+		order = frappe.db.get_value("Field Order", {"external_order_id": doc.store_order_id}, "name")
+	if not order:
+		return False
+	return _rep_in_allowed(frappe.db.get_value("Field Order", order, "sales_rep"), user)
+
+
 def _rep_in_allowed(rep: str | None, user: str | None) -> bool:
 	if is_admin(user):
 		return True
 	return bool(rep) and rep in get_allowed_reps(user)
+
+
+# ----------------------------------------------------------------------
+# validate: who a saved record belonged to
+# ----------------------------------------------------------------------
+
+
+def check_owner_change(doc, method: str | None = None) -> None:
+	"""
+	``validate`` hook (hooks.doc_events): a saved record may move to another Sales Rep only
+	when the user may already edit it, i.e. its stored rep is in their hierarchy.
+
+	The ``has_permission`` hooks above see the record as sent, with the new rep. REST PUT
+	checks the stored record first, but ``frappe.client.save`` and the desk's ``savedocs``
+	build the document from the request, so without this check a user could take another
+	team's record by saving it with their own rep. Server code that saves with
+	``ignore_permissions`` and admins are not limited. A record with no stored rep may still
+	be claimed (the ``has_permission`` hooks decide who).
+	"""
+	if doc.is_new() or doc.flags.ignore_permissions or is_admin():
+		return
+	field = REP_FIELD.get(doc.doctype)
+	if not field or field == "name":
+		return
+	before = doc.get_doc_before_save()
+	stored = before.get(field) if before else None
+	if stored and stored != doc.get(field) and stored not in get_allowed_reps():
+		frappe.throw(
+			frappe._("{0} {1} belongs to another team. Only its own team can assign it to someone else.").format(
+				frappe._(doc.doctype), doc.name
+			),
+			frappe.PermissionError,
+		)

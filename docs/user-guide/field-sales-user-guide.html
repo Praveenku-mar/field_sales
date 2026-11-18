@@ -147,7 +147,13 @@
 </ol>
 <p>Order statuses run Draft → Pending → Synced, with Failed if Shopify rejects the order. Cancelled orders keep their record. From <strong>More actions</strong> you can <strong>Refresh Stock</strong>, <strong>Open in Shopify</strong>, <strong>Cancel Order</strong> (submitted orders) or <strong>Delete</strong> (drafts). Cancelling in Field Sales does not cancel the order in Shopify, and a paid order must be refunded before it can be cancelled.</p>
 <p><strong>Invoices and email</strong>: each synced order sends the shop one confirmation email with the invoice PDF attached. On the order page, use <strong>Download Invoice</strong> or <strong>Resend Email</strong>. The invoice prints as a GST "Tax Invoice" when a GSTIN is set on the Invoice tab, otherwise as "Invoice". To stop the emails, untick <strong>Send order confirmation</strong> in <strong>Settings → Invoice</strong>.</p>
-<p><strong>Payments</strong>: Field Sales does not take payments. Shops pay through Shopify or directly to your business. When a shop pays you in cash or by bank transfer / UPI, open the submitted order and click <strong>Mark as Paid</strong>, choose the payment method and, for a bank transfer or UPI, enter the reference number. This records the payment in Field Sales only, so the team can see which orders are paid; mark the order paid in your Shopify admin as well. Payments recorded in Shopify still drive commission.</p>
+<p><strong>Payments</strong>: Field Sales does not take payments. Payments are collected or recorded in Shopify, and Field Sales follows.</p>
+<ul>
+  <li><strong>Online</strong>: the shop pays on Shopify's checkout with any payment provider set up in Shopify (Settings → Payments, for example Razorpay or UPI). On a draft order, use <strong>Pay in Store Checkout</strong>, <strong>Copy Link</strong> or <strong>WhatsApp</strong> on the order's Payment card to send the checkout link. When Shopify shows the order paid, Field Sales marks it Paid (for a draft, once it is completed, within 30 minutes).</li>
+  <li><strong>Cash or bank transfer / UPI</strong>: open the submitted order, click <strong>Mark as Paid</strong>, choose the method and, for a transfer, enter the reference number. Then click <strong>Mark Paid in Shopify</strong>: it opens the order in the Shopify admin, where you use <strong>Collect payment → Mark as paid</strong>.</li>
+  <li><strong>Orders → Payment → To record in Shopify</strong> lists orders paid in Field Sales that Shopify doesn't show as paid yet. An order leaves the list once Shopify shows it paid.</li>
+  <li>An unpaid order has <strong>Collect Payment in Shopify</strong>, to send an invoice or record a payment there. Payments recorded in Shopify drive commission.</li>
+</ul>
 
 <h3>Sales reps (managers)</h3>
 <p>Click <strong>New Sales Rep</strong> and fill in <strong>User (Email)</strong>, <strong>Full Name</strong>, <strong>Mobile</strong>, <strong>Territory</strong>, <strong>Reports To</strong>, <strong>Monthly Target</strong> and <strong>Max Discount % per Order</strong> (leave it empty to allow no discount). Pick the role <strong>Sales Rep</strong> or <strong>Sales Manager</strong>, tick <strong>Email an invite to set a password</strong>, and click <strong>Create</strong>. A rep's page has <strong>Send Reset Link</strong> and <strong>Set Password</strong>.</p>
@@ -285,7 +291,7 @@
 </table>
 <p><strong>Can I edit a product's price in Field Sales?</strong> No. Products are read-only; change them in Shopify and they sync back.</p>
 <p><strong>Does cancelling an order in Field Sales cancel it in Shopify?</strong> No. Cancel it in Shopify as well. A paid order must be refunded first.</p>
-<p><strong>Does Field Sales take payments?</strong> No. Payments go through Shopify or directly to your business; <strong>Mark as Paid</strong> only records a cash or bank payment in Field Sales.</p>
+<p><strong>Does Field Sales take payments?</strong> No. Payments go through Shopify's checkout or directly to your business. <strong>Mark as Paid</strong> records a cash or bank payment in Field Sales; record it in Shopify too with <strong>Mark Paid in Shopify</strong>.</p>
 <p><strong>Can reps work without a signal?</strong> Yes, in the mobile app. Orders, visits and check-ins are queued and sent automatically when the connection returns.</p>
 
 </body>

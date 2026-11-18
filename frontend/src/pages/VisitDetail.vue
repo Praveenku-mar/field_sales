@@ -74,6 +74,7 @@
           <p v-if="d.notes" class="mt-3 whitespace-pre-line text-polaris-text">{{ d.notes }}</p>
         </SectionCard>
       </div>
+      <Timeline class="xl:col-span-2" doctype="Visit" :name="name" :version="d.modified || null" />
     </div>
 
     <Dialog v-model="reasonOpen" title="No order taken" size="md">
@@ -105,6 +106,7 @@
 import { computed, ref } from 'vue'
 import { Button, Dialog, FormControl, createDocumentResource, createResource, toast } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
+import Timeline from '@/components/Timeline.vue'
 import SectionCard from '@/components/SectionCard.vue'
 import InfoGrid from '@/components/InfoGrid.vue'
 import MapEmbed from '@/components/MapEmbed.vue'

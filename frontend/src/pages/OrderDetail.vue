@@ -371,6 +371,24 @@
           <div v-if="canMarkPaid" class="p-4 pt-2">
             <Button class="w-full" label="Mark as Paid" icon-left="lucide-check-circle" @click="openManualPayment" />
           </div>
+          <!-- App Store installs: the merchant collects or records the payment in Shopify (rule 1.1.2) -->
+          <div v-if="shopifyPayAction" class="space-y-2 p-4 pt-1">
+            <p v-if="shopifyPayAction.note" class="rounded-lg bg-[#fff1e3] px-3 py-2 text-xs text-[#5e4200]">
+              {{ shopifyPayAction.note }}
+            </p>
+            <Button
+              class="w-full"
+              :variant="shopifyPayAction.note ? 'solid' : 'subtle'"
+              :label="shopifyPayAction.label"
+              icon-left="lucide-external-link"
+              @click="openInShopifyAdmin"
+            />
+          </div>
+          <!-- Managers: refund what is left of the order's Razorpay payment -->
+          <div v-if="pay.can_refund" class="p-4 pt-1">
+            <Button class="w-full" theme="red" label="Refund" icon-left="lucide-undo-2" @click="refundOpen = true" />
+          </div>
+          <PaymentHistory v-if="pay.transactions?.length" :transactions="pay.transactions" class="border-t border-outline-gray-1 px-4 py-3" />
           <div v-if="pay.razorpay_enabled && (pay.razorpay_payment_link_url || linkAction)" class="space-y-2 p-4 pt-1">
             <div v-if="pay.razorpay_payment_link_url" class="flex gap-2">
               <Button class="flex-1" label="Copy" icon-left="lucide-copy" @click="copyPaymentLink" />
@@ -446,6 +464,7 @@
           </div>
         </div>
       </div>
+      <Timeline doctype="Field Order" :name="name" :version="d.modified || null" />
     </div>
 
     <!-- Add Multiple -->
@@ -489,7 +508,8 @@
         <p class="text-sm text-polaris-secondary">Record the full payment of {{ formatCurrency(pay.grand_total || d.grand_total) }} for this order.</p>
         <!-- App Store installs never mark the Shopify order paid themselves (Shopify rule 1.1.2). -->
         <p v-if="session.store.app_store" class="text-sm text-polaris-secondary">
-          This records the payment in Field Sales only. Mark the order paid in the Shopify admin too.
+          This records the payment in Field Sales only. Then click Mark Paid in Shopify on this page to
+          record it in the Shopify admin too.
         </p>
         <FormControl v-model="manualPayment.method" type="select" label="Payment Method" :options="manualPaymentOptions" required />
         <FormControl v-if="manualPayment.method === 'Bank Transfer / UPI'" v-model="manualPayment.reference" label="Payment Reference No." maxlength="140" required />
@@ -501,6 +521,7 @@
         </div>
       </template>
     </Dialog>
+    <RefundDialog v-model="refundOpen" :field-order="name" :max-amount="pay.refundable_amount || 0" @refunded="onRefunded" />
 
     <Dialog v-model="manualCopyOpen" title="Copy link">
       <p class="mb-3 text-sm text-ink-gray-6">Your browser blocked automatic copying. Select the link below and copy it.</p>
@@ -550,6 +571,9 @@ import {
   toast,
 } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
+import Timeline from '@/components/Timeline.vue'
+import PaymentHistory from '@/components/PaymentHistory.vue'
+import RefundDialog from '@/components/RefundDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import LinkField from '@/components/LinkField.vue'
@@ -1211,6 +1235,12 @@ watch(
   { immediate: true },
 )
 const pay = computed(() => paymentInfo.data || {})
+// Refund (managers; payments/refunds.py): the dialog, then the card and the order reload.
+const refundOpen = ref(false)
+async function onRefunded() {
+  await reloadPayment()
+  doc.reload()
+}
 const creatingLink = ref(false)
 const refreshingPayment = ref(false)
 const manualPaymentOpen = ref(false)
@@ -1221,8 +1251,22 @@ const manualPaymentOptions = [
   { label: 'Cash', value: 'Cash' },
   { label: 'Bank Transfer / UPI', value: 'Bank Transfer / UPI' },
 ]
+// Money came in (refunds included): no new link, store checkout or manual payment.
+const HAS_PAYMENT = ['Paid', 'Partially Paid', 'Partially Refunded', 'Refunded']
 const canMarkPaid = computed(() => d.value.docstatus === 1 && pay.value.can_mark_paid &&
-  pay.value.grand_total > 0 && !['Paid', 'Partially Paid'].includes(pay.value.payment_status))
+  pay.value.grand_total > 0 && !HAS_PAYMENT.includes(pay.value.payment_status))
+
+// App Store installs: Agamsale never records a payment on Shopify itself (rule 1.1.2), so the
+// server (frontend_api._store_payment_action, shared with the mobile app) sends a manager to the
+// order or draft in the Shopify admin: Collect payment → Mark as paid / Send invoice.
+const shopifyPayAction = computed(() => (d.value.docstatus === 1 ? pay.value.store_payment_action || null : null))
+function openInShopifyAdmin() {
+  const url = shopifyPayAction.value?.url
+  if (!url) return
+  // Inside the admin, open it in the admin itself; standalone, in a new tab.
+  if (embedded) window.open(url, '_top')
+  else window.open(url, '_blank', 'noopener')
+}
 
 function openManualPayment() {
   manualPayment.method = ''
@@ -1255,7 +1299,7 @@ const paymentRows = computed(() => {
   const rows = [
     { label: 'Amount Paid', value: `${formatCurrency(o.amount_paid || 0)} of ${formatCurrency(o.grand_total ?? d.value.grand_total ?? 0)}`, muted: !o.amount_paid },
   ]
-  if (o.payment_status !== 'Paid') {
+  if (!HAS_PAYMENT.includes(o.payment_status) || o.payment_status === 'Partially Paid') {
     if (o.razorpay_payment_link_url) rows.push({ label: 'Payment Link', value: o.razorpay_payment_link_id || 'Open', href: o.razorpay_payment_link_url })
     else if (storeCheckout.value) rows.push({ label: 'Store Checkout', value: 'Pay online', href: o.store_checkout_url })
     else rows.push({ label: 'Payment Link', value: 'Not created', muted: true })
@@ -1265,6 +1309,7 @@ const paymentRows = computed(() => {
   if (o.manual_payment_method) rows.push({ label: 'Payment Method', value: o.manual_payment_method })
   if (o.manual_payment_reference) rows.push({ label: 'Reference No.', value: o.manual_payment_reference })
   if (o.razorpay_payment_id) rows.push({ label: 'Payment ID', value: o.razorpay_payment_id })
+  if (o.amount_refunded) rows.push({ label: 'Refunded', value: formatCurrency(o.amount_refunded) })
   if (o.store_marked_paid_on) rows.push({ label: 'Store', value: `Marked paid ${when(o.store_marked_paid_on)}` })
   return rows
 })
@@ -1282,7 +1327,7 @@ const linkActive = computed(
 const linkAction = computed(() => {
   const o = pay.value
   if (!o.razorpay_enabled || !o.can_create_link || o.payment_links_available === false || !(o.grand_total > 0)) return null
-  if (o.payment_status === 'Paid' || o.payment_status === 'Partially Paid') return null
+  if (HAS_PAYMENT.includes(o.payment_status)) return null
   return linkActive.value ? 'New Link' : 'Create Link'
 })
 
@@ -1290,7 +1335,7 @@ const linkAction = computed(() => {
 // edition's only payment link; direct installs get it when Razorpay has no link yet).
 const storeCheckout = computed(() => {
   const o = pay.value
-  return !!o.store_checkout_url && !['Paid', 'Partially Paid'].includes(o.payment_status)
+  return !!o.store_checkout_url && !HAS_PAYMENT.includes(o.payment_status)
 })
 
 function openStoreCheckout() {

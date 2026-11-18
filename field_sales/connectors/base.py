@@ -207,6 +207,28 @@ class BaseConnector:
 		"""
 		raise NotImplementedError
 
+	def get_customers(self, cursor: str | None = None) -> dict:
+		"""
+		Fetch one page of store customers, for importing them as Retailers.
+
+		Normalized customer dict::
+
+			{
+				"external_customer_id": str,
+				"email": str | None,
+				"first_name": str, "last_name": str,
+				"company": str | None,
+				"phone": str | None,
+				"address_line1": str | None, "address_line2": str | None,
+				"city": str | None, "state": str | None, "pincode": str | None,
+				"country_code": str | None,   # ISO alpha-2, upper case
+			}
+
+		:param cursor: Opaque cursor from the previous page's ``next_cursor``; ``None`` for the first page.
+		:return: ``{"items": [normalized customer, ...], "next_cursor": str | None}``
+		"""
+		raise NotImplementedError
+
 	def get_stock(self, inventory_ids: list, location_id: str) -> dict:
 		"""
 		Get available quantity per inventory item at one location.
@@ -257,6 +279,17 @@ class BaseConnector:
 		:raises ConnectorError: the store cannot mark it paid (e.g. cancelled there).
 		"""
 		raise NotImplementedError
+
+	def get_store_payment(self, external_order_id: str) -> dict | None:
+		"""
+		The payment the customer made on the store for this order (its checkout or pay page, or
+		one the merchant recorded there), as the store counts it — see payments/store_payments.py.
+
+		:return: ``None`` when the store does not count the order as paid, else
+			``{"amount": float, "currency": str, "method": str | None, "reference": str | None,
+			"paid_at": UTC timestamp | None}``. By default ``get_order()``'s ``store_payment``.
+		"""
+		return (self.get_order(external_order_id) or {}).get("store_payment")
 
 	def get_draft_names(self, draft_ids: list) -> dict:
 		"""

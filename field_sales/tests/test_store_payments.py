@@ -1,0 +1,158 @@
+# Copyright (c) 2026, Your Company and contributors
+# For license information, please see license.txt
+
+"""
+A payment made on the store marks the Field Order paid (payments/store_payments.py). The same
+file runs in every Field Sales edition; each platform's own rule for "paid" is tested with its
+connector.
+"""
+
+import importlib
+from unittest.mock import MagicMock, patch
+
+import frappe
+from frappe.tests import IntegrationTestCase
+
+APP = __name__.split(".", 1)[0]
+store_payments = importlib.import_module(f"{APP}.payments.store_payments")
+links = importlib.import_module(f"{APP}.tests.test_razorpay_links")
+
+
+class TestStorePayments(links.LinkFixture, IntegrationTestCase):
+	def setUp(self):
+		super().setUp()
+		frappe.db.set_value("Field Order", self.order.name, "external_order_id", "7001")
+		self.total = frappe.db.get_value("Field Order", self.order.name, "grand_total")
+		self.conn = MagicMock()
+		notify = patch.object(store_payments, "notify_payment_received")
+		self.notify = notify.start()
+		self.addCleanup(notify.stop)
+
+	def saved(self, *fields):
+		return frappe.db.get_value("Field Order", self.order.name, list(fields), as_dict=True)
+
+	def paid(self, amount, **extra):
+		return {"amount": amount, "currency": "INR", "method": "Card", "reference": "txn_1", "paid_at": "2026-11-16T04:30:00Z", **extra}
+
+	def history(self):
+		return frappe.get_all(
+			"Payment Transaction",
+			filters={"reference_order": self.order.name, "transaction_key": "store:7001"},
+			fields=["status", "amount", "source", "method", "reference"],
+		)
+
+	def test_paid_in_full_on_the_store(self):
+		self.conn.get_store_payment.return_value = self.paid(self.total)
+		result = store_payments.apply_store_payment(self.conn, "7001")
+		self.assertEqual(result["payment_status"], "Paid")
+		o = self.saved("payment_status", "amount_paid", "store_marked_paid_on", "paid_on")
+		self.assertEqual((o.payment_status, o.amount_paid), ("Paid", self.total))
+		self.assertIsNotNone(o.store_marked_paid_on)
+		self.assertIsNotNone(o.paid_on)
+		(row,) = self.history()
+		self.assertEqual((row.status, row.source, row.method, row.reference), ("Captured", "Store Checkout", "Card", "txn_1"))
+		self.notify.assert_called_once()
+
+	def test_part_then_rest_updates_one_history_row(self):
+		self.conn.get_store_payment.return_value = self.paid(100)
+		store_payments.apply_store_payment(self.conn, "7001")
+		self.assertEqual(self.saved("payment_status").payment_status, "Partially Paid")
+		self.conn.get_store_payment.return_value = self.paid(self.total)
+		store_payments.apply_store_payment(self.conn, "7001")
+		self.assertEqual(self.saved("payment_status").payment_status, "Paid")
+		(row,) = self.history()
+		self.assertEqual(row.amount, self.total)
+
+	def test_repeat_changes_nothing(self):
+		self.conn.get_store_payment.return_value = self.paid(100)
+		store_payments.apply_store_payment(self.conn, "7001")
+		self.assertIn("Ignored", store_payments.apply_store_payment(self.conn, "7001")["note"])
+		self.notify.assert_called_once()
+
+	def test_more_than_the_order_is_capped(self):
+		self.conn.get_store_payment.return_value = self.paid(self.total + 500)
+		store_payments.apply_store_payment(self.conn, "7001")
+		self.assertEqual(self.saved("amount_paid").amount_paid, self.total)
+
+	def test_already_paid_in_agamsale_is_left_alone(self):
+		frappe.db.set_value(
+			"Field Order",
+			self.order.name,
+			{"payment_status": "Paid", "amount_paid": self.total, "store_marked_paid_on": "2026-11-16 10:00:00"},
+		)
+		self.assertIn("Ignored", store_payments.apply_store_payment(self.conn, "7001")["note"])
+		self.conn.get_store_payment.assert_not_called()
+
+	def test_paid_in_agamsale_then_on_the_store_is_noted_once(self):
+		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Paid", "amount_paid": self.total})
+		self.conn.get_store_payment.return_value = None
+		self.assertIn("not paid on the store yet", store_payments.apply_store_payment(self.conn, "7001")["note"])
+		self.assertIsNone(self.saved("store_marked_paid_on").store_marked_paid_on)
+
+		# The merchant records the cash payment on the store.
+		self.conn.get_store_payment.return_value = self.paid(self.total, method="Cash on Delivery (COD)")
+		self.assertEqual(store_payments.apply_store_payment(self.conn, "7001")["note"], "Paid on the store too")
+		o = self.saved("store_marked_paid_on", "amount_paid", "payment_status")
+		self.assertIsNotNone(o.store_marked_paid_on)
+		self.assertEqual((o.payment_status, o.amount_paid), ("Paid", self.total))
+		self.assertEqual(self.history(), [])  # no second payment
+		self.notify.assert_not_called()
+
+		self.conn.get_store_payment.reset_mock()
+		self.assertIn("Ignored", store_payments.apply_store_payment(self.conn, "7001")["note"])
+		self.conn.get_store_payment.assert_not_called()
+
+	def test_unpaid_or_unknown_store_order(self):
+		self.conn.get_store_payment.return_value = None
+		self.assertIn("Ignored", store_payments.apply_store_payment(self.conn, "7001")["note"])
+		self.assertEqual(self.saved("payment_status").payment_status, "Unpaid")
+		self.assertIn("Ignored", store_payments.apply_store_payment(self.conn, "999999")["note"])
+
+	def test_open_payment_link_is_cancelled(self):
+		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Link Sent", "razorpay_payment_link_id": "plink_9"})
+		self.conn.get_store_payment.return_value = self.paid(self.total)
+		with patch.object(store_payments, "fetch_payment_link", return_value={"status": "created", "amount_paid": 0}), patch.object(
+			store_payments, "cancel_payment_link"
+		) as cancel:
+			store_payments.apply_store_payment(self.conn, "7001")
+		cancel.assert_called_once()
+		self.assertEqual(self.saved("payment_status").payment_status, "Paid")
+
+	def test_paid_link_wins(self):
+		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Link Sent", "razorpay_payment_link_id": "plink_9"})
+		self.conn.get_store_payment.return_value = self.paid(self.total)
+		with patch.object(store_payments, "fetch_payment_link", return_value={"status": "paid", "amount_paid": 100}):
+			result = store_payments.apply_store_payment(self.conn, "7001")
+		self.assertIn("payment link", result["note"])
+		self.assertEqual(self.saved("payment_status").payment_status, "Link Sent")
+
+	def test_store_time_in_utc_becomes_system_time(self):
+		naive = store_payments._when("2026-11-16 04:30:00")
+		zulu = store_payments._when("2026-11-16T04:30:00Z")
+		self.assertEqual(naive, zulu)
+		self.assertIsNone(zulu.tzinfo)
+
+
+class TestShopifyPaidRule(IntegrationTestCase):
+	"""Shopify: paid / partially paid, amount received, latest successful sale or capture."""
+
+	def test_rule(self):
+		from field_sales.connectors.shopify import _store_payment
+
+		order = {
+			"displayFinancialStatus": "PAID",
+			"currencyCode": "INR",
+			"totalReceivedSet": {"shopMoney": {"amount": "1180.00", "currencyCode": "INR"}},
+			"transactions": [
+				{"id": "gid://shopify/OrderTransaction/1", "gateway": "razorpay", "kind": "AUTHORIZATION", "status": "SUCCESS", "processedAt": "2026-11-16T04:00:00Z"},
+				{"id": "gid://shopify/OrderTransaction/2", "gateway": "razorpay", "kind": "CAPTURE", "status": "SUCCESS", "processedAt": "2026-11-16T04:05:00Z"},
+				{"id": "gid://shopify/OrderTransaction/3", "gateway": "razorpay", "kind": "SALE", "status": "FAILURE", "processedAt": "2026-11-16T04:10:00Z"},
+			],
+		}
+		self.assertEqual(
+			_store_payment(order),
+			{"amount": 1180.0, "currency": "INR", "method": "razorpay", "reference": "2", "paid_at": "2026-11-16T04:05:00Z"},
+		)
+		self.assertEqual(_store_payment({**order, "displayFinancialStatus": "PARTIALLY_PAID"})["amount"], 1180.0)
+		self.assertIsNone(_store_payment({**order, "displayFinancialStatus": "PENDING"}))
+		self.assertIsNone(_store_payment({**order, "cancelledAt": "2026-11-16T05:00:00Z"}))

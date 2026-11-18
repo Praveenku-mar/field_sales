@@ -3,6 +3,13 @@
   <div class="flex h-full flex-col">
     <PageHeader title="Shops">
       <template #actions>
+        <Button
+          v-if="session.isManager"
+          label="Import from Store"
+          icon-left="lucide-download"
+          :loading="importing"
+          @click="importCustomers"
+        />
         <Button label="New Shop" icon-left="lucide-plus" variant="solid" @click="newRetailerOpen = true" />
       </template>
     </PageHeader>
@@ -39,8 +46,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { Button } from 'frappe-ui'
+import { onBeforeUnmount, ref } from 'vue'
+import { Button, call, toast } from 'frappe-ui'
 import { useRoute } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import ListFilters from '@/components/ListFilters.vue'
@@ -49,6 +56,8 @@ import DataTable from '@/components/DataTable.vue'
 import StatusPill from '@/components/StatusPill.vue'
 import RetailerDialog from '@/components/RetailerDialog.vue'
 import { useDocList } from '@/composables/useDocList'
+import { callMethod } from '@/utils/api'
+import { useSessionStore } from '@/stores/session'
 import { daysAgo, relativeDay } from '@/utils/format'
 
 const newRetailerOpen = ref(false)
@@ -80,7 +89,7 @@ function buildFilters(m) {
 }
 
 const route = useRoute()
-const { model, list, count, presetLabel, pageSize } = useDocList({
+const { model, list, count, presetLabel, pageSize, refresh } = useDocList({
   doctype: 'Retailer',
   fields: ['name', 'retailer_name', 'city', 'retailer_type', 'sales_rep', 'sales_rep.full_name as sales_rep_name', 'phone', 'last_visit', 'status', 'sync_status'],
   orderBy: 'retailer_name asc',
@@ -100,4 +109,66 @@ function lastVisitClass(value) {
       ? 'font-medium text-polaris-attention'
       : 'text-polaris-text'
 }
+
+// ---------------------------------------------------------------- import
+// Store customers -> Shops (managers only, enforced on the server too). The run is done when
+// its own summary Sync Log appears; the per-request logs of the same operation have no
+// reference_doctype.
+const session = useSessionStore()
+const importing = ref(false)
+const POLL_MS = 4000
+const POLL_LIMIT_MS = 25 * 60 * 1000 // the job's own timeout
+let pollTimer = null
+
+async function lastImportLog() {
+  const [log] = await call('frappe.client.get_list', {
+    doctype: 'Sync Log',
+    fields: ['name', 'status', 'response_payload', 'error_message', 'creation'],
+    filters: { operation: 'Customer Sync', reference_doctype: 'Retailer' },
+    order_by: 'creation desc',
+    limit_page_length: 1,
+  })
+  return log || null
+}
+
+async function importCustomers() {
+  importing.value = true
+  try {
+    const before = await lastImportLog()
+    const result = await callMethod('field_sales.api.enqueue_customer_import')
+    toast[result.queued ? 'info' : 'warning'](result.message)
+    waitForImport(before?.creation || null, Date.now())
+  } catch {
+    // callMethod already toasted the error (e.g. Store Connection disabled).
+    importing.value = false
+  }
+}
+
+function waitForImport(after, pollStart) {
+  pollTimer = setTimeout(async () => {
+    try {
+      const log = await lastImportLog()
+      if (log && (!after || log.creation > after)) return finishImport(log)
+    } catch {
+      // A failed poll is retried on the next tick.
+    }
+    if (Date.now() - pollStart < POLL_LIMIT_MS) waitForImport(after, pollStart)
+    else importing.value = false
+  }, POLL_MS)
+}
+
+function finishImport(log) {
+  importing.value = false
+  if (log.status === 'Success') {
+    const s = JSON.parse(log.response_payload || '{}')
+    const text = `Customer import done: ${s.created ?? 0} created, ${s.linked ?? 0} linked, ${s.updated ?? 0} updated, ${s.unchanged ?? 0} unchanged, ${s.skipped ?? 0} skipped`
+    if (s.failed) toast.warning(`${text}, ${s.failed} failed (see Sync Log)`)
+    else toast.success(text)
+  } else {
+    toast.error(`Customer import failed: ${log.error_message || 'see Sync Log'}`)
+  }
+  refresh()
+}
+
+onBeforeUnmount(() => clearTimeout(pollTimer))
 </script>

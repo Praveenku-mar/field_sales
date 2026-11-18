@@ -63,8 +63,8 @@
             label="Password"
             :type="form.showPassword ? 'text' : 'password'"
             autocomplete="new-password"
-            :required="!form.name"
-            :placeholder="form.name ? 'Leave blank to keep the saved password' : ''"
+            :required="passwordRequired"
+            :placeholder="passwordPlaceholder"
             :description="passwordHint"
           >
             <template #suffix>
@@ -184,7 +184,7 @@ const accounts = embedded
       auto: true,
     })
 
-const form = reactive({ open: false, name: null, saving: false, showPassword: false })
+const form = reactive({ open: false, name: null, saving: false, showPassword: false, saved: null })
 const blank = () => ({
   service: 'Custom',
   email_id: '',
@@ -219,6 +219,7 @@ function openForm(account = null) {
       always_use_account_email_id_as_sender: !!account.always_use_account_email_id_as_sender,
     })
   }
+  form.saved = account ? connection() : null
   lastSecurity = f.security
   form.open = true
 }
@@ -244,11 +245,30 @@ const passwordHint = computed(() => {
   return null
 })
 
+// Where and how the account signs in. The server checks a saved account by signing in with
+// the stored password, so changing any of this needs the password again (merchant_settings.py).
+function connection() {
+  return JSON.stringify([
+    f.service,
+    f.smtp_server.trim().toLowerCase(),
+    String(f.smtp_port || ''),
+    f.security,
+    !!f.login_id_is_different,
+    f.login_id_is_different ? f.login_id.trim().toLowerCase() : '',
+  ])
+}
+const connectionChanged = computed(() => !!form.name && connection() !== form.saved)
+const passwordRequired = computed(() => !form.name || connectionChanged.value)
+const passwordPlaceholder = computed(() => {
+  if (!form.name) return ''
+  return connectionChanged.value ? 'Enter the password to change the server or sign-in' : 'Leave blank to keep the saved password'
+})
+
 const canSave = computed(
   () =>
     !!f.email_id.trim() &&
     !!f.smtp_server.trim() &&
-    (form.name || !!f.password) &&
+    (!passwordRequired.value || !!f.password) &&
     (!f.login_id_is_different || !!f.login_id.trim()),
 )
 

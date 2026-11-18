@@ -80,6 +80,7 @@
           <InfoGrid :items="storeInfo" :columns="1" />
         </SectionCard>
       </div>
+      <Timeline class="xl:col-span-2" doctype="Platform Product" :name="name" :version="d.modified || null" />
     </div>
   </div>
 </template>
@@ -88,6 +89,7 @@
 import { computed } from 'vue'
 import { Button, createDocumentResource, createListResource, createResource } from 'frappe-ui'
 import PageHeader from '@/components/PageHeader.vue'
+import Timeline from '@/components/Timeline.vue'
 import SectionCard from '@/components/SectionCard.vue'
 import InfoGrid from '@/components/InfoGrid.vue'
 import DataTable from '@/components/DataTable.vue'

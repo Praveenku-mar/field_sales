@@ -146,3 +146,101 @@ class TestMerchantSettings(IntegrationTestCase):
 			ms.get_email_accounts()
 		self.as_embedded_manager()
 		self.assertIsInstance(ms.get_email_accounts(), list)
+
+
+class TestMerchantEmailAccounts(IntegrationTestCase):
+	"""
+	The Email tab from the Shopify admin: a merchant changes only accounts added there, and never
+	re-points a saved account to another server without its password (Frappe would sign in to the
+	new server with the stored one). The SMTP sign-in check itself is skipped in tests.
+	"""
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		frappe.db.set_single_value(
+			"Store Connection",
+			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_auth_mode": "OAuth"},
+		)
+		frappe.db.set_default(ms.MERCHANT_EMAIL_ACCOUNTS_KEY, "[]")
+		self.manager = TestMerchantSettings.user(self, "merchant.mail@example.com", "Sales Manager")
+		# The site's own account, set up by a System Manager.
+		self.site_account = self.account("site.mail@example.com", "smtp.site-host.example")
+		frappe.local.shopify_shop = None
+
+	def tearDown(self):
+		frappe.local.shopify_shop = None
+		frappe.set_user("Administrator")
+		frappe.db.rollback()
+		# Site defaults are cached: drop what the rolled-back writes left there.
+		frappe.defaults._clear_cache("__default")
+
+	def account(self, email, server):
+		return (
+			frappe.get_doc(
+				{
+					"doctype": "Email Account",
+					"email_id": email,
+					"auth_method": "Basic",
+					"enable_incoming": 0,
+					"enable_outgoing": 1,
+					"smtp_server": server,
+					"smtp_port": "587",
+					"use_tls": 1,
+					"password": "site-secret",
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
+
+	def as_merchant(self):
+		frappe.set_user(self.manager)
+		frappe.local.shopify_shop = SHOP
+
+	def merchant_account(self):
+		self.as_merchant()
+		return ms.save_email_account(
+			{"email_id": "shop.mail@example.com", "smtp_server": "smtp.shop-host.example", "smtp_port": "587",
+			 "use_tls": 1, "password": "shop-secret"}
+		)["name"]  # fmt: skip
+
+	def test_merchant_cannot_edit_the_sites_own_account(self):
+		self.as_merchant()
+		with self.assertRaises(frappe.PermissionError):
+			ms.save_email_account({"smtp_server": "smtp.attacker.example", "password": "x"}, name=self.site_account)
+		self.assertEqual(frappe.db.get_value("Email Account", self.site_account, "smtp_server"), "smtp.site-host.example")
+
+	def test_merchant_lists_only_accounts_added_from_the_tab(self):
+		mine = self.merchant_account()
+		names = {a.name for a in ms.get_email_accounts()}
+		self.assertIn(mine, names)
+		self.assertNotIn(self.site_account, names)
+
+	def test_merchant_edits_own_account(self):
+		mine = self.merchant_account()
+		ms.save_email_account({"always_use_account_email_id_as_sender": 1, "default_outgoing": 1}, name=mine)
+		self.assertEqual(frappe.db.get_value("Email Account", mine, "default_outgoing"), 1)
+
+	def test_changing_the_server_needs_the_password(self):
+		mine = self.merchant_account()
+		for change in ({"smtp_server": "smtp.elsewhere.example"}, {"smtp_port": "2525"}, {"use_tls": 0},
+				{"login_id_is_different": 1, "login_id": "someone"}):  # fmt: skip
+			with self.subTest(change=change), self.assertRaises(frappe.ValidationError):
+				ms.save_email_account(change, name=mine)
+		self.assertEqual(frappe.db.get_value("Email Account", mine, "smtp_server"), "smtp.shop-host.example")
+		ms.save_email_account({"smtp_server": "smtp.elsewhere.example", "password": "new-secret"}, name=mine)
+		self.assertEqual(frappe.db.get_value("Email Account", mine, "smtp_server"), "smtp.elsewhere.example")
+
+	def test_unchanged_connection_needs_no_password(self):
+		mine = self.merchant_account()
+		ms.save_email_account(
+			{"smtp_server": "SMTP.shop-host.example ", "smtp_port": "587", "use_tls": 1, "enable_outgoing": 0}, name=mine
+		)
+		self.assertEqual(frappe.db.get_value("Email Account", mine, "enable_outgoing"), 0)
+
+	def test_system_manager_sees_and_edits_every_account(self):
+		self.assertIn(self.site_account, {a.name for a in ms.get_email_accounts()})
+		with self.assertRaises(frappe.ValidationError):
+			ms.save_email_account({"smtp_server": "smtp.new-host.example"}, name=self.site_account)
+		ms.save_email_account({"smtp_server": "smtp.new-host.example", "password": "s"}, name=self.site_account)
+		self.assertEqual(frappe.db.get_value("Email Account", self.site_account, "smtp_server"), "smtp.new-host.example")

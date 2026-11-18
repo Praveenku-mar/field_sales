@@ -195,7 +195,7 @@ def _record_privacy_request(topic: str, shop: str, payload: dict, webhook_id: st
 
 def _to_system_time(iso: str):
 	"""Shopify's UTC timestamp as a naive datetime in the system time zone."""
-	from datetime import datetime, timezone
+	from datetime import datetime
 
 	from frappe.utils import convert_utc_to_system_timezone
 

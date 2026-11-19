@@ -34,6 +34,7 @@ from frappe.utils.password import get_decrypted_password, remove_encrypted_passw
 
 from field_sales.connectors.base import (
 	ORDER_CANCELLED_TOPIC,
+	ORDER_CREATED_TOPIC,
 	ORDER_FULFILLED_TOPIC,
 	ORDER_PAID_TOPIC,
 	PRODUCT_DELETE_TOPIC,
@@ -67,6 +68,7 @@ TOPIC_MAP = {
 	"inventory_levels/update": STOCK_TOPIC,
 	"products/update": PRODUCT_UPDATE_TOPIC,
 	"products/delete": PRODUCT_DELETE_TOPIC,
+	"orders/create": ORDER_CREATED_TOPIC,
 	"orders/paid": ORDER_PAID_TOPIC,
 	"orders/fulfilled": ORDER_FULFILLED_TOPIC,
 	"orders/cancelled": ORDER_CANCELLED_TOPIC,

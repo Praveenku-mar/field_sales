@@ -87,13 +87,15 @@ if TYPE_CHECKING:
 STOCK_TOPIC = "stock/update"
 PRODUCT_UPDATE_TOPIC = "product/update"
 PRODUCT_DELETE_TOPIC = "product/delete"
+ORDER_CREATED_TOPIC = "order/created"
 ORDER_PAID_TOPIC = "order/paid"
 ORDER_FULFILLED_TOPIC = "order/fulfilled"
 ORDER_CANCELLED_TOPIC = "order/cancelled"
 REFUND_CREATE_TOPIC = "refund/create"
 
-#: Topics that make the commission engine re-read the order.
-ORDER_TOPICS = (ORDER_PAID_TOPIC, ORDER_FULFILLED_TOPIC, ORDER_CANCELLED_TOPIC, REFUND_CREATE_TOPIC)
+#: Topics that make the commission engine re-read the order. "Created" links a draft completed on
+#: the store at once, whatever its payment (a manual or cash payment never sends "paid").
+ORDER_TOPICS = (ORDER_CREATED_TOPIC, ORDER_PAID_TOPIC, ORDER_FULFILLED_TOPIC, ORDER_CANCELLED_TOPIC, REFUND_CREATE_TOPIC)
 
 NORMALIZED_PRODUCT_KEYS: tuple[str, ...] = (
 	"external_product_id",

@@ -192,3 +192,27 @@ class TestOrderEventLink(IntegrationTestCase):
 
 		self.assertEqual(seen["linked"], self.name)
 		self.assertEqual(result["linked"], self.name)
+
+
+class TestOrderCreatedTopic(IntegrationTestCase):
+	def setUp(self):
+		frappe.db.set_single_value(
+			"Store Connection",
+			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_api_version": "2026-10"},
+		)
+
+	def tearDown(self):
+		frappe.db.after_rollback.reset()
+		frappe.db.rollback()
+
+	def test_orders_create_is_an_order_event(self):
+		# A manual or cash payment at checkout sends "created" but never "paid": the draft must still link.
+		from field_sales.connectors.base import ORDER_CREATED_TOPIC, ORDER_TOPICS
+
+		event = get_connector().parse_webhook({"X-Shopify-Topic": "orders/create"}, b'{"id": 8001}')
+		self.assertEqual(event["topic"], ORDER_CREATED_TOPIC)
+		self.assertIn(ORDER_CREATED_TOPIC, ORDER_TOPICS)
+
+		with patch.object(sync_webhooks, "_process_order_event", return_value={"note": "ok"}) as handled:
+			sync_webhooks.process_event("Shopify", event)
+		handled.assert_called_once()

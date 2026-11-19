@@ -47,6 +47,7 @@ uri = "https://fieldsales.example.com/api/method/field_sales.shopify.webhooks.re
 [[webhooks.subscriptions]]
 topics = [
   "inventory_levels/update",
+  "orders/create",
   "products/update",
   "products/delete",
   "orders/paid",

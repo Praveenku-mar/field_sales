@@ -509,23 +509,33 @@ class TestAppWebhooks(ShopifyAppTestCase):
 
 	def test_register_webhooks_creates_only_missing(self):
 		uri = "https://fs.example.com/api/method/field_sales.shopify.webhooks.receive"
-		calls = []
+		store_uri = "https://fs.example.com/api/method/field_sales.api.webhooks.receive"
+		topics = ["APP_UNINSTALLED", *webhooks.STORE_API_TOPICS]
+		created = []
 
 		def fake_graphql(conn, query, variables=None, **kwargs):
-			calls.append(query)
 			if "webhookSubscriptions(" in query:
 				return {"webhookSubscriptions": {"nodes": []}}
+			created.append((variables["topic"], variables["sub"]["uri"]))
 			return {"webhookSubscriptionCreate": {"webhookSubscription": {"id": "1"}}}
 
 		with patch.object(ShopifyConnector, "_graphql", fake_graphql):
-			self.assertEqual(webhooks.register_webhooks(), {"APP_UNINSTALLED": "created"})
+			self.assertEqual(webhooks.register_webhooks(), dict.fromkeys(topics, "created"))
+		# The uninstall topic goes to the app endpoint; store data (orders included) to the store one.
+		self.assertEqual(created[0], ("APP_UNINSTALLED", uri))
+		self.assertEqual({u for t, u in created[1:]}, {store_uri})
+		self.assertIn(("ORDERS_CREATE", store_uri), created)
 
 		def existing(conn, query, variables=None, **kwargs):
-			return {"webhookSubscriptions": {"nodes": [{"id": "1", "topic": "APP_UNINSTALLED", "uri": uri}]}}
+			topic = variables["topics"][0]
+			return {
+				"webhookSubscriptions": {
+					"nodes": [{"id": "1", "topic": topic, "uri": uri if topic == "APP_UNINSTALLED" else store_uri}]
+				}
+			}
 
 		with patch.object(ShopifyConnector, "_graphql", existing):
-			self.assertEqual(webhooks.register_webhooks(), {"APP_UNINSTALLED": "exists"})
-		self.assertEqual(len(calls), 2)
+			self.assertEqual(webhooks.register_webhooks(), dict.fromkeys(topics, "exists"))
 
 
 # ----------------------------------------------------------------------

@@ -33,6 +33,19 @@ COMPLIANCE_TOPICS = ("customers/data_request", "customers/redact", "shop/redact"
 
 # Topics registered through the Admin API (GraphQL enum name -> Shopify topic).
 API_TOPICS = {"APP_UNINSTALLED": UNINSTALLED_TOPIC}
+# Store data the sync needs, registered through the API too (to ``config.STORE_WEBHOOK_PATH``), so
+# they reach this site's own address whatever URL the deployed shopify.app.toml holds. When the
+# toml declares them as well, an event arrives twice; processing is idempotent.
+STORE_API_TOPICS = (
+	"INVENTORY_LEVELS_UPDATE",
+	"PRODUCTS_UPDATE",
+	"PRODUCTS_DELETE",
+	"ORDERS_CREATE",
+	"ORDERS_PAID",
+	"ORDERS_FULFILLED",
+	"ORDERS_CANCELLED",
+	"REFUNDS_CREATE",
+)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -138,7 +151,10 @@ def handle_uninstalled(shop: str, triggered_at: str | None = None):
 
 def register_webhooks():
 	"""
-	Background job after install: subscribe ``app/uninstalled`` to ``receive`` unless it already is.
+	Background job after install: subscribe ``app/uninstalled`` to ``receive``, and the store topics
+	(``STORE_API_TOPICS``) to the store webhook endpoint, unless they already are. Safe to run again
+	(e.g. after the site's public address changes: ``bench execute
+	field_sales.shopify.webhooks.register_webhooks``).
 
 	Compliance topics are declared in ``shopify.app.toml`` instead (Shopify does not allow them
 	through the API). Failures are in Sync Log (operation Register Webhooks) and not retried.
@@ -150,6 +166,9 @@ def register_webhooks():
 	results = {}
 	for topic in API_TOPICS:
 		results[topic] = conn.ensure_webhook(topic, uri)
+	store_uri = config.public_url(config.STORE_WEBHOOK_PATH)
+	for topic in STORE_API_TOPICS:
+		results[topic] = conn.ensure_webhook(topic, store_uri)
 	log_sync(
 		platform="Shopify",
 		operation="Register Webhooks",

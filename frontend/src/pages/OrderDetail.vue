@@ -951,6 +951,9 @@ function patchListed(products, values) {
 
 // Razorpay webhook / refresh changed the payment fields.
 onDocEvent('Field Order', props.name, 'field_order_payment_updated', () => reloadPayment())
+// Pushed, or its draft completed on the store (checkout or admin): show the store order at once.
+// The watch on the store ids then refetches syncInfo.
+onDocEvent('Field Order', props.name, 'field_order_synced', () => !dirty.value && doc.reload())
 
 onDoctypeEvent('Platform Product', 'product_price_updated', ({ product, price, compare_at_price }) => {
   patchListed([product], { price, compare_at_price })

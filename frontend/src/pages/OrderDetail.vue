@@ -582,7 +582,7 @@ import { useSellLocations } from '@/composables/useSellLocations'
 import { onDocEvent, onDoctypeEvent } from '@/composables/useRealtime'
 import { callMethod, findProductByBarcode } from '@/utils/api'
 import { copyText } from '@/utils/clipboard'
-import { formatCurrency, formatDate, formatNumber, formatTime, orderStatus, relativeDay } from '@/utils/format'
+import { formatCurrency, formatDate, formatNumber, formatTime, isPast, orderStatus, relativeDay } from '@/utils/format'
 
 const props = defineProps({ name: { type: String, required: true } })
 const router = useRouter()
@@ -1312,8 +1312,8 @@ const paymentRows = computed(() => {
 })
 
 const linkExpired = computed(() => {
-  const exp = pay.value.payment_link_expires_on
-  return !!exp && new Date(exp.replace(' ', 'T')) <= new Date()
+  // A naive server time (site's zone): compared on the site's clock, not the browser's.
+  return isPast(pay.value.payment_link_expires_on)
 })
 // A link the retailer can still pay.
 const linkActive = computed(

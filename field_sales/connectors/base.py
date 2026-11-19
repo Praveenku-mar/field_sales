@@ -408,6 +408,14 @@ class BaseConnector:
 		"""
 		raise NotImplementedError
 
+	def field_order_from_order_event(self, payload: dict) -> str | None:
+		"""
+		The Field Order No an order event's payload names, if the store order was made from one of
+		this app's drafts (e.g. carried in the order note). Only a hint: the caller confirms it with
+		``get_completed_drafts`` before linking. The default finds none.
+		"""
+		return None
+
 	def get_order(self, external_id: str) -> dict:
 		"""
 		Fetch the current state of one order, for commission.

@@ -19,6 +19,7 @@ shortly before it expires (or once on a 401).
 from __future__ import annotations
 
 import json
+import re
 import time
 import unicodedata
 from datetime import timedelta
@@ -72,6 +73,8 @@ TOPIC_MAP = {
 	"refunds/create": REFUND_CREATE_TOPIC,
 }
 PRODUCT_VARIANT_LIMIT = 250
+# The note _order_note() puts on drafts and orders; Shopify copies a draft's note to its order.
+FIELD_ORDER_NOTE = re.compile(r"Field Order (\S+) \u00b7")
 
 # Fields of one variant node, shared by the full product sync and single-product fetch.
 VARIANT_FIELDS = """
@@ -597,6 +600,11 @@ class ShopifyConnector(BaseConnector):
 				}
 			)
 		return prices
+
+	def field_order_from_order_event(self, payload: dict) -> str | None:
+		"""A completed draft's order keeps the draft's note (``_order_note``): "Field Order FO-… · Rep …"."""
+		match = FIELD_ORDER_NOTE.match((payload.get("note") or "").strip())
+		return match.group(1) if match else None
 
 	def order_id_from_event(self, payload: dict) -> str | None:
 		"""``orders/*`` carry the order as ``id``; ``refunds/create`` carries it as ``order_id``."""

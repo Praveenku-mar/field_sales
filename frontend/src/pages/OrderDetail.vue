@@ -226,6 +226,7 @@
                       v-model.number="row.qty"
                       type="number"
                       min="1"
+                      step="1"
                       class="num-input"
                       :class="isShort(row) && 'text-ink-red-6'"
                       :aria-label="`Quantity for ${rowLabel(row)}`"
@@ -268,7 +269,6 @@
             </Field>
             <dl class="space-y-2.5 text-xs">
               <div class="flex justify-between"><dt class="text-polaris-secondary">Net Total</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.net) }}</dd></div>
-              <div class="flex justify-between"><dt class="text-polaris-secondary">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.tax) }}</dd></div>
               <div v-if="editable" class="flex items-start justify-between gap-3">
                 <dt class="pt-1 text-polaris-secondary">Discount %</dt>
                 <dd class="text-right">
@@ -290,6 +290,8 @@
                 <dt class="text-polaris-secondary">Discount ({{ formatNumber(form.discount_percent || 0, 2) }}%)</dt>
                 <dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(form.discount_amount || 0) }}</dd>
               </div>
+              <!-- After the discount: GST is charged on the discounted value. -->
+              <div class="flex justify-between"><dt class="text-polaris-secondary">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.tax) }}</dd></div>
               <div class="flex justify-between border-t border-[#e1e3e5] pt-3 text-sm font-bold text-polaris-text">
                 <dt>Grand Total</dt><dd class="tabular-nums text-base">{{ formatCurrency(totals.grand) }}</dd>
               </div>
@@ -702,8 +704,9 @@ const totals = computed(() => {
   }
   const items = form.value.items
   const net = Math.round(items.reduce((sum, r) => sum + amountOf(r), 0) * 100) / 100
-  const tax = Math.round(((net * (+form.value.tax_percent || 0)) / 100) * 100) / 100
   const discount = Math.round(((net * (+form.value.discount_percent || 0)) / 100) * 100) / 100
+  // GST on the discounted value, as FieldOrder._compute_totals does.
+  const tax = Math.round((((net - discount) * (+form.value.tax_percent || 0)) / 100) * 100) / 100
   return {
     qty: items.reduce((sum, r) => sum + (+r.qty || 0), 0),
     net,

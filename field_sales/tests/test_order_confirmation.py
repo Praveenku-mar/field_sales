@@ -332,12 +332,13 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIn("CGST (2.5%)", html)
 		self.assertIn("SGST (2.5%)", html)
 		self.assertNotIn("IGST", html)
-		# 200 net, 20 discount, 10 tax (5 each); HSN, seller and buyer details, amount in words.
+		# 200 net, 20 discount, 9 tax on the taxable 180 (4.50 each); HSN, seller and buyer
+		# details, amount in words.
 		self.assertIn("1006", html)
 		self.assertIn("Test Traders", html)
 		self.assertIn("33AAAAA0000A1Z5", html)
 		self.assertIn("33BBBBB1111B1Z5", html)
-		self.assertIn("INR One Hundred And Ninety only.", html)  # grand total 190 in words
+		self.assertIn("INR One Hundred And Eighty Nine only.", html)  # grand total 189 in words
 
 	def test_state_match_ignores_case_and_spaces(self):
 		frappe.db.set_single_value("Store Connection", "company_state", "  tamil nadu ")

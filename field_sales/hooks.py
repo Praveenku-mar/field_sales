@@ -121,7 +121,7 @@ website_route_rules = [
 # ------------
 
 # before_install = "field_sales.install.before_install"
-# after_install = "field_sales.install.after_install"
+after_install = "field_sales.install.after_install"
 
 # Uninstallation
 # ------------

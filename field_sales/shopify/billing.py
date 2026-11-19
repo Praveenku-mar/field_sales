@@ -26,7 +26,7 @@ import json
 import frappe
 import requests
 from frappe import _
-from frappe.utils import cint, get_first_day, get_last_day, nowdate
+from frappe.utils import add_months, cint, get_first_day, nowdate
 
 from field_sales.connectors.shopify import REQUEST_TIMEOUT, is_oauth
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
@@ -162,10 +162,15 @@ def usage(kind: str) -> int:
 			filters["user"] = ("!=", embedded_user)
 		return frappe.db.count("Sales Rep", filters)
 	if kind == ORDERS_PER_MONTH:
-		today = nowdate()
+		# By submission time, which only the server sets; order_date can be back-dated.
+		first = get_first_day(nowdate())
 		return frappe.db.count(
 			"Field Order",
-			{"docstatus": 1, "order_date": ("between", [get_first_day(today), get_last_day(today)])},
+			[
+				["docstatus", "=", 1],
+				["submitted_on", ">=", f"{first} 00:00:00"],
+				["submitted_on", "<", f"{add_months(first, 1)} 00:00:00"],
+			],
 		)
 	raise ValueError(kind)
 

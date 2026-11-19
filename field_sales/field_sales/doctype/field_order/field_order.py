@@ -6,7 +6,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, now_datetime
 
 from field_sales.commission.engine import enqueue_create_entries
 from field_sales.connectors import ConnectorError, get_connector
@@ -80,6 +80,9 @@ class FieldOrder(Document):
 		self._validate_discount()
 
 	def before_submit(self):
+		# Server time, never the client's: the plan's monthly order limit counts by it, and order_date
+		# is an ordinary editable date (an order dated last month would escape this month's count).
+		self.submitted_on = now_datetime()
 		check_limit(ORDERS_PER_MONTH)
 		self._apply_live_stock()
 		self._block_on_stock_warning()

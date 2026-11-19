@@ -75,6 +75,18 @@ TOPIC_MAP = {
 	"refunds/create": REFUND_CREATE_TOPIC,
 }
 PRODUCT_VARIANT_LIMIT = 250
+
+# Active locations only, PAGE_SIZE at a time (get_locations pages through all of them).
+LOCATIONS_QUERY = """
+query($cursor: String) {
+  locations(first: %d, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id name isActive }
+  }
+}
+""" % PAGE_SIZE
+# A guard against a cursor that never ends, far above any real shop (Plus allows 1,000 locations).
+LOCATION_PAGE_LIMIT = 40
 # The note _order_note() puts on drafts and orders; Shopify copies a draft's note to its order.
 FIELD_ORDER_NOTE = re.compile(r"Field Order (\S+) \u00b7")
 
@@ -491,12 +503,22 @@ class ShopifyConnector(BaseConnector):
 		return moved
 
 	def get_locations(self) -> list[dict]:
-		"""Return the store's active locations as ``[{"id", "name"}]`` (ids are Shopify GIDs)."""
-		data = self._graphql(
-			"{ locations(first: 20) { nodes { id name isActive } } }", operation="Other"
-		)
-		nodes = (data.get("locations") or {}).get("nodes") or []
-		return [{"id": from_gid(n["id"]), "name": n["name"]} for n in nodes if n.get("isActive")]
+		"""
+		Return the store's active locations as ``[{"id", "name"}]`` (plain ids), every page of them:
+		a shop may have far more than one page (it read only the first 20 before).
+		"""
+		locations, cursor = [], None
+		for _page in range(LOCATION_PAGE_LIMIT):
+			data = self._graphql(LOCATIONS_QUERY, {"cursor": cursor}, operation="Other")
+			connection = data.get("locations") or {}
+			locations += [
+				{"id": from_gid(n["id"]), "name": n["name"]} for n in connection.get("nodes") or [] if n.get("isActive")
+			]
+			page_info = connection.get("pageInfo") or {}
+			cursor = page_info.get("endCursor")
+			if not (page_info.get("hasNextPage") and cursor):
+				break
+		return locations
 
 	def get_products(self, cursor: str | None = None) -> dict:
 		"""Fetch one page of variants (``PAGE_SIZE`` per page) as normalized product dicts."""

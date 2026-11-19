@@ -366,7 +366,7 @@ def link_completed_drafts():
 				"last_sync_attempt": (">=", add_to_date(now_datetime(), days=-DRAFT_LINK_DAYS)),
 			},
 			# Everything the connector writes onto the store order, read once for the whole batch.
-			fields=["name", "external_draft_id", "sales_rep", "location_id", "location_name"],
+			fields=LINK_FIELDS,
 			order_by="last_sync_attempt desc",
 			limit=DRAFT_LINK_BATCH,
 		)
@@ -380,33 +380,12 @@ def link_completed_drafts():
 			order_id = completed.get(d.external_draft_id)
 			if not order_id:
 				continue
-			# The row stands in for the Field Order: the connector logs its call against
-			# ``doctype`` / ``name`` (a Sync Log needs both).
-			d.doctype = "Field Order"
 			# One draft's failure must not stop the rest: the next run would list the same draft
 			# first again (newest attempt first) and block every draft after it.
 			try:
-				frappe.db.set_value("Field Order", d.name, "external_order_id", order_id, update_modified=False)
-				# Logged by the connector; the order itself is linked either way.
-				with suppress(ConnectorError):
-					# Shopify does not copy a draft's fields to the order made from it.
-					conn.set_order_metafields(order_id, d)
-				# The checkout or admin completion routed it by the store's own rules.
-				_assign_order_location(conn, d, order_id, d.location_id)
-				_carry_draft_payment(conn, d.name, order_id)
-				enqueue_create_entries(d.name)
-				enqueue_order_confirmation(d.name)
-				log_sync(
-					platform=conn.settings.platform,
-					operation="Confirm Order",
-					reference_doctype="Field Order",
-					reference_name=d.name,
-					status="Success",
-					external_id=order_id,
-				)
-				notify_order_synced(d.name)
-				safe_commit()
-				notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
+				if _link_completed_draft(conn, d, order_id):
+					safe_commit()
+					notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
 			except Exception:
 				frappe.db.rollback()
 				frappe.log_error(title=f"Linking completed draft failed: {d.name}")
@@ -417,6 +396,81 @@ def link_completed_drafts():
 		safe_commit()
 		raise
 
+
+
+# What _link_completed_draft needs of a Field Order (and what the connector writes onto the order).
+LINK_FIELDS = ["name", "external_draft_id", "sales_rep", "location_id", "location_name"]
+
+
+def _link_completed_draft(conn, d, order_id: str) -> bool:
+	"""
+	Record the store order a Field Order's draft became, and do what an order id starts: order
+	fields and location on the store, the payment taken at checkout, commission, the confirmation
+	email and the rep's notification. Does not commit.
+
+	The row is locked first, so the draft linker and an order webhook cannot both link it (which
+	would send the confirmation twice).
+
+	:param d: The Field Order's ``LINK_FIELDS``; ``doctype`` is set here for the connector's logs.
+	:return: ``False`` if it was already linked.
+	"""
+	if frappe.db.get_value("Field Order", d.name, "external_order_id", for_update=True):
+		return False
+	# The row stands in for the Field Order: the connector logs its call against
+	# ``doctype`` / ``name`` (a Sync Log needs both).
+	d.doctype = "Field Order"
+	frappe.db.set_value("Field Order", d.name, "external_order_id", order_id, update_modified=False)
+	# Logged by the connector; the order itself is linked either way.
+	with suppress(ConnectorError):
+		# Shopify does not copy a draft's fields to the order made from it.
+		conn.set_order_metafields(order_id, d)
+	# The checkout or admin completion routed it by the store's own rules.
+	_assign_order_location(conn, d, order_id, d.location_id)
+	_carry_draft_payment(conn, d.name, order_id)
+	enqueue_create_entries(d.name)
+	enqueue_order_confirmation(d.name)
+	log_sync(
+		platform=conn.settings.platform,
+		operation="Confirm Order",
+		reference_doctype="Field Order",
+		reference_name=d.name,
+		status="Success",
+		external_id=order_id,
+	)
+	notify_order_synced(d.name)
+	return True
+
+
+def link_order_from_event(conn, external_order_id: str, payload: dict) -> str | None:
+	"""
+	An order event for a store order no Field Order holds yet: if it is the order a Field Order's
+	draft was just completed into, link it now instead of waiting for ``link_completed_drafts``.
+
+	The payload only names a candidate (``connector.field_order_from_order_event``); the store must
+	confirm that this Field Order's own draft became exactly this order, so an edited note cannot
+	link someone else's order. Does not commit.
+
+	:return: The Field Order linked, or ``None``.
+	"""
+	if not external_order_id or frappe.db.exists("Field Order", {"external_order_id": external_order_id}):
+		return None
+	name = conn.field_order_from_order_event(payload or {})
+	if not name:
+		return None
+	d = frappe.db.get_value(
+		"Field Order",
+		{"name": name, "docstatus": 1, "sync_status": "Synced", "external_draft_id": ("is", "set")},
+		LINK_FIELDS,
+		as_dict=True,
+	)
+	if not d:
+		return None
+	if conn.get_completed_drafts([d.external_draft_id]).get(d.external_draft_id) != str(external_order_id):
+		return None
+	if not _link_completed_draft(conn, d, str(external_order_id)):
+		return None
+	notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
+	return d.name
 
 
 def _assign_order_location(conn, field_order, order_id: str, location_id: str | None) -> None:

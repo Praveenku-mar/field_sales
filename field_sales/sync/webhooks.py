@@ -233,7 +233,15 @@ def _process_order_event(conn, event: dict) -> dict:
 	if not external_order_id:
 		return {"note": "Ignored: no order id"}
 
+	# A draft just completed on the store (its checkout, or the admin): link it now, so the
+	# commission and payment below find the Field Order instead of waiting for the draft linker.
+	from field_sales.sync.orders import link_order_from_event
+
+	linked = link_order_from_event(conn, external_order_id, event.get("payload") or {})
+
 	result = reconcile_order(external_order_id)
+	if linked:
+		result = {**result, "linked": linked}
 	# Paid on the store itself (its checkout or pay page): the Field Order follows.
 	from field_sales.payments.store_payments import apply_store_payment
 

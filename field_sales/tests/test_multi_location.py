@@ -277,6 +277,38 @@ class TestMultiLocation(IntegrationTestCase):
 		# Untracked products get no stock rows.
 		self.assertEqual(frappe.db.count("Product Stock", {"product": "Shopify-2"}), 0)
 
+	def test_sync_puts_back_stock_a_webhook_changed(self):
+		# Review finding F7: a product matching its last sync was skipped, so a figure a webhook or
+		# live check had written stayed on Platform Product while Product Stock got the store's.
+		item = {
+			"external_product_id": "900",
+			"external_variant_id": "1",
+			"external_inventory_id": INVENTORY,
+			"product_title": "Synced",
+			"variant_title": "",
+			"sku": "",
+			"barcode": "",
+			"price": 5.0,
+			"compare_at_price": None,
+			"collection": "",
+			"image_url": "",
+			"status": "Active",
+			"track_inventory": True,
+		}
+
+		def at(qty):
+			return lambda self_, ids, location_id: {INVENTORY: qty}
+
+		with patch(GET_PRODUCT, return_value=[item]), patch(GET_STOCK, at(10.0)):
+			sync_one_product(get_connector(), "900")
+		set_location_stock(self.product.name, MAIN, 5.0)  # a webhook or live check
+		with patch(GET_PRODUCT, return_value=[item]), patch(GET_STOCK, at(10.0)):
+			summary = sync_one_product(get_connector(), "900")
+
+		self.assertEqual(summary["unchanged"], 1)
+		self.assertEqual(frappe.db.get_value("Platform Product", self.product.name, "available_qty"), 10)
+		self.assertEqual(self.stock_row(MAIN).available_qty, 10)
+
 	# -- Webhooks ----------------------------------------------------------------
 
 	def test_webhook_updates_the_events_location(self):

@@ -984,12 +984,9 @@ async function changeLocation(location) {
         return
       }
     } else {
-      await callMethod('frappe.client.set_value', {
-        doctype: 'Field Order',
-        name: props.name,
-        fieldname: 'location_id',
-        value: location,
-      })
+      // Not frappe.client.set_value: a new draft has no items yet, and a plain save of it fails
+      // with "Items is mandatory".
+      await callMethod('field_sales.api.set_order_location', { field_order: props.name, location_id: location })
     }
     if (d.value.items?.some((r) => r.product) || form.value.items.some((r) => r.product)) {
       await callMethod('field_sales.api.refresh_stock', { field_order: props.name })

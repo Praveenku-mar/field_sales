@@ -213,6 +213,27 @@ mutation($definition: MetafieldDefinitionInput!) {
 }
 """
 
+# An order's open fulfilment groups and where Shopify's routing put them (needs
+# read/write_merchant_managed_fulfillment_orders).
+ORDER_FULFILLMENT_ORDERS = """
+query($id: ID!) {
+  order(id: $id) {
+    fulfillmentOrders(first: 20) {
+      nodes { id status supportedActions { action } assignedLocation { location { id } } }
+    }
+  }
+}
+"""
+
+FULFILLMENT_ORDER_MOVE = """
+mutation($id: ID!, $loc: ID!) {
+  fulfillmentOrderMove(id: $id, newLocationId: $loc) {
+    movedFulfillmentOrder { id }
+    userErrors { field message }
+  }
+}
+"""
+
 METAFIELDS_SET = """
 mutation($metafields: [MetafieldsSetInput!]!) {
   metafieldsSet(metafields: $metafields) { metafields { key } userErrors { field message code } }
@@ -439,6 +460,30 @@ class ShopifyConnector(BaseConnector):
 			operation="Confirm Order",
 			ref=field_order,
 		)
+
+	def assign_order_location(self, order_id: str, location_id: str, field_order=None) -> int:
+		"""
+		``fulfillmentOrderMove`` every open fulfilment order of the order that Shopify's routing
+		assigned elsewhere, so its stock is committed at the rep's location. Orders and drafts
+		carry no location of their own, so without this the store's default location is used.
+		Groups Shopify does not allow to move (fulfilled, on hold, …) are left as they are.
+		"""
+		if not (order_id and location_id):
+			return 0
+		target = to_gid("Location", location_id)
+		data = self._graphql(
+			ORDER_FULFILLMENT_ORDERS, {"id": to_gid("Order", order_id)}, operation="Other", ref=field_order
+		)
+		nodes = (((data.get("order") or {}).get("fulfillmentOrders") or {}).get("nodes")) or []
+		moved = 0
+		for node in nodes:
+			current = ((node.get("assignedLocation") or {}).get("location") or {}).get("id")
+			actions = {a.get("action") for a in node.get("supportedActions") or []}
+			if current == target or "MOVE" not in actions:
+				continue
+			self._graphql(FULFILLMENT_ORDER_MOVE, {"id": node["id"], "loc": target}, operation="Other", ref=field_order)
+			moved += 1
+		return moved
 
 	def get_locations(self) -> list[dict]:
 		"""Return the store's active locations as ``[{"id", "name"}]`` (ids are Shopify GIDs)."""
@@ -1323,11 +1368,23 @@ def _is_rejected_email(error: ConnectorError) -> bool:
 	)
 
 
+def _person_name(retailer) -> tuple[str, str]:
+	"""
+	(first, last) name for the store: the owner's name, else the shop's name, split at the
+	last space. A single word is the last name, because Shopify's checkout refuses a shipping
+	address without one ("Selected shipping address is not valid").
+	"""
+	name = " ".join((retailer.owner_name or retailer.retailer_name or "").split())
+	first, _space, last = name.rpartition(" ")
+	return first, last
+
+
 def _customer_input(retailer) -> dict:
 	"""Retailer -> CustomerInput, without ``id`` or ``addresses``."""
+	first_name, last_name = _person_name(retailer)
 	customer_input = {
-		"firstName": retailer.owner_name or retailer.retailer_name,
-		"lastName": "",
+		"firstName": first_name,
+		"lastName": last_name,
 		"note": f"Field Sales retailer {retailer.name} \u00b7 {retailer.retailer_name}",
 		"tags": [t for t in ("field-sales", retailer.retailer_type, retailer.city) if t],
 	}
@@ -1347,7 +1404,10 @@ def _customer_address(retailer, phone: str | None) -> dict:
 	else as ``province`` text (deprecated but still accepted).
 	"""
 	country_code = retailer_country_code(retailer)
+	first_name, last_name = _person_name(retailer)
 	address = {
+		"firstName": first_name,
+		"lastName": last_name,
 		"address1": retailer.address_line1 or "",
 		"address2": retailer.address_line2 or "",
 		"city": retailer.city or "",

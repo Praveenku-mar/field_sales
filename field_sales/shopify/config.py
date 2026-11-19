@@ -32,7 +32,9 @@ DEFAULT_API_VERSION = "2026-10"
 # Every scope the connector's queries and the subscribed webhooks need.
 DEFAULT_SCOPES = (
 	"read_products,read_inventory,read_locations,write_customers,read_customers,"
-	"write_draft_orders,read_draft_orders,write_orders,read_orders"
+	"write_draft_orders,read_draft_orders,write_orders,read_orders,"
+	# fulfillmentOrderMove: commit an order's stock at the rep's location (assign_order_location).
+	"write_merchant_managed_fulfillment_orders"
 )
 
 # Shopify's documented format for a shop domain, anchored at both ends.

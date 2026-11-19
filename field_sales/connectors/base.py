@@ -335,6 +335,19 @@ class BaseConnector:
 		"""Write the Field Order No and Sales Rep onto an existing store order (e.g. a completed draft)."""
 		return None
 
+	def assign_order_location(self, order_id: str, location_id: str, field_order: Document | None = None) -> int:
+		"""
+		Have the store fulfil (and reserve stock for) an existing order from ``location_id``, the
+		location the rep sold from, instead of the one the store's own routing picked.
+
+		Platforms that route orders to locations themselves should override this; the default
+		does nothing.
+
+		:return: how many of the order's open fulfilment groups were moved (0 when none needed it).
+		:raises ConnectorError: the store could not be read or refused the move.
+		"""
+		return 0
+
 	def get_order_url(self, order_id: str | None, draft_id: str | None = None) -> str | None:
 		"""
 		Admin URL of an order on the store (or of its draft when not yet confirmed).

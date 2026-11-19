@@ -16,7 +16,7 @@ embedded = true
 
 [access_scopes]
 # Keep in step with site_config `shopify_app_scopes` (default in field_sales/shopify/config.py).
-scopes = "read_products,read_inventory,read_locations,write_customers,read_customers,write_draft_orders,read_draft_orders,write_orders,read_orders"
+scopes = "read_products,read_inventory,read_locations,write_customers,read_customers,write_draft_orders,read_draft_orders,write_orders,read_orders,write_merchant_managed_fulfillment_orders"
 # Shopify managed installation: Shopify installs the app and grants these scopes before
 # the first load; no install redirect is needed.
 

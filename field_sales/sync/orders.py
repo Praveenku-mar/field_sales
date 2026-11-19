@@ -187,6 +187,7 @@ def push_order(field_order: str):
 		external_id=result.get("order_id") or result.get("draft_id"),
 	)
 	if result.get("order_id"):
+		_assign_order_location(conn, doc, result["order_id"], doc.location_id or conn.settings.default_location_id)
 		enqueue_create_entries(field_order)
 		enqueue_order_confirmation(field_order)
 		notify_order_synced(field_order)
@@ -390,6 +391,8 @@ def link_completed_drafts():
 				with suppress(ConnectorError):
 					# Shopify does not copy a draft's fields to the order made from it.
 					conn.set_order_metafields(order_id, d)
+				# The checkout or admin completion routed it by the store's own rules.
+				_assign_order_location(conn, d, order_id, d.location_id)
 				_carry_draft_payment(conn, d.name, order_id)
 				enqueue_create_entries(d.name)
 				enqueue_order_confirmation(d.name)
@@ -414,6 +417,23 @@ def link_completed_drafts():
 		safe_commit()
 		raise
 
+
+
+def _assign_order_location(conn, field_order, order_id: str, location_id: str | None) -> None:
+	"""
+	Best effort: commit the store order's stock at the location the rep sold from
+	(``connector.assign_order_location``). The order is synced either way; a refusal (e.g. the
+	app lacks the fulfilment-order scope) is in the connector's Sync Log, anything else in the
+	Error Log.
+	"""
+	if not location_id:
+		return
+	try:
+		conn.assign_order_location(order_id, location_id, field_order)
+	except ConnectorError:
+		pass
+	except Exception:
+		frappe.log_error(title=f"Assigning the store order location failed: {field_order.name}")
 
 
 def _carry_draft_payment(conn, field_order: str, order_id: str):

@@ -42,6 +42,8 @@ SHOP_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
 
 CALLBACK_PATH = "/api/method/field_sales.shopify.oauth.callback"
 WEBHOOK_PATH = "/api/method/field_sales.shopify.webhooks.receive"
+# Store data (stock, products, orders): the endpoint client-credentials sites use too.
+STORE_WEBHOOK_PATH = "/api/method/field_sales.api.webhooks.receive"
 APP_HOME_PATH = "/fieldsales"
 
 

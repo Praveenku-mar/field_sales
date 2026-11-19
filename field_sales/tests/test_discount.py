@@ -65,7 +65,9 @@ class TestDiscount(IntegrationTestCase):
 		self.validate_as(self.rep_user, doc)
 		self.assertEqual(flt(doc.net_total), 1000)
 		self.assertEqual(flt(doc.discount_amount), 25)
-		self.assertEqual(flt(doc.grand_total), 1000 + 50 - 25)  # 5% GST
+		# 5% GST on the discounted value (975), not on the net total.
+		self.assertEqual(flt(doc.tax_amount), 48.75)
+		self.assertEqual(flt(doc.grand_total), 1000 - 25 + 48.75)
 
 	def test_rep_within_limit_is_allowed(self):
 		self.validate_as(self.rep_user, self.order(5))

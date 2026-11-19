@@ -241,7 +241,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import { callMethod } from '@/utils/api'
 import { isEmbedded } from '@/shopify/embedded'
 import { createMerchantStoreDoc, merchantLocationsUrl } from '@/shopify/merchantSettings'
-import { daysAgo, formatDate, formatDateTime, formatTime } from '@/utils/format'
+import { daysAgo, formatDate, formatDateTime, formatTime, msUntil, nowSql } from '@/utils/format'
 
 const embedded = isEmbedded()
 // Store Connection is a Single; its name is the doctype itself. Inside the Shopify admin the
@@ -394,8 +394,8 @@ async function copyClientId() {
 
 const tokenHint = computed(() => {
   if (!d.value.token_expiry) return 'Not issued yet — fetched automatically on the next sync'
-  const expiry = new Date(String(d.value.token_expiry).replace(' ', 'T'))
-  const ms = expiry - Date.now()
+  // token_expiry is site time: measured on the site's clock, not the browser's.
+  const ms = msUntil(d.value.token_expiry)
   if (ms <= 0) return 'Expired — refreshed automatically on the next call'
   const hours = Math.floor(ms / 3600000)
   const minutes = Math.floor((ms % 3600000) / 60000)
@@ -469,11 +469,6 @@ async function testConnection() {
   }
 }
 
-function nowSql() {
-  const n = new Date()
-  const p = (x) => String(x).padStart(2, '0')
-  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`
-}
 
 // The Settings page header renders Discard / Save Changes from these.
 const isDirty = computed(() => !!doc.isDirty)

@@ -186,9 +186,10 @@ def get_embedded_user() -> str:
 				}
 			).insert(ignore_permissions=True)
 		if not frappe.db.exists("Sales Rep", {"user": email}):
-			frappe.get_doc(
-				{"doctype": "Sales Rep", "user": email, "full_name": "Shopify Admin", "active": 1}
-			).insert(ignore_permissions=True)
+			rep = frappe.get_doc({"doctype": "Sales Rep", "user": email, "full_name": "Shopify Admin", "active": 1})
+			# Not counted against the plan (billing.usage), and embedded_user is only set below.
+			rep.flags.ignore_plan_limit = True
+			rep.insert(ignore_permissions=True)
 		frappe.db.set_single_value("Store Connection", "embedded_user", email)
 		safe_commit()
 	finally:

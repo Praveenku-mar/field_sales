@@ -16,6 +16,7 @@
   "col_break_order",
   "sales_rep",
   "order_date",
+  "submitted_on",
   "delivery_date",
   "location_id",
   "location_name",
@@ -137,6 +138,15 @@
    "search_index": 1,
    "in_list_view": 1,
    "in_standard_filter": 1
+  },
+  {
+   "fieldname": "submitted_on",
+   "fieldtype": "Datetime",
+   "label": "Submitted On",
+   "read_only": 1,
+   "no_copy": 1,
+   "search_index": 1,
+   "description": "Set by the server when the order is submitted; the plan's monthly order limit counts by it."
   },
   {
    "fieldname": "delivery_date",
@@ -512,7 +522,7 @@
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-18 18:00:06.854803",
+ "modified": "2026-11-19 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

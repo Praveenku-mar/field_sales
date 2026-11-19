@@ -21,7 +21,7 @@ from field_sales.commission.api import (
 	get_commission_statements,
 	get_my_commission_summary,
 )
-from field_sales.commission.statements import build_statement, mark_paid
+from field_sales.commission.statements import build_statement, mark_paid, regenerate_statement
 from field_sales.connectors import get_connector
 from field_sales.connectors.shopify import _normalize_order
 from field_sales.field_sales.report.rep_commission_summary.rep_commission_summary import execute as run_summary
@@ -333,6 +333,66 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual((entry.status, flt(entry.reversed_amount)), ("Reversed", 100))
 
 	# -- 6 refund after the statement is paid --------------------------------
+
+	# -- 6b refund while the statement is a Draft (review finding F8) ---------
+
+	def draft_with_refund(self, order_id):
+		"""A 10% plan, a 1,000 order (commission 100) on a Draft statement, then 1 of 4 units refunded."""
+		rep = self.rep(self.plan(f"Draft refund {order_id}", flat_rate=10))
+		self.field_order(rep, [("1", 4, 250)], order_id)
+		line = [{"variant": "1", "qty": 4, "price": 250}]
+		self.reconcile(self.store_order(order_id, line))
+		today = nowdate()
+		statement = build_statement(rep.name, get_first_day(today), get_last_day(today))
+		self.assertEqual(flt(statement.net_payable), 100)
+		refunded = self.store_order(order_id, line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))])
+		self.reconcile(refunded)
+		return statement, refunded
+
+	def test_out_of_date_statement_is_not_approved(self):
+		statement, _refunded = self.draft_with_refund("7107")
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			approve_statement(statement.name)
+		self.assertIn("out of date", str(raised.exception))
+		self.assertEqual(frappe.db.get_value("Commission Statement", statement.name, "docstatus"), 0)
+		# Its entries are still linked: the check's trial rebuild was rolled back.
+		self.assertEqual(frappe.db.count("Commission Entry", {"commission_statement": statement.name}), 1)
+
+		# The Desk form / REST submit is held to the same rule.
+		with self.assertRaises(frappe.ValidationError):
+			frappe.get_doc("Commission Statement", statement.name).submit()
+
+	def test_regenerated_statement_approves_with_the_refund_deducted(self):
+		statement, refunded = self.draft_with_refund("7108")
+
+		regenerate_statement(statement.name)
+		result = approve_statement(statement.name)
+
+		self.assertEqual(result["status"], "Approved")
+		self.assertEqual(flt(result["net_payable"]), 75)
+		# Nothing more to book: the statement already deducted the refund.
+		self.reconcile(refunded)
+		self.assertEqual(self.entries(entry_type="Adjustment"), [])
+
+	def test_refund_missed_by_an_approved_statement_is_booked_later(self):
+		# A statement approved before this check, with a refund changed onto the entry in place:
+		# the loss is measured against what the statement paid, so it is still deducted.
+		rep = self.rep(self.plan("Missed refund plan", flat_rate=10))
+		self.field_order(rep, [("1", 4, 250)], "7109")
+		line = [{"variant": "1", "qty": 4, "price": 250}]
+		self.reconcile(self.store_order("7109", line))
+		today = nowdate()
+		statement = build_statement(rep.name, get_first_day(today), get_last_day(today))
+		statement.submit()
+		entry = frappe.db.get_value("Commission Entry", {"entry_type": "Order", "sales_rep": rep.name}, "name")
+		frappe.db.set_value("Commission Entry", entry, "reversed_amount", 25, update_modified=False)
+
+		self.reconcile(self.store_order("7109", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]))
+
+		(adjustment,) = self.entries(entry_type="Adjustment")
+		self.assertEqual(flt(adjustment.amount), -25)
+		self.assertEqual(adjustment.adjusts_entry, entry)
 
 	def test_refund_after_paid_statement_books_adjustment(self):
 		rep = self.rep(self.plan("Adjust plan", flat_rate=10))

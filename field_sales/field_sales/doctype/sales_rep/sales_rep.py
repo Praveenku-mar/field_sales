@@ -7,6 +7,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 from field_sales.permissions import clear_allowed_reps_cache, get_own_rep, is_admin, is_manager_or_admin
+from field_sales.utils.limits import SALES_REPS, check_limit
 
 # What a rep earns and may give away: never set by the rep themselves (see _validate_not_own_terms).
 OWN_TERMS_FIELDS = ("commission_plan", "commission_active", "max_discount_pct")
@@ -85,6 +86,7 @@ class SalesRep(Document):
 			frappe.throw(_("Only a System Manager can change the user of a Sales Rep."), frappe.PermissionError)
 
 		self._validate_not_own_terms()
+		self._check_plan_limit()
 		if self.is_new():
 			check_adoptable_user(self.user)
 
@@ -106,6 +108,24 @@ class SalesRep(Document):
 						_("Only Administrator and Sales Manager can assign roles."),
 						frappe.PermissionError,
 					)
+
+	def _check_plan_limit(self):
+		"""
+		The plan's active-rep limit (``utils.limits``) for every way a rep becomes active: the app's
+		New Sales Rep, a Desk or REST insert, and ticking Active on an inactive rep. Before, only
+		``api.create_sales_rep`` checked it (review finding F6).
+
+		The embedded Shopify admin's own rep is not counted (``billing.usage``), nor limited here.
+		"""
+		if self.flags.ignore_plan_limit or not cint(self.active):
+			return
+		if not self.is_new():
+			before = self.get_doc_before_save()
+			if before is None or cint(before.active):
+				return
+		if self.user and self.user == frappe.db.get_single_value("Store Connection", "embedded_user"):
+			return
+		check_limit(SALES_REPS)
 
 	def _validate_not_own_terms(self):
 		"""

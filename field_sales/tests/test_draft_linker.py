@@ -13,6 +13,8 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now_datetime, nowdate
 
+from field_sales.utils.store import set_store_value
+
 APP = __name__.split(".", 1)[0]
 sync_orders = importlib.import_module(f"{APP}.sync.orders")
 PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[
@@ -24,7 +26,7 @@ class TestDraftLinker(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.started = now_datetime()
-		frappe.db.set_single_value("Store Connection", {"enabled": 1, "platform": PLATFORM})
+		set_store_value({"enabled": 1, "platform": PLATFORM})
 		user = frappe.get_doc(
 			{
 				"doctype": "User",

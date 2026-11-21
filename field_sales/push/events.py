@@ -72,7 +72,8 @@ def notify_low_stock(products: list[tuple[str, float]], digest: bool = False) ->
 		return
 	# Recipients first: with nobody to tell, the products must not be marked as reported,
 	# or a manager added later would miss them for a day.
-	users = [u for u in users_with_roles(LOW_STOCK_ROLES) if u != "Administrator"]
+	store = frappe.db.get_value("Platform Product", products[0][0], "store")
+	users = [u for u in users_with_roles(LOW_STOCK_ROLES, store) if u != "Administrator"]
 	if not users:
 		return
 	fresh = []
@@ -87,12 +88,17 @@ def notify_low_stock(products: list[tuple[str, float]], digest: bool = False) ->
 
 	if digest and len(fresh) >= LOW_STOCK_DIGEST_MIN:
 		subject = _("{0} products are low on stock").format(len(fresh))
-		notify_users(users, "low_stock_digest", "Platform Product", None, subject, params={"count": len(fresh)})
+		notify_users(
+			users, "low_stock_digest", "Platform Product", None, subject, params={"count": len(fresh)}
+		)
 		return
 
 	for name, qty in fresh:
-		row = frappe.db.get_value("Platform Product", name, ["product_title", "variant_title"], as_dict=True) or {}
-		title = " – ".join(t for t in (row.get("product_title"), row.get("variant_title")) if t) or name
+		row = (
+			frappe.db.get_value("Platform Product", name, ["product_title", "variant_title"], as_dict=True)
+			or {}
+		)
+		title = " \u2013 ".join(t for t in (row.get("product_title"), row.get("variant_title")) if t) or name
 		subject = _("Low stock: {0} has {1} left").format(f"<b>{escape_html(title)}</b>", flt(qty))
 		notify_users(
 			users, "low_stock", "Platform Product", name, subject, params={"product": title, "qty": flt(qty)}

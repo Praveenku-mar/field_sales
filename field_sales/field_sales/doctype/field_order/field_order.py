@@ -6,13 +6,14 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.model.naming import make_autoname
 from frappe.utils import flt, now_datetime
 
 from field_sales.commission.engine import enqueue_create_entries
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.payments.razorpay import cancel_link_for_cancelled_order
-from field_sales.permissions import get_allowed_reps, is_admin
+from field_sales.permissions import MANAGER_ROLES, get_allowed_reps, is_admin
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import (
 	fetch_live_stock,
@@ -23,9 +24,10 @@ from field_sales.sync.stock import (
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.limits import ORDERS_PER_MONTH, check_limit
 from field_sales.utils.money import site_currency
+from field_sales.utils.store import order_series
 
 # May set a line's rate other than the product's price.
-PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
+PRICE_OVERRIDE_ROLES = MANAGER_ROLES
 # Written only by the store sync (db_set); location_id is the user's pick and is validated instead.
 SYNC_FIELDS = (
 	"platform",
@@ -64,6 +66,15 @@ class FieldOrder(Document):
 	# ------------------------------------------------------------------
 	# Frappe hooks
 	# ------------------------------------------------------------------
+
+	def autoname(self):
+		"""Per-store numbers on the shared site (utils/store.py -> order_series).
+
+		Left unnamed otherwise, so Frappe applies the doctype's ``naming_series:`` as before.
+		"""
+		series = order_series(self.store)
+		if series:
+			self.name = make_autoname(series, doc=self)
 
 	def validate(self):
 		self._keep_sync_fields()
@@ -143,20 +154,27 @@ class FieldOrder(Document):
 		)
 		if stored.sync_status == "Pending":
 			frappe.throw(
-				_("Order {0} is being sent to the store. Cancel it once that has finished.").format(self.name),
+				_("Order {0} is being sent to the store. Cancel it once that has finished.").format(
+					self.name
+				),
 				title=_("Sync in progress"),
 			)
 		if not (stored.external_order_id or stored.external_draft_id):
 			return
 
-		store_ref = stored.store_order_name or stored.store_draft_name or stored.external_order_id or stored.external_draft_id
+		store_ref = (
+			stored.store_order_name
+			or stored.store_draft_name
+			or stored.external_order_id
+			or stored.external_draft_id
+		)
 		try:
 			conn = get_connector()
 		except frappe.ValidationError:
 			frappe.throw(
 				_(
-					"Order {0} is on the store as {1}, but the Store Connection is off, so it cannot be checked "
-					"there. Turn the Store Connection on, then cancel."
+					"Order {0} is on the store as {1}, but the store connection is off, so it cannot be checked "
+					"there. Turn the store connection on, then cancel."
 				).format(self.name, store_ref),
 				title=_("Store not connected"),
 			)
@@ -168,7 +186,9 @@ class FieldOrder(Document):
 			order = conn.get_order(order_id)
 		except ConnectorError as e:
 			frappe.throw(
-				_("Could not check order {0} on the store, so it was not cancelled: {1}").format(store_ref, e.message),
+				_("Could not check order {0} on the store, so it was not cancelled: {1}").format(
+					store_ref, e.message
+				),
 				title=_("Store unavailable"),
 			)
 
@@ -257,18 +277,18 @@ class FieldOrder(Document):
 			return
 		if visit.sales_rep not in get_allowed_reps():
 			frappe.throw(
-				_("Visit {0} belongs to another sales rep. Pick one of your own visits or clear the Visit.").format(
-					self.visit
-				),
+				_(
+					"Visit {0} belongs to another sales rep. Pick one of your own visits or clear the Visit."
+				).format(self.visit),
 				frappe.PermissionError,
 			)
 
 	def _validate_location(self):
 		"""
-		A draft sells from one location: the Store Connection default when none is picked, and
+		A draft sells from one location: the Store's default when none is picked, and
 		otherwise one of its ``Sell from here`` locations.
 
-		Skipped while the Store Connection has no locations, so orders can be made before it is set up.
+		Skipped while the Store has no locations, so orders can be made before it is set up.
 		"""
 		if self.docstatus != 0:
 			return
@@ -280,7 +300,9 @@ class FieldOrder(Document):
 			default = next((loc["location_id"] for loc in locations.values() if loc["is_default"]), None)
 			if not default:
 				frappe.throw(
-					_("The store has no default sell-from location. Pick one on the order, or set a default in Settings.")
+					_(
+						"The store has no default sell-from location. Pick one on the order, or set a default in Settings."
+					)
 				)
 			self.location_id = default
 		if self.location_id not in locations:
@@ -317,9 +339,7 @@ class FieldOrder(Document):
 		for row in self.items:
 			qty = flt(row.qty)
 			if qty <= 0:
-				frappe.throw(
-					_("Row {0}: Quantity must be greater than 0.").format(row.idx)
-				)
+				frappe.throw(_("Row {0}: Quantity must be greater than 0.").format(row.idx))
 			if qty != int(qty):
 				frappe.throw(_("Row {0}: Quantity must be a whole number.").format(row.idx))
 
@@ -334,15 +354,18 @@ class FieldOrder(Document):
 			return
 		status = dict(
 			frappe.get_all(
-				"Platform Product", filters={"name": ("in", list(products))}, fields=["name", "status"], as_list=True
+				"Platform Product",
+				filters={"name": ("in", list(products))},
+				fields=["name", "status"],
+				as_list=True,
 			)
 		)
 		for row in self.items:
 			if row.product and status.get(row.product, "Active") != "Active":
 				frappe.throw(
-					_("Row {0}: {1} is {2} on the store and cannot be ordered. Remove it from the order.").format(
-						row.idx, row.product_title or row.product, _(status[row.product])
-					)
+					_(
+						"Row {0}: {1} is {2} on the store and cannot be ordered. Remove it from the order."
+					).format(row.idx, row.product_title or row.product, _(status[row.product]))
 				)
 
 	def _validate_no_duplicate_products(self):
@@ -374,12 +397,13 @@ class FieldOrder(Document):
 			return
 		if percent <= 0 or frappe.session.user == "Administrator":
 			return
-		if {"Sales Manager", "System Manager"} & set(frappe.get_roles()):
+		if MANAGER_ROLES & set(frappe.get_roles()):
 			return
 
-		rep = frappe.db.get_value(
-			"Sales Rep", self.sales_rep, ["full_name", "max_discount_pct"], as_dict=True
-		) or frappe._dict()
+		rep = (
+			frappe.db.get_value("Sales Rep", self.sales_rep, ["full_name", "max_discount_pct"], as_dict=True)
+			or frappe._dict()
+		)
 		limit = flt(rep.max_discount_pct)
 		name = rep.full_name or self.sales_rep or frappe.session.user
 		if limit <= 0:
@@ -402,7 +426,9 @@ class FieldOrder(Document):
 			live = fetch_live_stock([row.product for row in self.items], self.location_id)
 		except ConnectorError as e:
 			frappe.throw(
-				_("Could not check live stock on the store, so the order was not submitted: {0}").format(e.message),
+				_("Could not check live stock on the store, so the order was not submitted: {0}").format(
+					e.message
+				),
 				title=_("Live stock unavailable"),
 			)
 
@@ -416,10 +442,7 @@ class FieldOrder(Document):
 		for row in self.items:
 			if row.stock_warning:
 				frappe.throw(
-					_(
-						"Row {0}: <b>{1}</b> exceeds available stock — "
-						"only {2} unit(s) available."
-					).format(
+					_("Row {0}: <b>{1}</b> exceeds available stock — only {2} unit(s) available.").format(
 						row.idx,
 						row.product_title or row.product,
 						flt(row.available_qty),
@@ -437,7 +460,7 @@ class FieldOrder(Document):
 		    (PRICE_OVERRIDE_ROLES): the rate is sent to the store as the line's price.
 		    A saved row whose product and rate are unchanged keeps its rate, so a rep's
 		    save does not undo a manager's price (or move a draft to a newer store price).
-		  - amount = qty × rate
+		  - amount = qty x rate
 		  - stock_warning = 1  iff  track_inventory is set on the product
 		                            AND qty > available_qty
 
@@ -472,9 +495,7 @@ class FieldOrder(Document):
 			row.amount = flt(flt(row.qty) * flt(row.rate), row.precision("amount"))
 
 			tracks = product.track_inventory if product else 0
-			row.stock_warning = (
-				1 if tracks and flt(row.qty) > flt(row.available_qty) else 0
-			)
+			row.stock_warning = 1 if tracks and flt(row.qty) > flt(row.available_qty) else 0
 
 	def _compute_totals(self):
 		"""
@@ -500,15 +521,14 @@ class FieldOrder(Document):
 			self.precision("grand_total"),
 		)
 
-
 	def _validate_amounts(self):
 		"""Bounds on what is sent to the store as the order's tax and discount."""
 		if not 0 <= flt(self.tax_percent) <= 100:
 			frappe.throw(_("Tax % must be between 0 and 100."))
-		if (self.docstatus == 0 or self.get("_action") == "submit") and flt(self.tax_percent) not in TAX_SLABS:
-			frappe.throw(
-				_("Tax % must be one of {0}.").format(", ".join(f"{slab}%" for slab in TAX_SLABS))
-			)
+		if (self.docstatus == 0 or self.get("_action") == "submit") and flt(
+			self.tax_percent
+		) not in TAX_SLABS:
+			frappe.throw(_("Tax % must be one of {0}.").format(", ".join(f"{slab}%" for slab in TAX_SLABS)))
 		if flt(self.discount_amount) < 0:
 			frappe.throw(_("Discount cannot be negative."))
 		if flt(self.discount_amount) > flt(self.net_total) + flt(self.tax_amount):
@@ -518,3 +538,5 @@ class FieldOrder(Document):
 def on_doctype_update():
 	# Rep Performance and list filters read orders by rep over a date range.
 	frappe.db.add_index("Field Order", ["sales_rep", "order_date"])
+	# The same, inside one store (every list and report filters by store).
+	frappe.db.add_index("Field Order", ["store", "sales_rep", "order_date"])

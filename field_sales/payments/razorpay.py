@@ -34,13 +34,14 @@ from frappe.utils import (
 )
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
-from field_sales.shopify.config import OAUTH_MODE
-from field_sales.push.notify import notify_users
-from field_sales.sync.notify import users_with_roles
 from field_sales.payments import transactions
-from field_sales.utils.money import site_currency
-from field_sales.utils.urls import public_url
+from field_sales.push.notify import notify_users
+from field_sales.shopify.config import OAUTH_MODE
+from field_sales.sync.notify import users_with_roles
 from field_sales.utils.db import safe_commit
+from field_sales.utils.money import site_currency
+from field_sales.utils.store import get_store, is_multi_store
+from field_sales.utils.urls import public_url
 
 API_BASE = "https://api.razorpay.com/v1"
 REQUEST_TIMEOUT = 20  # seconds
@@ -92,7 +93,19 @@ class RazorpayError(Exception):
 
 
 def get_settings():
-	return frappe.get_single("Razorpay Settings")
+	"""Razorpay Settings; always disabled on the shared App Store site (see ``razorpay_enabled``)."""
+	settings = frappe.get_single("Razorpay Settings")
+	if is_multi_store():
+		settings.enabled = 0
+	return settings
+
+
+def razorpay_enabled() -> bool:
+	"""
+	Payment links are on. Never on the shared multi-store site: Shopify App Store requirement
+	1.1.2 forbids taking payment outside Shopify checkout and recording it through the API.
+	"""
+	return not is_multi_store() and bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled")))
 
 
 def _credentials(settings) -> tuple[str, str]:
@@ -310,10 +323,10 @@ def payment_links_disabled_reason() -> str | None:
 
 	Payment links collect money for store orders outside the store, which Shopify's App
 	Store rules do not allow, so they exist on every install except a Shopify App Store
-	one (Store Connection in OAuth mode). Direct installs (client credentials, or another
+	one (the Store in OAuth mode). Direct installs (client credentials, or another
 	platform such as WooCommerce) keep them.
 	"""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.platform == "Shopify" and settings.shopify_auth_mode == OAUTH_MODE:
 		return _("Payment links are not part of the Shopify App Store edition of Field Sales")
 	return None
@@ -374,7 +387,11 @@ def link_for_confirmation(doc) -> dict | None:
 	if payment_links_disabled_reason() is not None:
 		return None
 	settings = get_settings()
-	if not settings.enabled or flt(doc.grand_total) <= 0 or doc.payment_status in ("Partially Paid", *PAID_STATES):
+	if (
+		not settings.enabled
+		or flt(doc.grand_total) <= 0
+		or doc.payment_status in ("Partially Paid", *PAID_STATES)
+	):
 		return None
 	if doc.payment_status == "Link Sent" and doc.razorpay_payment_link_url and not _expired(doc):
 		return _link_result(doc)
@@ -441,7 +458,7 @@ def get_payment_config() -> dict:
 
 	_check_access()
 	return {
-		"enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
+		"enabled": razorpay_enabled(),
 		"available": payment_links_disabled_reason() is None,
 	}
 
@@ -567,7 +584,8 @@ def webhook():
 	}
 
 	# Refunds and failed payment attempts (payments/refunds.py); payment links below.
-	from field_sales.payments.refunds import WEBHOOK_EVENTS as REFUND_WEBHOOK_EVENTS, handle_webhook_event
+	from field_sales.payments.refunds import WEBHOOK_EVENTS as REFUND_WEBHOOK_EVENTS
+	from field_sales.payments.refunds import handle_webhook_event
 
 	if record["event"] in REFUND_WEBHOOK_EVENTS:
 		with _as_administrator():
@@ -599,7 +617,9 @@ def webhook():
 	other = {c for c in (link.get("currency"), (payment or {}).get("currency")) if c and c != currency}
 	if other:
 		_record_event(
-			record, "Ignored", error=f"Currency {', '.join(sorted(other))} does not match the order's {currency}"
+			record,
+			"Ignored",
+			error=f"Currency {', '.join(sorted(other))} does not match the order's {currency}",
 		)
 		return _respond(200, "ignored: currency mismatch")
 
@@ -666,9 +686,9 @@ def cancel_link_for_cancelled_order(doc) -> None:
 	except RazorpayError as e:
 		doc.add_comment(
 			"Info",
-			_("Payment link {0} could not be cancelled on Razorpay: {1}. Cancel it in the Razorpay Dashboard.").format(
-				escape_html(doc.razorpay_payment_link_id or ""), escape_html(e.message or "")
-			),
+			_(
+				"Payment link {0} could not be cancelled on Razorpay: {1}. Cancel it in the Razorpay Dashboard."
+			).format(escape_html(doc.razorpay_payment_link_id or ""), escape_html(e.message or "")),
 		)
 		return
 	doc.db_set("payment_status", "Link Cancelled", update_modified=False)
@@ -682,7 +702,7 @@ def reconcile_open_links() -> None:
 	state, for webhooks that never arrived. One order's failure does not stop the others.
 	"""
 	try:
-		if not cint(frappe.db.get_single_value("Razorpay Settings", "enabled")):
+		if not razorpay_enabled():
 			return
 		cutoff = frappe.utils.add_days(now_datetime(), -RECONCILE_DAYS)
 		fo = frappe.qb.DocType("Field Order")
@@ -712,7 +732,6 @@ def reconcile_open_links() -> None:
 		frappe.log_error(title="Field Sales scheduled job failed: reconcile_open_links")
 		safe_commit()
 		raise
-
 
 
 def _reconcile_link(name: str, settings) -> None:
@@ -863,7 +882,12 @@ def _stale_link(doc, link_entity: dict) -> bool:
 
 def notify_payment_received(doc) -> None:
 	"""Bell notification and a realtime event for the order's rep and every Sales Manager."""
-	users = {doc.sales_rep, *users_with_roles(PAYMENT_NOTIFY_ROLES)} - {None, "", "Guest", "Administrator"}
+	users = {doc.sales_rep, *users_with_roles(PAYMENT_NOTIFY_ROLES, doc.get("store"))} - {
+		None,
+		"",
+		"Guest",
+		"Administrator",
+	}
 	users = [u for u in sorted(users) if frappe.db.get_value("User", u, "enabled")]
 	if not users:
 		return
@@ -906,7 +930,8 @@ def _already_handled(event_id: str | None, payload_hash: str | None = None) -> b
 	if event_id and frappe.db.exists("Razorpay Webhook Event", {"event_id": event_id, "status": done}):
 		return True
 	return bool(
-		payload_hash and frappe.db.exists("Razorpay Webhook Event", {"payload_hash": payload_hash, "status": done})
+		payload_hash
+		and frappe.db.exists("Razorpay Webhook Event", {"payload_hash": payload_hash, "status": done})
 	)
 
 

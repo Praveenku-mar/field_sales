@@ -7,6 +7,9 @@ store's country (the default country for new Retailers).
 
 The store is the source of truth: product prices come from it and order prices go back to it
 without conversion, so the site must use the store's currency.
+
+On the shared multi-store site (``is_multi_store()``) the site's currency and time zone are never
+changed: they belong to every merchant. Each store's values are only saved on its Store.
 """
 
 from zoneinfo import available_timezones
@@ -15,11 +18,12 @@ import frappe
 from frappe import _
 
 from field_sales.connectors import get_connector
+from field_sales.utils.store import get_store_value, is_multi_store, set_store_value
 
 
 def sync_shop_settings(shop: dict | None = None) -> dict:
 	"""
-	Save the store's currency and time zone on Store Connection and, when Match Store Currency
+	Save the store's currency and time zone on the Store and, when Match Store Currency
 	and Timezone is on, apply them to the site.
 
 	:param shop: ``{"currency", "timezone", "country"}`` already fetched (e.g. by Test Connection); fetched
@@ -41,10 +45,11 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 	if country:
 		values["shop_country"] = country
 	if values:
-		frappe.db.set_single_value("Store Connection", values)
+		set_store_value(values)
 
 	changes = []
-	if frappe.db.get_single_value("Store Connection", "match_shop_settings"):
+	# Never on the shared site: one store's sync would change every other store's currency and dates.
+	if get_store_value("match_shop_settings") and not is_multi_store():
 		if currency and _apply_currency(currency):
 			changes.append(_("Currency set to {0}").format(currency))
 		if timezone and _apply_timezone(timezone):
@@ -122,16 +127,11 @@ def get_mismatch(currency: str | None = None, timezone: str | None = None) -> li
 	"""
 	Differences between the store's settings and the site's, as readable lines.
 
-	:param currency: The store's currency; defaults to the one saved on Store Connection.
-	:param timezone: The store's time zone; defaults to the one saved on Store Connection.
+	:param currency: The store's currency; defaults to the one saved on the Store.
+	:param timezone: The store's time zone; defaults to the one saved on the Store.
 	"""
 	if currency is None or timezone is None:
-		saved = (
-			frappe.db.get_value(
-				"Store Connection", "Store Connection", ["shop_currency", "shop_timezone"], as_dict=True
-			)
-			or {}
-		)
+		saved = get_store_value(["shop_currency", "shop_timezone"], as_dict=True) or {}
 		currency = saved.get("shop_currency") if currency is None else currency
 		timezone = saved.get("shop_timezone") if timezone is None else timezone
 
@@ -151,13 +151,11 @@ def get_mismatch(currency: str | None = None, timezone: str | None = None) -> li
 
 def scheduled_sync(notify_user: str | None = None):
 	"""
-	Daily job, and queued after Store Connection is saved: re-check the store's settings.
+	Daily job, and queued after the Store is saved: re-check the store's settings.
 
-	:param notify_user: User who saved Store Connection; told in a popup if something changed.
+	:param notify_user: User who saved the Store; told in a popup if something changed.
 	"""
-	settings = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["enabled", "match_shop_settings"], as_dict=True
-	)
+	settings = get_store_value(["enabled", "match_shop_settings"], as_dict=True)
 	if not settings or not settings.enabled or not settings.match_shop_settings:
 		return
 

@@ -69,7 +69,8 @@
   "store_order_name",
   "col_break_invoice",
   "confirmation_sent_on",
-  "confirmation_status"
+  "confirmation_status",
+  "store"
  ],
  "fields": [
   {
@@ -516,13 +517,23 @@
    "label": "Confirmation Status",
    "read_only": 1,
    "no_copy": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "in_create": 0,
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-19 14:00:00.000000",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",
@@ -589,6 +600,21 @@
    "share": 0,
    "submit": 0,
    "write": 0
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Store Admin",
+   "share": 1,
+   "submit": 1,
+   "write": 1
   }
  ],
  "sort_field": "order_date",

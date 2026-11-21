@@ -13,7 +13,13 @@ def after_install():
 	  desk access on. Without this, a retailer's login became a System User with the Desk User role,
 	  could open the Desk, and every retailer-login action refused it ("has roles beyond Field
 	  Sales Retailer").
+	- ``create_first_store``: a single-store site gets its Store (code ``MAIN`` until a shop is
+	  connected) so settings and new records have a store; skipped on the shared multi-store site.
+	- ``assign_users_to_store``: its existing users belong to that store.
 	"""
 	from field_sales.patches.v1_0 import retailer_role
+	from field_sales.patches.v2_0 import assign_users_to_store, create_first_store
 
 	retailer_role.execute()
+	create_first_store.execute()
+	assign_users_to_store.execute()

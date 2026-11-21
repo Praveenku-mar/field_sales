@@ -9,7 +9,7 @@
  "module": "Field Sales",
  "name": "Payment Transaction",
  "owner": "Administrator",
- "modified": "2026-11-18 17:49:47.524751",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "field_order": [
   "transaction_type",
@@ -31,7 +31,8 @@
   "razorpay_refund_id",
   "section_break_3",
   "error",
-  "transaction_key"
+  "transaction_key",
+  "store"
  ],
  "fields": [
   {
@@ -170,6 +171,16 @@
    "unique": 1,
    "hidden": 1,
    "description": "Idempotency key: one row per Razorpay object (link, order, payment, refund) or manual payment."
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "permissions": [
@@ -181,6 +192,12 @@
   },
   {
    "role": "Sales Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Store Admin",
    "read": 1,
    "report": 1,
    "export": 1

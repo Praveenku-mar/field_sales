@@ -8,11 +8,12 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, validate_email_address
 
-from field_sales.permissions import STAFF_ROLES, get_own_rep, is_admin
+from field_sales.permissions import MANAGER_ROLES, STAFF_ROLES, get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 from field_sales.utils.geo import has_coords
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.phone import example_number, is_valid
+from field_sales.utils.store import assign_user_to_store, get_store_value
 
 # Written only by the server: the customer sync (_record_result) and Visit (last_visit).
 SERVER_FIELDS = (
@@ -26,7 +27,7 @@ SERVER_FIELDS = (
 	"last_visit",
 )
 # May move a located retailer or change its geofence radius (both decide check-in distance).
-LOCATION_EDIT_ROLES = {"Sales Manager", "System Manager"}
+LOCATION_EDIT_ROLES = MANAGER_ROLES
 # May link or re-point a retailer's login user (the Login Access card and its APIs).
 LOGIN_EDIT_ROLES = LOCATION_EDIT_ROLES
 
@@ -88,6 +89,9 @@ class Retailer(Document):
 			)
 
 	def on_update(self):
+		# A retailer's login belongs to the retailer's store (refuses a user of another store).
+		if self.user and self.store:
+			assign_user_to_store(self.user, self.store)
 		self._push_to_store_if_changed()
 
 	def _push_to_store_if_changed(self):
@@ -95,7 +99,7 @@ class Retailer(Document):
 		# Set by the sync itself when it saves the result, so it does not re-trigger.
 		if self.flags.ignore_sync:
 			return
-		if not frappe.db.get_single_value("Store Connection", "enabled"):
+		if not get_store_value("enabled"):
 			return
 		if any(self.has_value_changed(field) for field in SYNCED_FIELDS):
 			enqueue_push(self.name)
@@ -152,8 +156,10 @@ class Retailer(Document):
 		"""
 		if not self.user:
 			return
-		if not self.is_new() and self.has_value_changed("user") and not (
-			LOGIN_EDIT_ROLES & set(frappe.get_roles())
+		if (
+			not self.is_new()
+			and self.has_value_changed("user")
+			and not (LOGIN_EDIT_ROLES & set(frappe.get_roles()))
 		):
 			frappe.throw(_("Only a Sales Manager can change a retailer's login user"), frappe.PermissionError)
 		if self.user in ("Administrator", "Guest"):
@@ -169,18 +175,13 @@ class Retailer(Document):
 			self.email = frappe.db.get_value("User", self.user, "email") or None
 
 	def _validate_coordinates(self):
-
 		# Converted to a number first: at validate time the value may still be a string
 		# (a value set from a client form), and comparing a string with a number raises.
 		if self.latitude and not (-90 <= flt(self.latitude) <= 90):
-			frappe.throw(
-				_("Latitude must be between -90 and 90. Received: {0}").format(self.latitude)
-			)
+			frappe.throw(_("Latitude must be between -90 and 90. Received: {0}").format(self.latitude))
 
 		if self.longitude and not (-180 <= flt(self.longitude) <= 180):
-			frappe.throw(
-				_("Longitude must be between -180 and 180. Received: {0}").format(self.longitude)
-			)
+			frappe.throw(_("Longitude must be between -180 and 180. Received: {0}").format(self.longitude))
 
 
 def country_code_of(country: str | None) -> str:
@@ -193,11 +194,11 @@ def country_code_of(country: str | None) -> str:
 @frappe.whitelist(methods=["GET"])
 def get_default_country() -> str | None:
 	"""
-	Country for a new retailer: the store's (Store Connection ``shop_country``), else
+	Country for a new retailer: the store's (Store ``shop_country``), else
 	System Settings' country.
 	"""
 	frappe.has_permission("Retailer", "read", throw=True)
-	shop_country = (frappe.db.get_single_value("Store Connection", "shop_country") or "").strip()
+	shop_country = (get_store_value("shop_country") or "").strip()
 	if shop_country:
 		country = frappe.db.get_value("Country", {"code": shop_country.lower()}, "name")
 		if country:

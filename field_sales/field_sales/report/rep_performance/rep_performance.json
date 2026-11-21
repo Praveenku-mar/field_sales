@@ -21,6 +21,9 @@
   },
   {
    "role": "System Manager"
+  },
+  {
+   "role": "Store Admin"
   }
  ]
 }

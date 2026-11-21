@@ -24,6 +24,7 @@ from frappe.utils import get_datetime, now_datetime
 from field_sales.connectors.shopify import clear_oauth_tokens
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
 from field_sales.shopify import config
+from field_sales.utils.store import get_store, set_store_value
 
 DEDUP_TTL_SECONDS = 24 * 60 * 60
 REJECTED_LOG_INTERVAL_SECONDS = 60
@@ -59,7 +60,7 @@ def receive():
 	# Read first: the signature covers these exact bytes.
 	raw_body = frappe.request.get_data()
 	headers = frappe.request.headers
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 
 	if not config.verify_body_hmac(raw_body, headers.get("X-Shopify-Hmac-Sha256"), _secrets(settings)):
 		_log_throttled("INVALID_SIGNATURE", "Webhook signature did not match", 401)
@@ -117,7 +118,7 @@ def handle_uninstalled(shop: str, triggered_at: str | None = None):
 	Background job for ``app/uninstalled``: drop the tokens and disable the connection, so
 	scheduled syncs stop. Ignored if the shop was (re)installed after the uninstall happened.
 	"""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if (settings.store_url or "").lower() != shop:
 		return
 	if triggered_at and settings.installed_on:
@@ -137,14 +138,13 @@ def handle_uninstalled(shop: str, triggered_at: str | None = None):
 
 	now = now_datetime()
 	clear_oauth_tokens()
-	frappe.db.set_single_value(
-		"Store Connection",
+	set_store_value(
 		{
 			"enabled": 0,
 			"uninstalled_on": now,
 			"last_test_status": "Uninstalled from Shopify",
 			"last_tested_on": now,
-		},
+		}
 	)
 	log_sync(platform="Shopify", operation="Uninstall", status="Success", external_id=shop)
 

@@ -14,34 +14,40 @@ so they are safe in document names; each connector converts them back as needed.
 
 Normalized product dict (one per *variant*)::
 
-	{
-		"external_product_id": str,
-		"external_variant_id": str,
-		"external_inventory_id": str | None,
-		"product_title": str,
-		"variant_title": str | None,
-		"sku": str | None,
-		"barcode": str | None,
-		"price": float,
-		"compare_at_price": float | None,
-		"collection": str | None,
-		"image_url": str | None,
-		"status": "Active" | "Draft" | "Archived",
-		"track_inventory": bool,
-	}
+        {
+            "external_product_id": str,
+            "external_variant_id": str,
+            "external_inventory_id": str | None,
+            "product_title": str,
+            "variant_title": str | None,
+            "sku": str | None,
+            "barcode": str | None,
+            "price": float,
+            "compare_at_price": float | None,
+            "collection": str | None,
+            "image_url": str | None,
+            "status": "Active" | "Draft" | "Archived",
+            "track_inventory": bool,
+        }
 
 Webhooks: the store pushes events to ``field_sales.api.webhooks.receive``, which
 verifies and parses them through the connector, so everything after that is
 platform-neutral. A parsed event is::
 
-	{
-		"topic": "stock/update" | "product/update" | "product/delete"
-			| "order/paid" | "order/fulfilled" | "order/cancelled" | "refund/create" | other,
-		"platform_topic": str,       # the store's own topic name, for logs
-		"event_id": str | None,      # unique per delivery; used to drop duplicates
-		"updated_at": str | None,    # ISO timestamp of the change, to order events
-		"payload": dict,             # the store's JSON body, untouched
-	}
+        {
+            "topic": "stock/update"
+            | "product/update"
+            | "product/delete"
+            | "order/paid"
+            | "order/fulfilled"
+            | "order/cancelled"
+            | "refund/create"
+            | other,
+            "platform_topic": str,  # the store's own topic name, for logs
+            "event_id": str | None,  # unique per delivery; used to drop duplicates
+            "updated_at": str | None,  # ISO timestamp of the change, to order events
+            "payload": dict,  # the store's JSON body, untouched
+        }
 
 Normalized order dict (``get_order``), used for commission. Statuses are the
 platform's, mapped to these lowercase words::
@@ -95,7 +101,13 @@ REFUND_CREATE_TOPIC = "refund/create"
 
 #: Topics that make the commission engine re-read the order. "Created" links a draft completed on
 #: the store at once, whatever its payment (a manual or cash payment never sends "paid").
-ORDER_TOPICS = (ORDER_CREATED_TOPIC, ORDER_PAID_TOPIC, ORDER_FULFILLED_TOPIC, ORDER_CANCELLED_TOPIC, REFUND_CREATE_TOPIC)
+ORDER_TOPICS = (
+	ORDER_CREATED_TOPIC,
+	ORDER_PAID_TOPIC,
+	ORDER_FULFILLED_TOPIC,
+	ORDER_CANCELLED_TOPIC,
+	REFUND_CREATE_TOPIC,
+)
 
 NORMALIZED_PRODUCT_KEYS: tuple[str, ...] = (
 	"external_product_id",
@@ -152,7 +164,7 @@ class BaseConnector:
 	"""
 	Abstract base for store connectors. Subclasses override every public method.
 
-	:param settings: The ``Store Connection`` single document.
+	:param settings: The ``Store`` document.
 	"""
 
 	#: Value written to ``Sync Log.platform``; subclasses set it.
@@ -166,7 +178,7 @@ class BaseConnector:
 		"""
 		Turn what was entered as Store URL into the form this platform stores.
 
-		Called by Store Connection's ``validate()`` through the ``CONNECTORS`` registry.
+		Called by Store's ``validate()`` through the ``CONNECTORS`` registry.
 		Raises ``frappe.ValidationError`` for a URL the platform cannot use.
 		"""
 		return (url or "").strip()
@@ -215,16 +227,20 @@ class BaseConnector:
 
 		Normalized customer dict::
 
-			{
-				"external_customer_id": str,
-				"email": str | None,
-				"first_name": str, "last_name": str,
-				"company": str | None,
-				"phone": str | None,
-				"address_line1": str | None, "address_line2": str | None,
-				"city": str | None, "state": str | None, "pincode": str | None,
-				"country_code": str | None,   # ISO alpha-2, upper case
-			}
+		        {
+		            "external_customer_id": str,
+		            "email": str | None,
+		            "first_name": str,
+		            "last_name": str,
+		            "company": str | None,
+		            "phone": str | None,
+		            "address_line1": str | None,
+		            "address_line2": str | None,
+		            "city": str | None,
+		            "state": str | None,
+		            "pincode": str | None,
+		            "country_code": str | None,  # ISO alpha-2, upper case
+		        }
 
 		:param cursor: Opaque cursor from the previous page's ``next_cursor``; ``None`` for the first page.
 		:return: ``{"items": [normalized customer, ...], "next_cursor": str | None}``
@@ -236,7 +252,7 @@ class BaseConnector:
 		Get available quantity per inventory item at one location.
 
 		:param inventory_ids: ``external_inventory_id`` values from normalized products.
-		:param location_id: Platform location id (``Store Connection.default_location_id``).
+		:param location_id: Platform location id (``Store.default_location_id``).
 		:return: ``{inventory_id: qty}``; ids with no stock record at the location map to 0.
 		"""
 		raise NotImplementedError
@@ -258,7 +274,7 @@ class BaseConnector:
 		Push a submitted Field Order to the store.
 
 		The retailer must already exist on the store (``external_customer_id``).
-		``Store Connection.order_mode`` decides whether a draft or a confirmed
+		``Store.order_mode`` decides whether a draft or a confirmed
 		order (payment pending) is created. Totals must match the Field Order:
 		its tax and discount are sent explicitly, not recalculated by the store.
 
@@ -337,7 +353,9 @@ class BaseConnector:
 		"""Write the Field Order No and Sales Rep onto an existing store order (e.g. a completed draft)."""
 		return None
 
-	def assign_order_location(self, order_id: str, location_id: str, field_order: Document | None = None) -> int:
+	def assign_order_location(
+		self, order_id: str, location_id: str, field_order: Document | None = None
+	) -> int:
 		"""
 		Have the store fulfil (and reserve stock for) an existing order from ``location_id``, the
 		location the rep sold from, instead of the one the store's own routing picked.

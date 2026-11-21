@@ -4,7 +4,7 @@
 """
 Settings the merchant manages from inside the Shopify admin (embedded app).
 
-Store Connection and Email Account are System Manager doctypes; the embedded user is a Sales
+Store and Email Account are System Manager doctypes; the embedded user is a Sales
 Manager. These endpoints let a manager change only the merchant-facing settings — locations,
 default location, order mode, product sync schedule, invoice details, the commission switch and
 the outgoing email account — and only on a request signed by the connected shop's session token
@@ -21,12 +21,12 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-from field_sales.utils.guards import is_system_manager
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.db import safe_commit
+from field_sales.utils.guards import is_system_manager
+from field_sales.utils.store import get_store, get_store_value
 
-MANAGER_ROLES = {"System Manager", "Sales Manager"}
-
-# Store Connection fields the merchant may change (the Settings forms send the whole doc).
+# Store fields the merchant may change (the Settings forms send the whole doc).
 EDITABLE_FIELDS = (
 	"order_mode",
 	"product_sync_frequency",
@@ -95,25 +95,26 @@ def _require_merchant() -> None:
 	if is_system_manager():
 		return
 	shop = getattr(frappe.local, "shopify_shop", None)
-	store = (frappe.db.get_single_value("Store Connection", "store_url") or "").lower()
+	store = (get_store_value("store_url") or "").lower()
 	if shop and shop == store and MANAGER_ROLES & set(frappe.get_roles()):
 		return
 	frappe.throw(_("Only the store's managers can change these settings"), frappe.PermissionError)
 
 
 # ----------------------------------------------------------------------
-# Store Connection
+# Store
 # ----------------------------------------------------------------------
 
 
 @frappe.whitelist(methods=["GET"])
 def get_store_settings() -> dict:
-	"""The merchant-facing part of Store Connection, shaped like a document for the Settings forms."""
+	"""The merchant-facing part of the Store, shaped like a document for the Settings forms."""
 	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	values = {f: settings.get(f) for f in (*READ_FIELDS, *EDITABLE_FIELDS)}
-	values["doctype"] = "Store Connection"
+	values["doctype"] = "Store"
+	values["name"] = settings.name
 	values["locations"] = [
 		{"doctype": "Store Location", **{f: row.get(f) for f in LOCATION_FIELDS}}
 		for row in settings.locations
@@ -130,7 +131,7 @@ def save_store_settings(values: dict | str) -> dict:
 	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
 	values = frappe.parse_json(values) or {}
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	before_default = settings.default_location_id
 
 	for field in EDITABLE_FIELDS:
@@ -158,16 +159,9 @@ def save_store_settings(values: dict | str) -> dict:
 
 def _queue_product_sync() -> None:
 	"""Like ``sync.products.enqueue_sync()``, but only once this request's save is committed."""
-	from field_sales.sync.products import JOB_ID
+	from field_sales.sync.products import enqueue_sync
 
-	frappe.enqueue(
-		"field_sales.sync.products.sync_products",
-		queue="long",
-		timeout=1500,
-		job_id=JOB_ID,
-		deduplicate=True,
-		enqueue_after_commit=True,
-	)
+	enqueue_sync(enqueue_after_commit=True)
 
 
 @frappe.whitelist(methods=["GET"])
@@ -185,7 +179,7 @@ def setup_new_store() -> None:
 	Background job after an install: if no default location is set yet, use the store's first
 	location (ticked Sell from here) and start the first product sync. Never overrides a choice.
 	"""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.default_location_id or not settings.enabled:
 		return
 	from field_sales.connectors import get_connector

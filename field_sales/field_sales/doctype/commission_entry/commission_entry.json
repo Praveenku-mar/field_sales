@@ -38,7 +38,8 @@
   "adjustment_section",
   "adjustment_reason",
   "adjusts_entry",
-  "dedupe_key"
+  "dedupe_key",
+  "store"
  ],
  "fields": [
   {
@@ -270,10 +271,20 @@
    "read_only": 1,
    "no_copy": 1,
    "print_hide": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "links": [],
- "modified": "2026-11-18 16:59:09.233868",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Commission Entry",
@@ -314,6 +325,18 @@
    "share": 0,
    "write": 0,
    "role": "Field Sales Rep"
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 0,
+   "write": 1,
+   "role": "Store Admin"
   }
  ],
  "sort_field": "creation",

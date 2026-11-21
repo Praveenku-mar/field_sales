@@ -12,6 +12,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
 from field_sales.api import create_order, set_order_location
+from field_sales.utils.store import get_store, set_store_value
 
 MAIN = "100"
 WAREHOUSE = "200"
@@ -21,8 +22,7 @@ CLOSED = "300"  # in the table, but not ticked
 class TestOrderLocationSwitch(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
@@ -30,17 +30,27 @@ class TestOrderLocationSwitch(IntegrationTestCase):
 				"shopify_api_version": "2026-10",
 				"default_location_id": MAIN,
 				"default_location_name": "Main",
-			},
+			}
 		)
-		settings = frappe.get_doc("Store Connection")
+		settings = get_store()
 		settings.set("locations", [])
-		for location_id, name, sell_from in ((MAIN, "Main", 1), (WAREHOUSE, "Warehouse", 1), (CLOSED, "Closed", 0)):
-			settings.append("locations", {"location_id": location_id, "location_name": name, "sell_from": sell_from})
+		for location_id, name, sell_from in (
+			(MAIN, "Main", 1),
+			(WAREHOUSE, "Warehouse", 1),
+			(CLOSED, "Closed", 0),
+		):
+			settings.append(
+				"locations", {"location_id": location_id, "location_name": name, "sell_from": sell_from}
+			)
 		settings.flags.ignore_mandatory = True
 		settings.save(ignore_permissions=True)
 
 		self.rep_user = self.user("switch.rep@example.com")
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user}).insert(ignore_permissions=True).name
+		self.rep = (
+			frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user})
+			.insert(ignore_permissions=True)
+			.name
+		)
 		self.retailer = (
 			frappe.get_doc(
 				{
@@ -62,7 +72,9 @@ class TestOrderLocationSwitch(IntegrationTestCase):
 		frappe.db.rollback()
 
 	def user(self, email):
-		user = frappe.get_doc({"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0})
+		user = frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0}
+		)
 		user.insert(ignore_permissions=True)
 		user.add_roles("Field Sales Rep")
 		return user.name

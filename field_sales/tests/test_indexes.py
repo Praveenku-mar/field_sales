@@ -27,6 +27,10 @@ EXPECTED = (
 	("Payment Transaction", ("currency",)),
 	("Platform Product", ("external_product_id",)),
 	("Field Order", ("payment_status",)),
+	("Field Order", ("store", "sales_rep", "order_date")),
+	("Visit", ("store", "sales_rep", "visit_date")),
+	("Retailer", ("store",)),
+	("Sync Log", ("store",)),
 )
 
 

@@ -13,20 +13,20 @@ from field_sales import commands
 from field_sales.shopify import billing
 from field_sales.utils.anonymise import anonymise_inactive_retailers
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS, check_limit
+from field_sales.utils.store import set_store_value
 
 
 class DataProtectionCase(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"enabled": 0,
 				"platform": "Shopify",
 				"shopify_auth_mode": "Client Credentials",
-				"plan_limits": None,
-			},
+			}
 		)
+		frappe.db.set_single_value("Store Connection", "plan_limits", None)
 		self.addCleanup(billing.clear_cache)
 
 	def tearDown(self):
@@ -61,7 +61,7 @@ class DataProtectionCase(IntegrationTestCase):
 class TestInactiveAnonymisation(DataProtectionCase):
 	def test_off_by_default(self):
 		old = self.retailer("Old Inactive", "Inactive", 400)
-		frappe.db.set_single_value("Store Connection", "retailer_inactive_anonymise_days", 0)
+		set_store_value("retailer_inactive_anonymise_days", 0)
 		anonymise_inactive_retailers()
 		self.assertEqual(frappe.db.get_value("Retailer", old, "retailer_name"), "Old Inactive")
 
@@ -69,7 +69,7 @@ class TestInactiveAnonymisation(DataProtectionCase):
 		old = self.retailer("Old Inactive", "Inactive", 400)
 		recent = self.retailer("Recent Inactive", "Inactive", 10)
 		active = self.retailer("Old Active", "Active", 400)
-		frappe.db.set_single_value("Store Connection", "retailer_inactive_anonymise_days", 365)
+		set_store_value("retailer_inactive_anonymise_days", 365)
 		with patch.object(frappe.db, "commit"):
 			anonymise_inactive_retailers()
 		row = frappe.db.get_value("Retailer", old, ["retailer_name", "email", "owner_name"], as_dict=True)
@@ -81,14 +81,13 @@ class TestInactiveAnonymisation(DataProtectionCase):
 
 class TestPlanLimits(DataProtectionCase):
 	def oauth(self, limits):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"shopify_auth_mode": "OAuth",
 				"store_url": "plan-shop.myshopify.com",
-				"plan_limits": frappe.as_json(limits),
-			},
+			}
 		)
+		frappe.db.set_single_value("Store Connection", "plan_limits", frappe.as_json(limits))
 
 	def test_client_credentials_is_never_limited(self):
 		frappe.db.set_single_value(

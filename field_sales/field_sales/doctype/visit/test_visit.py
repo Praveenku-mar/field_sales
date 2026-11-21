@@ -5,8 +5,12 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
+from field_sales.utils.store import set_store_value
+
 APP = __name__.split(".", 1)[0]
-PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[APP]
+PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[
+	APP
+]
 
 
 def make_rep(email="doctype.rep@example.com"):
@@ -55,7 +59,7 @@ def make_product(external_id="doctype-1"):
 class TestVisit(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": PLATFORM})
+		set_store_value({"enabled": 0, "platform": PLATFORM})
 		self.rep = make_rep()
 		self.retailer = make_retailer(self.rep)
 
@@ -64,7 +68,13 @@ class TestVisit(IntegrationTestCase):
 
 	def visit(self, **values):
 		return frappe.get_doc(
-			{"doctype": "Visit", "sales_rep": self.rep, "retailer": self.retailer, "visit_date": nowdate(), **values}
+			{
+				"doctype": "Visit",
+				"sales_rep": self.rep,
+				"retailer": self.retailer,
+				"visit_date": nowdate(),
+				**values,
+			}
 		)
 
 	def test_planned_visit_saves(self):

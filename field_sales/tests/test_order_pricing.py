@@ -6,6 +6,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import flt, nowdate
 
 from field_sales.connectors.shopify import _draft_line_item, _order_line_item
+from field_sales.utils.store import set_store_value
 
 SHOP = "test-shop.myshopify.com"
 PRICE = 100
@@ -17,9 +18,9 @@ class TestOrderPricing(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# set_single_value does not validate; everything rolls back after each test.
-		frappe.db.set_single_value("Store Connection", {"platform": "Shopify", "enabled": 1, "store_url": SHOP})
+		set_store_value({"platform": "Shopify", "enabled": 1, "store_url": SHOP})
 		# The site's live sell-from rows would need a default; these tests assume no locations.
-		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
+		frappe.db.delete("Store Location", {"parenttype": "Store"})
 		self.product = frappe.get_doc(
 			{
 				"doctype": "Platform Product",
@@ -32,7 +33,9 @@ class TestOrderPricing(IntegrationTestCase):
 				"track_inventory": 0,
 			}
 		).insert(ignore_permissions=True)
-		self.manager_user = self.make_user("pricing.manager@example.com", ["Field Sales Rep", "Sales Manager"])
+		self.manager_user = self.make_user(
+			"pricing.manager@example.com", ["Field Sales Rep", "Sales Manager"]
+		)
 		self.manager_rep = self.make_rep(self.manager_user)
 		self.rep_user = self.make_user("pricing.rep@example.com", ["Field Sales Rep"])
 		self.rep = self.make_rep(self.rep_user, reports_to=self.manager_rep.name)
@@ -207,9 +210,15 @@ class TestOrderPricing(IntegrationTestCase):
 
 	def stock_order(self, qty):
 		"""A rep's draft for `qty` of a tracked product with 5 in stock; live stock is off, so stored stock decides."""
-		frappe.db.set_single_value("Store Connection", "default_location_id", "")
+		set_store_value("default_location_id", "")
 		tracked = frappe.get_doc(
-			{**self.product.as_dict(), "name": None, "external_variant_id": "94", "track_inventory": 1, "available_qty": 5}
+			{
+				**self.product.as_dict(),
+				"name": None,
+				"external_variant_id": "94",
+				"track_inventory": 1,
+				"available_qty": 5,
+			}
 		).insert(ignore_permissions=True)
 		frappe.set_user(self.rep_user)
 		try:

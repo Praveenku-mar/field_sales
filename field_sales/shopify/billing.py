@@ -29,8 +29,11 @@ from frappe import _
 from frappe.utils import add_months, cint, get_first_day, nowdate
 
 from field_sales.connectors.shopify import REQUEST_TIMEOUT, is_oauth
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
+from field_sales.utils.store import get_store, get_store_name, get_store_value
 
+# One cached plan per store: f"{CACHE_KEY}:{store}" (_cache_key).
 CACHE_KEY = "field_sales:shopify_active_plan"
 CACHE_SECONDS = 60 * 60
 NO_PLAN = "none"
@@ -42,27 +45,35 @@ query($appId: ID!, $shopId: ID!) {
 }"""
 
 
-def get_active_plan() -> dict:
+def _cache_key(store: str | None = None) -> str:
+	"""The plan cache key of ``store`` (default: the current store): each shop has its own plan."""
+	return f"{CACHE_KEY}:{get_store_name(store) or ''}"
+
+
+def get_active_plan(store: str | None = None) -> dict:
 	"""
-	``{"plan": handle | None, "trial_ends_at": str | None, "known": bool}``.
+	``{"plan": handle | None, "trial_ends_at": str | None, "known": bool}`` for ``store``
+	(default: the current store).
 
 	``known`` is False when the Partner API isn't configured or failed: limits are then not
 	enforced (a lookup problem must not stop reps from working).
 	"""
-	cached = frappe.cache.get_value(CACHE_KEY)
+	store = get_store_name(store)
+	key = _cache_key(store)
+	cached = frappe.cache.get_value(key)
 	if cached:
 		return cached
-	result = _fetch_plan()
+	result = _fetch_plan(store)
 	if result["known"]:
-		frappe.cache.set_value(CACHE_KEY, result, expires_in_sec=CACHE_SECONDS)
+		frappe.cache.set_value(key, result, expires_in_sec=CACHE_SECONDS)
 	return result
 
 
-def clear_cache() -> None:
-	frappe.cache.delete_value(CACHE_KEY)
+def clear_cache(store: str | None = None) -> None:
+	frappe.cache.delete_value(_cache_key(store))
 
 
-def _fetch_plan() -> dict:
+def _fetch_plan(store: str | None = None) -> dict:
 	unknown = {"plan": None, "trial_ends_at": None, "known": False}
 	org_id = (frappe.conf.get("shopify_partner_org_id") or "").strip()
 	token = (frappe.conf.get("shopify_partner_api_token") or "").strip()
@@ -74,7 +85,7 @@ def _fetch_plan() -> dict:
 
 	try:
 		# Also while disabled (e.g. waiting for a reinstall): the plan is the shop's either way.
-		shop_gid = get_connector(require_enabled=False).get_shop_id()
+		shop_gid = get_connector(require_enabled=False, store=store).get_shop_id()
 		response = requests.post(
 			f"https://partners.shopify.com/{org_id}/api/{PARTNER_API_VERSION}/graphql.json",
 			json={"query": ACTIVE_SUBSCRIPTION_QUERY, "variables": {"appId": app_gid, "shopId": shop_gid}},
@@ -105,7 +116,7 @@ def _fetch_plan() -> dict:
 
 def pricing_url() -> str | None:
 	"""Shopify's plan selection page for this shop and app, or ``None`` if the app handle is unknown."""
-	store = (frappe.db.get_single_value("Store Connection", "store_url") or "").lower()
+	store = (get_store_value("store_url") or "").lower()
 	app_handle = (frappe.conf.get("shopify_app_handle") or "").strip()
 	if not store.endswith(".myshopify.com") or not app_handle:
 		return None
@@ -125,7 +136,7 @@ def plan_limits() -> dict:
 
 def check_limit(kind: str) -> None:
 	"""``field_sales_limit_checks`` hook: refuse one more ``kind`` when the plan's limit is reached."""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.platform != "Shopify" or not is_oauth(settings):
 		return
 	limits = plan_limits()
@@ -155,9 +166,11 @@ def check_limit(kind: str) -> None:
 
 def usage(kind: str) -> int:
 	"""How many of ``kind`` are used now (the embedded app's own Sales Rep is not counted)."""
+	store = get_store_name()
+	in_store = {"store": store} if store else {}
 	if kind == SALES_REPS:
-		embedded_user = frappe.db.get_single_value("Store Connection", "embedded_user")
-		filters = {"active": 1}
+		embedded_user = get_store_value("embedded_user")
+		filters = {"active": 1, **in_store}
 		if embedded_user:
 			filters["user"] = ("!=", embedded_user)
 		return frappe.db.count("Sales Rep", filters)
@@ -167,6 +180,7 @@ def usage(kind: str) -> int:
 		return frappe.db.count(
 			"Field Order",
 			[
+				*([["store", "=", store]] if store else []),
 				["docstatus", "=", 1],
 				["submitted_on", ">=", f"{first} 00:00:00"],
 				["submitted_on", "<", f"{add_months(first, 1)} 00:00:00"],
@@ -178,12 +192,9 @@ def usage(kind: str) -> int:
 @frappe.whitelist(methods=["GET"])
 def get_plan_info() -> dict:
 	"""Settings page: the shop's plan, limits and usage (managers; OAuth mode only)."""
-	if (
-		not ({"System Manager", "Sales Manager"} & set(frappe.get_roles()))
-		and frappe.session.user != "Administrator"
-	):
+	if not (MANAGER_ROLES & set(frappe.get_roles())) and frappe.session.user != "Administrator":
 		frappe.throw(_("Only managers can see the plan"), frappe.PermissionError)
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.platform != "Shopify" or not is_oauth(settings):
 		return {"oauth": False}
 	plan = get_active_plan()

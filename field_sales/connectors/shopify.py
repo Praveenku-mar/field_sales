@@ -4,15 +4,15 @@
 """
 Shopify connector (Admin GraphQL API).
 
-Two auth modes (``Store Connection.shopify_auth_mode``):
+Two auth modes (``Store.shopify_auth_mode``):
 
 - **Client Credentials** (stores in our own Shopify organization): the client
-  id/secret on Store Connection are exchanged for a short-lived access token.
+  id/secret on the Store are exchanged for a short-lived access token.
 - **OAuth** (App Store installs): ``field_sales.shopify.oauth`` stores an
   expiring offline token and its refresh token; the app's credentials and API
   version come from site_config (``field_sales.shopify.config``).
 
-Either way the access token is cached encrypted on Store Connection and renewed
+Either way the access token is cached encrypted on the Store and renewed
 shortly before it expires (or once on a 401).
 """
 
@@ -22,9 +22,9 @@ import json
 import re
 import time
 import unicodedata
+from contextlib import suppress
 from datetime import timedelta
 
-from contextlib import suppress
 import frappe
 import pycountry
 import requests
@@ -45,8 +45,9 @@ from field_sales.connectors.base import (
 	ConnectorError,
 )
 from field_sales.shopify import config as app_config
-from field_sales.utils.phone import to_e164
 from field_sales.utils.db import safe_commit
+from field_sales.utils.phone import to_e164
+from field_sales.utils.store import get_store_name, is_multi_store
 
 # (connect, read) seconds. A short connect limit means an unreachable address (e.g. a broken
 # IPv6 route) is given up quickly and the next one (IPv4) is tried; replies still get 30 s.
@@ -77,14 +78,17 @@ TOPIC_MAP = {
 PRODUCT_VARIANT_LIMIT = 250
 
 # Active locations only, PAGE_SIZE at a time (get_locations pages through all of them).
-LOCATIONS_QUERY = """
+LOCATIONS_QUERY = (
+	"""
 query($cursor: String) {
   locations(first: %d, after: $cursor) {
     pageInfo { hasNextPage endCursor }
     nodes { id name isActive }
   }
 }
-""" % PAGE_SIZE
+"""
+	% PAGE_SIZE
+)
 # A guard against a cursor that never ends, far above any real shop (Plus allows 1,000 locations).
 LOCATION_PAGE_LIMIT = 40
 # The note _order_note() puts on drafts and orders; Shopify copies a draft's note to its order.
@@ -142,14 +146,18 @@ query($ids: [ID!]!, $loc: ID!) {
 
 DRAFT_ORDER_FIELDS = "id name status invoiceUrl order { id name }"
 
-DRAFT_ORDER_CREATE = """
+DRAFT_ORDER_CREATE = (
+	"""
 mutation($input: DraftOrderInput!) {
   draftOrderCreate(input: $input) { draftOrder { %s } userErrors { field message } }
 }
-""" % DRAFT_ORDER_FIELDS
+"""
+	% DRAFT_ORDER_FIELDS
+)
 
 # Store customers, for importing them as Retailers (sync/customers.py import_customers).
-CUSTOMERS_QUERY = """
+CUSTOMERS_QUERY = (
+	"""
 query($cursor: String) {
   customers(first: %d, after: $cursor, sortKey: ID) {
     pageInfo { hasNextPage endCursor }
@@ -163,18 +171,26 @@ query($cursor: String) {
     }
   }
 }
-""" % PAGE_SIZE
+"""
+	% PAGE_SIZE
+)
 
 # Financial statuses that mean the customer paid (all or part) on Shopify.
 STORE_PAID_STATUSES = {"paid", "partially_paid"}
 
-DRAFT_ORDER_QUERY = """
+DRAFT_ORDER_QUERY = (
+	"""
 query($id: ID!) { draftOrder(id: $id) { %s } }
-""" % DRAFT_ORDER_FIELDS
+"""
+	% DRAFT_ORDER_FIELDS
+)
 
-DRAFT_ORDERS_QUERY = """
+DRAFT_ORDERS_QUERY = (
+	"""
 query($ids: [ID!]!) { nodes(ids: $ids) { ... on DraftOrder { %s } } }
-""" % DRAFT_ORDER_FIELDS
+"""
+	% DRAFT_ORDER_FIELDS
+)
 
 DRAFT_ORDER_DELETE = """
 mutation($id: ID!) { draftOrderDelete(input: {id: $id}) { deletedId userErrors { field message } } }
@@ -321,7 +337,7 @@ ORDER_DISCOUNT_CODE = "FIELD-ORDER"
 
 
 class ShopifyConnector(BaseConnector):
-	"""Connector for a single Shopify store configured on Store Connection."""
+	"""Connector for one Shopify store, configured on its Store record."""
 
 	platform = "Shopify"
 
@@ -329,23 +345,23 @@ class ShopifyConnector(BaseConnector):
 		super().__init__(settings)
 		self.shop_domain = normalize_shop_domain(settings.store_url)
 		if not self.shop_domain:
-			frappe.throw(_("Store URL is required on Store Connection"))
+			frappe.throw(_("Store URL is required on the Store"))
 		if not is_myshopify_domain(self.shop_domain):
 			frappe.throw(
-				_("Store URL must be the shop's myshopify.com domain (e.g. your-store.myshopify.com), not {0}").format(
-					self.shop_domain
-				)
+				_(
+					"Store URL must be the shop's myshopify.com domain (e.g. your-store.myshopify.com), not {0}"
+				).format(self.shop_domain)
 			)
 		self.oauth = is_oauth(settings)
 		api_version = app_config.api_version() if self.oauth else settings.shopify_api_version
 		if not api_version:
-			frappe.throw(_("Shopify API Version is required on Store Connection"))
+			frappe.throw(_("Shopify API Version is required on the Store"))
 
 		self.graphql_url = f"https://{self.shop_domain}/admin/api/{api_version}/graphql.json"
 		self.token_url = f"https://{self.shop_domain}/admin/oauth/access_token"
 
 		# Token cached for the life of this instance, so a refresh made here is
-		# reused without re-reading Store Connection.
+		# reused without re-reading the Store.
 		self._token: str | None = None
 		self._token_expiry = None
 		# True once this instance has requested a token itself, so it carries
@@ -439,7 +455,7 @@ class ShopifyConnector(BaseConnector):
 		Create the Field Order No and Sales Rep field definitions on orders and draft orders.
 
 		Safe to run again: a definition that already exists counts as done. Records the time on
-		Store Connection (``metafields_ready_on``) once all of them exist, so it is not repeated.
+		the Store (``metafields_ready_on``) once all of them exist, so it is not repeated.
 
 		:return: ``True`` if every definition exists now; ``False`` if one could not be created
 			(logged in Sync Log; orders still carry the values without a definition).
@@ -465,7 +481,7 @@ class ShopifyConnector(BaseConnector):
 					if codes != {"TAKEN"}:
 						ok = False
 		if ok:
-			frappe.db.set_single_value("Store Connection", "metafields_ready_on", now_datetime())
+			frappe.db.set_value("Store", self.settings.name, "metafields_ready_on", now_datetime())
 		return ok
 
 	def set_order_metafields(self, order_id: str, field_order) -> None:
@@ -498,7 +514,9 @@ class ShopifyConnector(BaseConnector):
 			actions = {a.get("action") for a in node.get("supportedActions") or []}
 			if current == target or "MOVE" not in actions:
 				continue
-			self._graphql(FULFILLMENT_ORDER_MOVE, {"id": node["id"], "loc": target}, operation="Other", ref=field_order)
+			self._graphql(
+				FULFILLMENT_ORDER_MOVE, {"id": node["id"], "loc": target}, operation="Other", ref=field_order
+			)
 			moved += 1
 		return moved
 
@@ -512,7 +530,9 @@ class ShopifyConnector(BaseConnector):
 			data = self._graphql(LOCATIONS_QUERY, {"cursor": cursor}, operation="Other")
 			connection = data.get("locations") or {}
 			locations += [
-				{"id": from_gid(n["id"]), "name": n["name"]} for n in connection.get("nodes") or [] if n.get("isActive")
+				{"id": from_gid(n["id"]), "name": n["name"]}
+				for n in connection.get("nodes") or []
+				if n.get("isActive")
 			]
 			page_info = connection.get("pageInfo") or {}
 			cursor = page_info.get("endCursor")
@@ -522,9 +542,7 @@ class ShopifyConnector(BaseConnector):
 
 	def get_products(self, cursor: str | None = None) -> dict:
 		"""Fetch one page of variants (``PAGE_SIZE`` per page) as normalized product dicts."""
-		data = self._graphql(
-			PRODUCTS_QUERY, {"cursor": cursor}, operation="Product Sync"
-		)
+		data = self._graphql(PRODUCTS_QUERY, {"cursor": cursor}, operation="Product Sync")
 		connection = data.get("productVariants") or {}
 		page_info = connection.get("pageInfo") or {}
 		return {
@@ -614,7 +632,9 @@ class ShopifyConnector(BaseConnector):
 		for variant in variants:
 			variant_id = variant.get("id") if isinstance(variant, dict) else None
 			if not variant_id or variant.get("price") in (None, ""):
-				raise ConnectorError(_("Product webhook has a variant without an id or price."), code="BAD_PAYLOAD")
+				raise ConnectorError(
+					_("Product webhook has a variant without an id or price."), code="BAD_PAYLOAD"
+				)
 			compare_at = variant.get("compare_at_price")
 			prices.append(
 				{
@@ -733,7 +753,7 @@ class ShopifyConnector(BaseConnector):
 
 	def create_order(self, field_order) -> dict:
 		"""
-		Push a submitted Field Order according to Store Connection's Order Mode.
+		Push a submitted Field Order according to the Store's Order Mode.
 
 		- Confirmed: a real order (``orderCreate``) with the Field Order's tax as
 		  an explicit tax line and payment pending, so Shopify shows the same
@@ -765,14 +785,19 @@ class ShopifyConnector(BaseConnector):
 				code="CUSTOMER_MISSING",
 			)
 
-		draft = self._get_draft(field_order.external_draft_id, field_order) if field_order.external_draft_id else None
+		draft = (
+			self._get_draft(field_order.external_draft_id, field_order)
+			if field_order.external_draft_id
+			else None
+		)
 		if not draft and cint(field_order.sync_attempts) > 1:
 			# A retry: an earlier attempt may have created the draft and lost the response.
 			draft = self._find_draft(field_order, retailer)
 		if draft and draft.get("status") == "COMPLETED":
 			return _order_result(draft)
 
-		if self.settings.order_mode != "Confirmed":
+		# The shared App Store site sends drafts only: the buyer pays on Shopify checkout (1.1.2).
+		if self.settings.order_mode != "Confirmed" or is_multi_store():
 			return _order_result(draft or self._create_draft(field_order, retailer))
 
 		order = self._find_order(field_order) or self._create_confirmed_order(field_order, retailer)
@@ -802,7 +827,9 @@ class ShopifyConnector(BaseConnector):
 		names = {}
 		for start in range(0, len(draft_ids), PAGE_SIZE):
 			batch = draft_ids[start : start + PAGE_SIZE]
-			data = self._graphql(DRAFT_ORDERS_QUERY, {"ids": [to_gid("DraftOrder", i) for i in batch]}, operation="Other")
+			data = self._graphql(
+				DRAFT_ORDERS_QUERY, {"ids": [to_gid("DraftOrder", i) for i in batch]}, operation="Other"
+			)
 			for node in data.get("nodes") or []:
 				if node and node.get("name"):
 					names[from_gid(node["id"])] = node["name"]
@@ -870,7 +897,10 @@ class ShopifyConnector(BaseConnector):
 	def _find_order(self, field_order) -> dict | None:
 		"""An order already created for this Field Order (a retry after a lost response)."""
 		# Orders from older versions were found by tag; still look for one, so their retries never duplicate.
-		for query in (f'source_identifier:"{field_order.name}"', f'tag:"{_legacy_field_order_tag(field_order)}"'):
+		for query in (
+			f'source_identifier:"{field_order.name}"',
+			f'tag:"{_legacy_field_order_tag(field_order)}"',
+		):
 			data = self._graphql(ORDER_SEARCH, {"q": query}, operation="Confirm Order", ref=field_order)
 			nodes = (data.get("orders") or {}).get("nodes") or []
 			if nodes:
@@ -896,7 +926,9 @@ class ShopifyConnector(BaseConnector):
 				),
 				code="CANNOT_MARK_PAID",
 			)
-		data = self._graphql(ORDER_MARK_AS_PAID, {"input": {"id": gid}}, operation="Mark Order Paid", ref=field_order)
+		data = self._graphql(
+			ORDER_MARK_AS_PAID, {"input": {"id": gid}}, operation="Mark Order Paid", ref=field_order
+		)
 		paid = (data.get("orderMarkAsPaid") or {}).get("order") or {}
 		return {"financial_status": (paid.get("displayFinancialStatus") or "").lower(), "already_paid": False}
 
@@ -999,7 +1031,7 @@ class ShopifyConnector(BaseConnector):
 			raise ConnectorError(
 				_(
 					"The store's currency is {0} but this site uses {1}. Order prices would be sent in the "
-					"wrong currency. Turn on Match Store Currency and Timezone on Store Connection (or set "
+					"wrong currency. Turn on Match Store Currency and Timezone on the Store (or set "
 					"the site currency to {0}), then retry."
 				).format(self._currency, site_currency),
 				code="CURRENCY_MISMATCH",
@@ -1011,7 +1043,7 @@ class ShopifyConnector(BaseConnector):
 	# ------------------------------------------------------------------
 
 	def _client_id(self) -> str:
-		"""The app's client id: site_config in OAuth mode, Store Connection otherwise."""
+		"""The app's client id: site_config in OAuth mode, the Store otherwise."""
 		return app_config.client_id() if self.oauth else (self.settings.shopify_client_id or "")
 
 	def _client_secret(self) -> str:
@@ -1034,7 +1066,10 @@ class ShopifyConnector(BaseConnector):
 				self._token_expiry = self.settings.token_expiry
 
 			if self._token and (
-				(self._token_expiry and get_datetime(self._token_expiry) > now_datetime() + TOKEN_REFRESH_MARGIN)
+				(
+					self._token_expiry
+					and get_datetime(self._token_expiry) > now_datetime() + TOKEN_REFRESH_MARGIN
+				)
 				or (self.oauth and not self._token_expiry)
 			):
 				return self._token
@@ -1049,7 +1084,7 @@ class ShopifyConnector(BaseConnector):
 		client_secret = self._client_secret()
 		if not client_id or not client_secret:
 			raise ConnectorError(
-				_("Shopify Client ID and Client Secret are required on Store Connection"), code="CONFIG_ERROR"
+				_("Shopify Client ID and Client Secret are required on the Store"), code="CONFIG_ERROR"
 			)
 
 		# The secret is never logged.
@@ -1068,9 +1103,7 @@ class ShopifyConnector(BaseConnector):
 			)
 		except requests.RequestException as e:
 			self._log_token_call("Failed", start, None, log_request, None, str(e), "NETWORK_ERROR")
-			raise ConnectorError(
-				_("Could not reach Shopify: {0}").format(e), code="NETWORK_ERROR"
-			) from e
+			raise ConnectorError(_("Could not reach Shopify: {0}").format(e), code="NETWORK_ERROR") from e
 
 		body = _json_or_none(response)
 		token = (body or {}).get("access_token")
@@ -1089,11 +1122,11 @@ class ShopifyConnector(BaseConnector):
 
 		expiry = add_to_date(now_datetime(), seconds=cint(body.get("expires_in")) or DEFAULT_TOKEN_TTL)
 		# Password fields keep the real value in __Auth and a mask in the field
-		# itself; writing the token with set_single_value alone would store it
+		# itself; writing the token with set_value alone would store it
 		# in plain text, and the next form save would wipe the stored token.
-		set_encrypted_password("Store Connection", "Store Connection", token, "access_token")
-		frappe.db.set_single_value(
-			"Store Connection", {"access_token": "*" * len(token), "token_expiry": expiry}
+		set_encrypted_password("Store", self.settings.name, token, "access_token")
+		frappe.db.set_value(
+			"Store", self.settings.name, {"access_token": "*" * len(token), "token_expiry": expiry}
 		)
 		safe_commit()
 
@@ -1109,13 +1142,15 @@ class ShopifyConnector(BaseConnector):
 		workers refreshing at once would invalidate each other. A worker that waited for the lock
 		uses the token the other one stored instead of refreshing again.
 
-		A missing, expired or rejected refresh token disables Store Connection and raises
+		A missing, expired or rejected refresh token disables the Store and raises
 		``ConnectorError(code="REAUTH_REQUIRED")``: the merchant must open the app from Shopify again.
 
 		:param stale_token: The token this instance already holds (and wants replaced).
 		"""
 		lock = frappe.cache.lock(
-			frappe.cache.make_key(TOKEN_LOCK_KEY), timeout=TOKEN_LOCK_SECONDS, blocking_timeout=TOKEN_LOCK_SECONDS
+			frappe.cache.make_key(f"{TOKEN_LOCK_KEY}:{self.shop_domain}"),
+			timeout=TOKEN_LOCK_SECONDS,
+			blocking_timeout=TOKEN_LOCK_SECONDS,
 		)
 		if not lock.acquire():
 			raise ConnectorError(_("Timed out waiting for another Shopify token refresh"), code="AUTH_FAILED")
@@ -1123,9 +1158,9 @@ class ShopifyConnector(BaseConnector):
 			# End this transaction's snapshot so the reads below see a token another worker committed.
 			safe_commit()
 			current = get_decrypted_password(
-				"Store Connection", "Store Connection", "access_token", raise_exception=False
+				"Store", self.settings.name, "access_token", raise_exception=False
 			)
-			expiry = _stored_datetime("token_expiry")
+			expiry = _stored_datetime(self.settings.name, "token_expiry")
 			if (
 				current
 				and current != stale_token
@@ -1136,9 +1171,9 @@ class ShopifyConnector(BaseConnector):
 				return current
 
 			refresh_token = get_decrypted_password(
-				"Store Connection", "Store Connection", "refresh_token", raise_exception=False
+				"Store", self.settings.name, "refresh_token", raise_exception=False
 			)
-			refresh_expiry = _stored_datetime("refresh_token_expiry")
+			refresh_expiry = _stored_datetime(self.settings.name, "refresh_token_expiry")
 			if not refresh_token:
 				self._require_reauth(_("No Shopify refresh token is stored"))
 			if refresh_expiry and refresh_expiry <= now_datetime():
@@ -1173,7 +1208,13 @@ class ShopifyConnector(BaseConnector):
 			if response.status_code in (400, 401) or (response.ok and not body.get("access_token")):
 				message = _error_text(body, response) or _("No access token in response")
 				self._log_token_call(
-					"Failed", start, response.status_code, log_request, response.text, message, "REAUTH_REQUIRED"
+					"Failed",
+					start,
+					response.status_code,
+					log_request,
+					response.text,
+					message,
+					"REAUTH_REQUIRED",
 				)
 				self._require_reauth(_("Shopify rejected the refresh token: {0}").format(message))
 			if not response.ok:
@@ -1202,9 +1243,11 @@ class ShopifyConnector(BaseConnector):
 	def _require_reauth(self, reason: str):
 		"""Disable the connection, drop the dead tokens, and raise ``REAUTH_REQUIRED``."""
 		message = _("Reinstall required: {0}. Open the app from Shopify admin to reconnect.").format(reason)
-		clear_oauth_tokens()
-		frappe.db.set_single_value(
-			"Store Connection", {"enabled": 0, "last_test_status": message[:140], "last_tested_on": now_datetime()}
+		clear_oauth_tokens(self.settings.name)
+		frappe.db.set_value(
+			"Store",
+			self.settings.name,
+			{"enabled": 0, "last_test_status": message[:140], "last_tested_on": now_datetime()},
 		)
 		safe_commit()
 		self._write_log("Token Refresh", status="Failed", error_code="REAUTH_REQUIRED", error_message=message)
@@ -1265,9 +1308,7 @@ class ShopifyConnector(BaseConnector):
 					error_message=str(e),
 					error_code="NETWORK_ERROR",
 				)
-				raise ConnectorError(
-					_("Could not reach Shopify: {0}").format(e), code="NETWORK_ERROR"
-				) from e
+				raise ConnectorError(_("Could not reach Shopify: {0}").format(e), code="NETWORK_ERROR") from e
 
 			log.update(
 				duration_ms=_elapsed_ms(start),
@@ -1482,7 +1523,9 @@ def _order_line_item(row, currency: str) -> dict:
 def _check_line_item(row) -> None:
 	if not row.external_variant_id:
 		raise ConnectorError(
-			_("Row {0}: {1} is not linked to a Shopify variant").format(row.idx, row.product_title or row.product),
+			_("Row {0}: {1} is not linked to a Shopify variant").format(
+				row.idx, row.product_title or row.product
+			),
 			code="CONFIG_ERROR",
 		)
 	if flt(row.qty) != cint(row.qty):
@@ -1509,7 +1552,10 @@ def _order_tags(field_order) -> list[str]:
 
 def _order_metafields(field_order) -> list[dict]:
 	"""MetafieldInput values for the Field Order No and Sales Rep fields."""
-	full_name, email = frappe.db.get_value("Sales Rep", field_order.sales_rep, ["full_name", "user"]) or (None, None)
+	full_name, email = frappe.db.get_value("Sales Rep", field_order.sales_rep, ["full_name", "user"]) or (
+		None,
+		None,
+	)
 	email = email or field_order.sales_rep
 	values = {
 		"field_order_no": field_order.name,
@@ -1581,7 +1627,9 @@ def _normalize_order(order: dict | None) -> dict:
 				"external_variant_id": from_gid((node.get("variant") or {}).get("id")),
 				"qty": flt(node.get("quantity")),
 				"current_qty": flt(node.get("currentQuantity")),
-				"unit_price": flt(((node.get("originalUnitPriceSet") or {}).get("shopMoney") or {}).get("amount")),
+				"unit_price": flt(
+					((node.get("originalUnitPriceSet") or {}).get("shopMoney") or {}).get("amount")
+				),
 				"discount": discount,
 				"product_type": product.get("productType") or None,
 				"tags": list(product.get("tags") or []),
@@ -1645,7 +1693,11 @@ def _store_payment(order: dict) -> dict | None:
 	if order.get("cancelledAt") or status not in STORE_PAID_STATUSES:
 		return None
 	received = (order.get("totalReceivedSet") or {}).get("shopMoney") or {}
-	paid = [t for t in order.get("transactions") or [] if t.get("status") == "SUCCESS" and t.get("kind") in ("SALE", "CAPTURE")]
+	paid = [
+		t
+		for t in order.get("transactions") or []
+		if t.get("status") == "SUCCESS" and t.get("kind") in ("SALE", "CAPTURE")
+	]
 	latest = max(paid, key=lambda t: t.get("processedAt") or "") if paid else {}
 	return {
 		"amount": flt(received.get("amount")),
@@ -1673,8 +1725,12 @@ def _normalize_variant(variant: dict) -> dict:
 		"barcode": variant.get("barcode") or "",
 		"price": flt(variant.get("price")),
 		"compare_at_price": flt(compare_at) if compare_at is not None else None,
-		"collection": (collections[0].get("title") if collections else None) or product.get("productType") or "",
-		"image_url": (variant.get("image") or {}).get("url") or (product.get("featuredImage") or {}).get("url") or "",
+		"collection": (collections[0].get("title") if collections else None)
+		or product.get("productType")
+		or "",
+		"image_url": (variant.get("image") or {}).get("url")
+		or (product.get("featuredImage") or {}).get("url")
+		or "",
 		# UNLISTED and any future status are treated as not sellable.
 		"status": STATUS_MAP.get(product.get("status"), "Draft"),
 		"track_inventory": bool(inventory_item.get("tracked")),
@@ -1682,15 +1738,17 @@ def _normalize_variant(variant: dict) -> dict:
 
 
 def is_oauth(settings) -> bool:
-	"""True when Store Connection uses the App Store (OAuth) install rather than client credentials."""
+	"""True when the Store uses the App Store (OAuth) install rather than client credentials."""
 	return (settings.get("shopify_auth_mode") or app_config.CLIENT_CREDENTIALS_MODE) == app_config.OAUTH_MODE
 
 
-def save_oauth_tokens(body: dict):
+def save_oauth_tokens(body: dict, store: str | None = None):
 	"""
 	Store a token response from ``/admin/oauth/access_token`` (code exchange or refresh) on
-	Store Connection: access + refresh tokens encrypted, their expiries, granted scopes.
+	the Store: access + refresh tokens encrypted, their expiries, granted scopes.
 	Does not commit.
+
+	:param store: The Store (default: the current / only one).
 
 	:return: The access token's expiry (``None`` for a non-expiring token).
 	"""
@@ -1699,10 +1757,11 @@ def save_oauth_tokens(body: dict):
 	expiry = add_to_date(now, seconds=cint(body["expires_in"])) if body.get("expires_in") else None
 	refresh = body.get("refresh_token")
 	values = {"access_token": "*" * len(token), "token_expiry": expiry}
+	store = get_store_name(store, required=True)
 
-	set_encrypted_password("Store Connection", "Store Connection", token, "access_token")
+	set_encrypted_password("Store", store, token, "access_token")
 	if refresh:
-		set_encrypted_password("Store Connection", "Store Connection", refresh, "refresh_token")
+		set_encrypted_password("Store", store, refresh, "refresh_token")
 		values["refresh_token"] = "*" * len(refresh)
 		values["refresh_token_expiry"] = (
 			add_to_date(now, seconds=cint(body["refresh_token_expires_in"]))
@@ -1710,34 +1769,32 @@ def save_oauth_tokens(body: dict):
 			else None
 		)
 	else:
-		remove_encrypted_password("Store Connection", "Store Connection", "refresh_token")
+		remove_encrypted_password("Store", store, "refresh_token")
 		values.update(refresh_token=None, refresh_token_expiry=None)
 	if body.get("scope"):
 		values["shopify_scopes"] = body["scope"]
-	frappe.db.set_single_value("Store Connection", values)
+	frappe.db.set_value("Store", store, values)
 	return expiry
 
 
-def clear_oauth_tokens() -> None:
+def clear_oauth_tokens(store: str | None = None) -> None:
 	"""Forget the stored access and refresh tokens (uninstall, reauth, shop redact). Does not commit."""
+	store = get_store_name(store)
+	if not store:
+		return
 	for field in ("access_token", "refresh_token"):
-		remove_encrypted_password("Store Connection", "Store Connection", field)
-	frappe.db.set_single_value(
-		"Store Connection",
+		remove_encrypted_password("Store", store, field)
+	frappe.db.set_value(
+		"Store",
+		store,
 		{"access_token": None, "token_expiry": None, "refresh_token": None, "refresh_token_expiry": None},
 	)
 
 
-def _stored_datetime(field: str):
-	"""A Store Connection Datetime straight from the table (``None`` if unset; see Gotchas on Singles)."""
-	singles = frappe.qb.DocType("Singles")
-	rows = (
-		frappe.qb.from_(singles)
-		.select(singles.value)
-		.where((singles.doctype == "Store Connection") & (singles.field == field))
-		.run()
-	)
-	return get_datetime(rows[0][0]) if rows and rows[0][0] else None
+def _stored_datetime(store: str, field: str):
+	"""A Datetime of the Store straight from the table (``None`` if unset)."""
+	value = frappe.db.get_value("Store", store, field)
+	return get_datetime(value) if value else None
 
 
 def normalize_shop_domain(store_url: str | None) -> str:
@@ -1806,7 +1863,9 @@ def _graphql_error(response: requests.Response, body: dict | None) -> ConnectorE
 		)
 
 	if body is None:
-		return ConnectorError(_("Shopify returned an invalid response"), code="INVALID_RESPONSE", http_status=status)
+		return ConnectorError(
+			_("Shopify returned an invalid response"), code="INVALID_RESPONSE", http_status=status
+		)
 
 	if body.get("errors"):
 		errors = body["errors"]
@@ -1820,7 +1879,9 @@ def _graphql_error(response: requests.Response, body: dict | None) -> ConnectorE
 		user_errors = result.get("userErrors") if isinstance(result, dict) else None
 		if user_errors:
 			message = "; ".join(
-				f"{'.'.join(e.get('field') or [])}: {e.get('message')}" if e.get("field") else e.get("message", "")
+				f"{'.'.join(e.get('field') or [])}: {e.get('message')}"
+				if e.get("field")
+				else e.get("message", "")
 				for e in user_errors
 			)
 			return ConnectorError(message, code="USER_ERROR", http_status=status, details=user_errors)

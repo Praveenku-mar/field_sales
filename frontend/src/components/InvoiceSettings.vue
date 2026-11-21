@@ -49,9 +49,9 @@ import EmptyState from '@/components/EmptyState.vue'
 
 const emit = defineEmits(['saved'])
 
-// Store Connection is a Single; its name is the doctype itself.
+// The Store this user works in (boot value `store`).
 // Inside the Shopify admin: the merchant endpoints (managers may not edit Store Connection directly).
-const doc = isEmbedded() ? createMerchantStoreDoc() : createDocumentResource({ doctype: 'Store Connection', name: 'Store Connection' })
+const doc = isEmbedded() ? createMerchantStoreDoc() : createDocumentResource({ doctype: 'Store', name: window.store })
 const d = computed(() => doc.doc || {})
 const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.error || ''))
 

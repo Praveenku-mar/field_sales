@@ -34,11 +34,12 @@ from field_sales.payments.razorpay import (
 	get_settings,
 	request,
 )
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.money import site_currency
 
 REFUND_EVENTS = ("refund.processed", "refund.failed")
 WEBHOOK_EVENTS = (*REFUND_EVENTS, "payment.failed")
-REFUND_ROLES = ("System Manager", "Sales Manager")
+REFUND_ROLES = tuple(MANAGER_ROLES)
 REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,64}")
 
 
@@ -165,7 +166,9 @@ def refundable_payment(store_order_id: str | None, field_order: str | None, amou
 	for payment in payments:
 		if flt(payment.amount) - refunded_on(payment.razorpay_payment_id) + 0.005 >= amount:
 			return payment
-	raise RefundError("AMOUNT_TOO_HIGH", _("The refund is more than what is left to refund on the Razorpay payment"))
+	raise RefundError(
+		"AMOUNT_TOO_HIGH", _("The refund is more than what is left to refund on the Razorpay payment")
+	)
 
 
 def refunded_on(razorpay_payment_id: str) -> float:
@@ -212,7 +215,11 @@ def apply_refund_to_order(field_order: str) -> None:
 		flt(r.amount)
 		for r in frappe.get_all(
 			"Payment Transaction",
-			filters={"reference_order": field_order, "transaction_type": "Refund", "status": ("in", ("Pending", "Processed"))},
+			filters={
+				"reference_order": field_order,
+				"transaction_type": "Refund",
+				"status": ("in", ("Pending", "Processed")),
+			},
 			fields=["amount"],
 		)
 	)
@@ -233,7 +240,9 @@ def apply_refund_to_order(field_order: str) -> None:
 			_(doc.payment_status),
 		),
 	)
-	frappe.publish_realtime(PAYMENT_EVENT, _payment_fields(doc), doctype="Field Order", docname=doc.name, after_commit=True)
+	frappe.publish_realtime(
+		PAYMENT_EVENT, _payment_fields(doc), doctype="Field Order", docname=doc.name, after_commit=True
+	)
 
 
 # ----------------------------------------------------------------------
@@ -280,7 +289,10 @@ def _webhook_refund(event: str, refund: dict, record: dict | None = None) -> tup
 	refund_id = refund.get("id")
 	status = "Processed" if event == "refund.processed" else "Failed"
 	row = refund_id and frappe.db.get_value(
-		"Payment Transaction", {"razorpay_refund_id": refund_id}, ["name", "reference_order", "status"], as_dict=True
+		"Payment Transaction",
+		{"razorpay_refund_id": refund_id},
+		["name", "reference_order", "status"],
+		as_dict=True,
 	)
 	if row:
 		if record is not None:

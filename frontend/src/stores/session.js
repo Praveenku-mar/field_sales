@@ -6,7 +6,7 @@ import { APP_BASE } from '@/utils/base'
 
 // Roles that may open the app at all (checked again on the server). Field Sales
 // Retailer is the customer login: it reaches My Orders only (see the router guard).
-export const APP_ROLES = ['System Manager', 'Sales Manager', 'Field Sales Rep', 'Field Sales Retailer']
+export const APP_ROLES = ['System Manager', 'Store Admin', 'Sales Manager', 'Field Sales Rep', 'Field Sales Retailer']
 
 export function redirectToLogin() {
   const target = window.location.pathname + window.location.search

@@ -18,6 +18,7 @@ from field_sales.sync.stock import (
 	set_location_stock,
 )
 from field_sales.sync.webhooks import process_event
+from field_sales.utils.store import get_store, set_store_value
 
 MAIN = "100"
 WAREHOUSE = "200"
@@ -29,8 +30,7 @@ GET_PRODUCT = "field_sales.connectors.shopify.ShopifyConnector.get_product"
 
 class TestMultiLocation(IntegrationTestCase):
 	def setUp(self):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
@@ -38,12 +38,18 @@ class TestMultiLocation(IntegrationTestCase):
 				"shopify_api_version": "2026-10",
 				"default_location_id": MAIN,
 				"default_location_name": "Main",
-			},
+			}
 		)
-		settings = frappe.get_doc("Store Connection")
+		settings = get_store()
 		settings.set("locations", [])
-		for location_id, name, sell_from in ((MAIN, "Main", 1), (WAREHOUSE, "Warehouse", 1), (CLOSED, "Closed", 0)):
-			settings.append("locations", {"location_id": location_id, "location_name": name, "sell_from": sell_from})
+		for location_id, name, sell_from in (
+			(MAIN, "Main", 1),
+			(WAREHOUSE, "Warehouse", 1),
+			(CLOSED, "Closed", 0),
+		):
+			settings.append(
+				"locations", {"location_id": location_id, "location_name": name, "sell_from": sell_from}
+			)
 		settings.flags.ignore_mandatory = True
 		settings.save(ignore_permissions=True)
 
@@ -99,7 +105,7 @@ class TestMultiLocation(IntegrationTestCase):
 			},
 		}
 
-	# -- Store Connection ----------------------------------------------------
+	# -- Store ---------------------------------------------------------------
 
 	def test_sell_locations_list_default_first_and_skip_unticked(self):
 		self.assertEqual(
@@ -111,7 +117,7 @@ class TestMultiLocation(IntegrationTestCase):
 		)
 
 	def test_default_location_is_added_and_ticked_on_save(self):
-		settings = frappe.get_doc("Store Connection")
+		settings = get_store()
 		settings.default_location_id = "400"
 		settings.flags.ignore_mandatory = True
 		settings.save(ignore_permissions=True)
@@ -124,7 +130,7 @@ class TestMultiLocation(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Store Location", {"location_id": MAIN}, "sell_from"), 1)
 
 	def test_duplicate_location_is_refused(self):
-		settings = frappe.get_doc("Store Connection")
+		settings = get_store()
 		settings.append("locations", {"location_id": WAREHOUSE, "sell_from": 1})
 		settings.flags.ignore_mandatory = True
 		with self.assertRaises(frappe.ValidationError):
@@ -138,14 +144,18 @@ class TestMultiLocation(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Platform Product", self.product.name, "available_qty"), 50)
 
 		set_location_stock(self.product.name, MAIN, 9, "Main")
-		product = frappe.db.get_value("Platform Product", self.product.name, ["available_qty", "stock_updated_at"], as_dict=True)
+		product = frappe.db.get_value(
+			"Platform Product", self.product.name, ["available_qty", "stock_updated_at"], as_dict=True
+		)
 		self.assertEqual(product.available_qty, 9)
 		self.assertIsNotNone(product.stock_updated_at)
 
 		# A second write updates the row instead of adding one.
 		set_location_stock(self.product.name, WAREHOUSE, 5)
 		self.assertEqual(self.stock_row(WAREHOUSE).available_qty, 5)
-		self.assertEqual(frappe.db.count("Product Stock", {"product": self.product.name, "location_id": WAREHOUSE}), 1)
+		self.assertEqual(
+			frappe.db.count("Product Stock", {"product": self.product.name, "location_id": WAREHOUSE}), 1
+		)
 
 	def test_fetch_live_stock_at_another_location(self):
 		with patch(GET_STOCK, return_value={INVENTORY: 4}) as get_stock:
@@ -208,8 +218,8 @@ class TestMultiLocation(IntegrationTestCase):
 		self.assertEqual(doc.items[0].stock_warning, 1)
 
 	def test_without_any_location_rows_use_the_products_stock(self):
-		frappe.db.set_single_value("Store Connection", {"default_location_id": None, "default_location_name": None})
-		frappe.db.delete("Store Location", {"parent": "Store Connection"})
+		set_store_value({"default_location_id": None, "default_location_name": None})
+		frappe.db.delete("Store Location", {"parenttype": "Store"})
 		self.assertEqual(get_location_stock([self.product.name]), {self.product.name: 50})
 
 	def test_submit_check_uses_the_orders_location(self):
@@ -343,7 +353,9 @@ class TestMultiLocation(IntegrationTestCase):
 	# -- Shopify order tags and note ---------------------------------------------
 
 	def test_order_tag_is_field_sales_and_note_carries_the_location(self):
-		order = frappe._dict(name="FO-1", sales_rep="rep@example.com", location_id=WAREHOUSE, location_name="Warehouse, East")
+		order = frappe._dict(
+			name="FO-1", sales_rep="rep@example.com", location_id=WAREHOUSE, location_name="Warehouse, East"
+		)
 		# The order number and rep are metafields now; the location stays in the note.
 		self.assertEqual(_order_tags(order), ["field-sales"])
 		self.assertTrue(_order_note(order).endswith(" · Location Warehouse, East"))
@@ -372,12 +384,16 @@ class TestMultiLocation(IntegrationTestCase):
 			run_patch()
 
 		self.assertEqual(
-			frappe.get_all("Store Location", filters={"parent": "Store Connection"}, fields=["location_id", "sell_from"]),
+			frappe.get_all(
+				"Store Location", filters={"parenttype": "Store"}, fields=["location_id", "sell_from"]
+			),
 			[{"location_id": MAIN, "sell_from": 1}],
 		)
 		row = self.stock_row(MAIN)
 		self.assertEqual(row.available_qty, 50)
 		self.assertEqual(str(row.stock_updated_at), "2026-10-01 10:00:00")
-		self.assertEqual(frappe.db.count("Product Stock", {"location_id": MAIN}), 1)  # untracked product has none
+		self.assertEqual(
+			frappe.db.count("Product Stock", {"location_id": MAIN}), 1
+		)  # untracked product has none
 		self.assertEqual(frappe.db.get_value("Field Order", order.name, "location_id"), MAIN)
 		self.assertEqual(frappe.db.get_value("Field Order", order.name, "location_name"), "Main")

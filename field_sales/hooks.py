@@ -1,7 +1,7 @@
 app_name = "field_sales"
 app_title = "Agamsale"
 app_publisher = "Agamnxt Technologies"
-app_description = "Agamsale is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
+app_description = "Agamsale is a Frappe app that lets a brand's sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
 app_email = "praveenkumar@agamnxt.com"
 app_license = "mit"
 
@@ -182,6 +182,11 @@ permission_query_conditions = {
 	"Commission Entry": "field_sales.permissions.commission_entry_query",
 	"Commission Statement": "field_sales.permissions.commission_statement_query",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_query",
+	"Platform Product": "field_sales.permissions.platform_product_query",
+	"Product Stock": "field_sales.permissions.product_stock_query",
+	"Sync Log": "field_sales.permissions.sync_log_query",
+	"Commission Plan": "field_sales.permissions.commission_plan_query",
+	"Privacy Request": "field_sales.permissions.privacy_request_query",
 }
 
 has_permission = {
@@ -192,19 +197,49 @@ has_permission = {
 	"Commission Entry": "field_sales.permissions.commission_entry_has_permission",
 	"Commission Statement": "field_sales.permissions.commission_statement_has_permission",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_has_permission",
+	**{
+		doctype: "field_sales.permissions.store_only_has_permission"
+		for doctype in ("Platform Product", "Product Stock", "Sync Log", "Commission Plan", "Privacy Request")
+	},
 }
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
+# Business doctypes that belong to one Store (required ``store`` link, set on insert).
+# Read elsewhere with utils/store.py -> store_doctypes().
+field_sales_store_doctypes = [
+	"Retailer",
+	"Field Order",
+	"Visit",
+	"Platform Product",
+	"Product Stock",
+	"Sales Rep",
+	"Commission Plan",
+	"Commission Entry",
+	"Commission Statement",
+	"Payment Transaction",
+	"Sync Log",
+	"Privacy Request",
+]
+# No moving another team's record to your own rep (permissions.check_owner_change).
+_OWNER_CHECKED = ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+
 doc_events = {
 	# Push bell notifications made by push.notify.notify_users to the mobile app.
 	"Notification Log": {"after_insert": "field_sales.push.notify.on_notification_log_insert"},
-	# No moving another team's record to your own rep (permissions.check_owner_change).
+	# A new record belongs to the current store (utils/store.py -> stamp_store).
 	**{
-		doctype: {"validate": "field_sales.permissions.check_owner_change"}
-		for doctype in ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+		doctype: {
+			"before_insert": "field_sales.utils.store.stamp_store",
+			**(
+				{"validate": "field_sales.permissions.check_owner_change"}
+				if doctype in _OWNER_CHECKED
+				else {}
+			),
+		}
+		for doctype in field_sales_store_doctypes
 	},
 }
 
@@ -217,7 +252,7 @@ scheduler_events = {
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 		# Keep the site's currency and time zone the same as the store's.
 		"field_sales.sync.shop_settings.scheduled_sync",
-		# Store Connection retailer_inactive_anonymise_days (0 = off).
+		# Store retailer_inactive_anonymise_days (0 = off).
 		"field_sales.utils.anonymise.anonymise_inactive_retailers",
 	],
 	# Razorpay payment links whose webhook never arrived (Link Sent, last 7 days, 50 a run).
@@ -226,7 +261,7 @@ scheduler_events = {
 		# Confirmed store orders paid on Razorpay that the store does not show as paid yet.
 		"field_sales.sync.orders.retry_store_payments",
 	],
-	# Ticks every 30 minutes; scheduled_sync itself honours Store Connection's sync frequency.
+	# Ticks every 30 minutes; scheduled_sync itself honours the Store's sync frequency.
 	"cron": {
 		"*/30 * * * *": [
 			"field_sales.sync.products.scheduled_sync",
@@ -325,7 +360,7 @@ after_request = ["field_sales.shopify.embedded.after_request"]
 # --------------------------------
 
 # Shopify admin (embedded app): requests with an App Bridge session token sign in as
-# Store Connection's embedded user. A no-op for every other request.
+# the Store's embedded user. A no-op for every other request.
 auth_hooks = ["field_sales.shopify.session_token.authenticate"]
 
 # Automatically update python controller files with type annotations for this app.

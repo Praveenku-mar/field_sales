@@ -8,24 +8,27 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_months, flt, get_first_day, get_last_day, nowdate
 
-from field_sales.commission.engine import create_entries, reconcile_order
 from field_sales.commission.api import (
 	approve_statement,
-	get_team_commission,
 	assign_commission_plan,
 	create_adjustment,
 	generate_statements,
 	get_commission_plans,
-	save_commission_plan,
 	get_commission_statement,
 	get_commission_statements,
 	get_my_commission_summary,
+	get_team_commission,
+	save_commission_plan,
 )
+from field_sales.commission.engine import create_entries, reconcile_order
 from field_sales.commission.statements import build_statement, mark_paid, regenerate_statement
 from field_sales.connectors import get_connector
 from field_sales.connectors.shopify import _normalize_order
-from field_sales.field_sales.report.rep_commission_summary.rep_commission_summary import execute as run_summary
+from field_sales.field_sales.report.rep_commission_summary.rep_commission_summary import (
+	execute as run_summary,
+)
 from field_sales.sync.webhooks import process_event
+from field_sales.utils.store import set_store_value
 
 SHOP = "test-shop.myshopify.com"
 GET_ORDER = "field_sales.connectors.shopify.ShopifyConnector.get_order"
@@ -35,8 +38,7 @@ CURRENCY = "INR"
 class TestCommission(IntegrationTestCase):
 	def setUp(self):
 		# set_single_value does not validate; everything rolls back after each test.
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_api_version": "2026-10"},
 		)
 		# Earlier runs' entries linger on a shared site; every test counts from empty.
@@ -133,10 +135,20 @@ class TestCommission(IntegrationTestCase):
 				],
 			}
 		).insert(ignore_permissions=True)
-		frappe.db.set_value("Field Order", doc.name, {"docstatus": 1, "external_order_id": order_id, "platform": "Shopify"})
+		frappe.db.set_value(
+			"Field Order", doc.name, {"docstatus": 1, "external_order_id": order_id, "platform": "Shopify"}
+		)
 		return doc.name
 
-	def store_order(self, order_id: str, lines: list[dict], financial="paid", fulfillment="unfulfilled", refunds=(), cancelled=False):
+	def store_order(
+		self,
+		order_id: str,
+		lines: list[dict],
+		financial="paid",
+		fulfillment="unfulfilled",
+		refunds=(),
+		cancelled=False,
+	):
 		"""A neutral order as ``get_order`` returns it. Each line: variant, qty, price and optional discount / tags / type."""
 		return {
 			"external_order_id": order_id,
@@ -161,7 +173,10 @@ class TestCommission(IntegrationTestCase):
 		}
 
 	def refund(self, refund_id: str, *quantities: tuple[str, float]):
-		return {"refund_id": refund_id, "lines": [{"line_id": line, "qty": qty, "amount": 0} for line, qty in quantities]}
+		return {
+			"refund_id": refund_id,
+			"lines": [{"line_id": line, "qty": qty, "amount": 0} for line, qty in quantities],
+		}
 
 	def reconcile(self, order: dict):
 		with patch(GET_ORDER, return_value=order):
@@ -217,7 +232,12 @@ class TestCommission(IntegrationTestCase):
 		self.field_order(rep, [("1", 1, 100), ("2", 1, 100), ("3", 1, 100), ("4", 1, 100)], "7002")
 
 		lines = [
-			{"variant": "1", "qty": 1, "price": 100, "tags": ["Premium"]},  # product + collection + tag -> product
+			{
+				"variant": "1",
+				"qty": 1,
+				"price": 100,
+				"tags": ["Premium"],
+			},  # product + collection + tag -> product
 			{"variant": "2", "qty": 1, "price": 100, "tags": ["Premium"]},  # collection + tag -> collection
 			{"variant": "3", "qty": 1, "price": 100, "tags": ["PREMIUM"]},  # tag only -> tag
 			{"variant": "4", "qty": 1, "price": 100},  # nothing -> default
@@ -239,7 +259,9 @@ class TestCommission(IntegrationTestCase):
 		)
 		rep = self.rep(plan)
 		self.field_order(rep, [("1", 1, 100)], "7003")
-		self.reconcile(self.store_order("7003", [{"variant": "1", "qty": 1, "price": 100, "type": "beverages"}]))
+		self.reconcile(
+			self.store_order("7003", [{"variant": "1", "qty": 1, "price": 100, "type": "beverages"}])
+		)
 		(entry,) = self.entries(entry_type="Order")
 		self.assertEqual(flt(entry.amount), 6)
 
@@ -263,7 +285,7 @@ class TestCommission(IntegrationTestCase):
 		return rep, build_statement(rep.name, get_first_day(today), get_last_day(today))
 
 	def test_slab_whole_amount(self):
-		rep, statement = self.slab_setup("Whole Amount")
+		_rep, statement = self.slab_setup("Whole Amount")
 		# 6000 of sales falls in the 5% band, and 5% applies to all of it.
 		self.assertEqual(flt(statement.total_sales), 6000)
 		self.assertEqual(flt(statement.slab_rate_applied), 5)
@@ -274,7 +296,7 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual(entry.commission_statement, statement.name)
 
 	def test_slab_marginal(self):
-		rep, statement = self.slab_setup("Marginal")
+		_rep, statement = self.slab_setup("Marginal")
 		# 1000 x 2% + 4000 x 3% + 1000 x 5% = 20 + 120 + 50.
 		self.assertEqual(flt(statement.gross_commission), 190)
 		self.assertEqual(flt(statement.net_payable), 190)
@@ -319,14 +341,19 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual(entry.status, "Earned")
 
 		# 1 of 4 units refunded: a quarter of the commission is reversed.
-		refunded = self.store_order("7006", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))])
+		refunded = self.store_order(
+			"7006", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]
+		)
 		self.reconcile(refunded)
 		(entry,) = self.entries(entry_type="Order")
 		self.assertEqual((entry.status, flt(entry.reversed_amount)), ("Earned", 25))
 
 		# Everything refunded: fully reversed.
 		everything = self.store_order(
-			"7006", line, financial="refunded", refunds=[self.refund("R1", ("L1", 1)), self.refund("R2", ("L1", 3))]
+			"7006",
+			line,
+			financial="refunded",
+			refunds=[self.refund("R1", ("L1", 1)), self.refund("R2", ("L1", 3))],
 		)
 		self.reconcile(everything)
 		(entry,) = self.entries(entry_type="Order")
@@ -345,7 +372,9 @@ class TestCommission(IntegrationTestCase):
 		today = nowdate()
 		statement = build_statement(rep.name, get_first_day(today), get_last_day(today))
 		self.assertEqual(flt(statement.net_payable), 100)
-		refunded = self.store_order(order_id, line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))])
+		refunded = self.store_order(
+			order_id, line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]
+		)
 		self.reconcile(refunded)
 		return statement, refunded
 
@@ -385,10 +414,16 @@ class TestCommission(IntegrationTestCase):
 		today = nowdate()
 		statement = build_statement(rep.name, get_first_day(today), get_last_day(today))
 		statement.submit()
-		entry = frappe.db.get_value("Commission Entry", {"entry_type": "Order", "sales_rep": rep.name}, "name")
+		entry = frappe.db.get_value(
+			"Commission Entry", {"entry_type": "Order", "sales_rep": rep.name}, "name"
+		)
 		frappe.db.set_value("Commission Entry", entry, "reversed_amount", 25, update_modified=False)
 
-		self.reconcile(self.store_order("7109", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]))
+		self.reconcile(
+			self.store_order(
+				"7109", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]
+			)
+		)
 
 		(adjustment,) = self.entries(entry_type="Adjustment")
 		self.assertEqual(flt(adjustment.amount), -25)
@@ -406,7 +441,9 @@ class TestCommission(IntegrationTestCase):
 		mark_paid(statement.name, payment_reference="UTR-1")
 		self.assertEqual(frappe.db.get_value("Commission Statement", statement.name, "status"), "Paid")
 
-		refunded = self.store_order("7007", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))])
+		refunded = self.store_order(
+			"7007", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]
+		)
 		self.reconcile(refunded)
 
 		original = frappe.db.get_value(
@@ -429,7 +466,9 @@ class TestCommission(IntegrationTestCase):
 		# The same refund again adds nothing; a bigger one adds only the difference.
 		self.reconcile(refunded)
 		self.assertEqual(len(self.entries(entry_type="Adjustment")), 1)
-		more = self.store_order("7007", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 2))])
+		more = self.store_order(
+			"7007", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 2))]
+		)
 		self.reconcile(more)
 		self.assertEqual(sorted(flt(a.amount) for a in self.entries(entry_type="Adjustment")), [-25, -25])
 
@@ -460,7 +499,9 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual((entry.status, flt(entry.amount)), ("Earned", 100))
 
 		# A refunds/create event names the order as order_id.
-		refunded = self.store_order("7008", [{"variant": "1", "qty": 4, "price": 250}], refunds=[self.refund("R1", ("L1", 1))])
+		refunded = self.store_order(
+			"7008", [{"variant": "1", "qty": 4, "price": 250}], refunds=[self.refund("R1", ("L1", 1))]
+		)
 		with patch(GET_ORDER, return_value=refunded):
 			process_event("Shopify", self.webhook_event("refunds/create", {"id": 1, "order_id": 7008}))
 			process_event("Shopify", self.webhook_event("refunds/create", {"id": 1, "order_id": 7008}))
@@ -487,7 +528,9 @@ class TestCommission(IntegrationTestCase):
 		rep = self.rep(self.plan("Dedupe plan", flat_rate=10, override_levels=1), reports_to=manager.name)
 		order_name = self.field_order(rep, [("1", 1, 100), ("2", 2, 50)], "7010")
 		other_name = self.field_order(rep, [("1", 1, 100)], "7011")
-		first = self.store_order("7010", [{"variant": "1", "qty": 1, "price": 100}, {"variant": "2", "qty": 2, "price": 50}])
+		first = self.store_order(
+			"7010", [{"variant": "1", "qty": 1, "price": 100}, {"variant": "2", "qty": 2, "price": 50}]
+		)
 		second = self.store_order("7011", [{"variant": "1", "qty": 1, "price": 100}])
 
 		def fake(external_id):
@@ -506,7 +549,9 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual(len(self.entries(source_order=order_name)), 4)
 		self.assertEqual(len(self.entries(source_order=other_name)), 2)
 		self.assertEqual(len({e.dedupe_key for e in self.entries()}), 6)
-		self.assertEqual(sum(flt(e.amount) for e in self.entries(source_order=order_name, beneficiary_type="Rep")), 20)
+		self.assertEqual(
+			sum(flt(e.amount) for e in self.entries(source_order=order_name, beneficiary_type="Rep")), 20
+		)
 
 	# -- order with a rep who is not on commission -----------------------------
 
@@ -561,7 +606,9 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual(paid_columns(), (100, 0, 100))
 
 		mark_paid(statement.name, payment_reference="UTR-2")
-		refunded = self.store_order("7014", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))])
+		refunded = self.store_order(
+			"7014", line, financial="partially_refunded", refunds=[self.refund("R1", ("L1", 1))]
+		)
 		self.reconcile(refunded)
 		# The paid 100 stays paid; the refund's -25 Adjustment is on no statement yet.
 		self.assertEqual(paid_columns(), (75, 100, -25))
@@ -659,9 +706,18 @@ class TestCommission(IntegrationTestCase):
 		self.assertEqual(created["rates"], [])
 
 		edited = save_commission_plan(
-			{"name": "Screen plan", "plan_name": "Renamed?", "rule_type": "Flat %", "flat_rate": 5, "is_active": 0}
+			{
+				"name": "Screen plan",
+				"plan_name": "Renamed?",
+				"rule_type": "Flat %",
+				"flat_rate": 5,
+				"is_active": 0,
+			}
 		)
-		self.assertEqual((edited["name"], edited["plan_name"], edited["rule_type"], edited["slabs"]), ("Screen plan", "Screen plan", "Flat %", []))
+		self.assertEqual(
+			(edited["name"], edited["plan_name"], edited["rule_type"], edited["slabs"]),
+			("Screen plan", "Screen plan", "Flat %", []),
+		)
 		self.assertEqual(frappe.db.get_value("Commission Plan", "Screen plan", "is_active"), 0)
 		self.assertIn("Screen plan", [p["name"] for p in get_commission_plans()])
 
@@ -708,8 +764,14 @@ class TestCommission(IntegrationTestCase):
 		create_adjustment(rep.name, -40, "Correction", beneficiary_type="Manager Override")
 
 		doc = frappe.get_doc("Commission Entry", entry["name"])
-		self.assertEqual((doc.entry_type, doc.status, doc.beneficiary_type, doc.earned_on), ("Adjustment", "Earned", "Rep", doc.posting_date))
-		self.assertEqual((doc.currency, doc.commission_plan, doc.adjustment_reason), (CURRENCY, "Adj plan", "Quarterly bonus"))
+		self.assertEqual(
+			(doc.entry_type, doc.status, doc.beneficiary_type, doc.earned_on),
+			("Adjustment", "Earned", "Rep", doc.posting_date),
+		)
+		self.assertEqual(
+			(doc.currency, doc.commission_plan, doc.adjustment_reason),
+			(CURRENCY, "Adj plan", "Quarterly bonus"),
+		)
 
 		frappe.set_user(rep.user)
 		try:
@@ -737,7 +799,9 @@ class TestCommission(IntegrationTestCase):
 		result = generate_statements(month)
 		self.assertEqual(len(result["created"]), 1)
 		statement = frappe.get_doc("Commission Statement", result["created"][0])
-		self.assertEqual((statement.sales_rep, statement.status, statement.net_payable), (with_entries.name, "Draft", 25))
+		self.assertEqual(
+			(statement.sales_rep, statement.status, statement.net_payable), (with_entries.name, "Draft", 25)
+		)
 		# Other active reps on the site are skipped too; check ours, not the whole list.
 		skipped = {s["rep"] for s in result["skipped"]}
 		self.assertIn(without_entries.name, skipped)
@@ -778,7 +842,11 @@ class TestCommission(IntegrationTestCase):
 							{"allocatedAmountSet": {"shopMoney": {"amount": "5.50"}}},
 						],
 						"variant": {"id": f"{gid}ProductVariant/21"},
-						"product": {"id": f"{gid}Product/31", "productType": "Snacks", "tags": ["premium", "new"]},
+						"product": {
+							"id": f"{gid}Product/31",
+							"productType": "Snacks",
+							"tags": ["premium", "new"],
+						},
 					},
 					# A custom line (the draft's tax line): no variant, no product.
 					{
@@ -830,7 +898,9 @@ class TestCommission(IntegrationTestCase):
 		)
 		self.assertIsNone(order["lines"][1]["external_variant_id"])
 		self.assertEqual(order["lines"][1]["tags"], [])
-		self.assertEqual(order["refunds"], [{"refund_id": "41", "lines": [{"line_id": "11", "qty": 1, "amount": 250}]}])
+		self.assertEqual(
+			order["refunds"], [{"refund_id": "41", "lines": [{"line_id": "11", "qty": 1, "amount": 250}]}]
+		)
 
 		self.assertEqual(_normalize_order(None), {})
 		self.assertTrue(_normalize_order({**node, "cancelledAt": "2026-10-15T10:00:00Z"})["cancelled"])

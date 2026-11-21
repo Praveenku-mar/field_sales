@@ -6,7 +6,7 @@ Anonymise retailers and the personal fields of their orders and visits, keeping 
 quantities and dates for reporting.
 
 Used by store privacy requests (``field_sales/shopify/privacy.py``) and by the daily
-``anonymise_inactive_retailers()`` (Store Connection ``retailer_inactive_anonymise_days``).
+``anonymise_inactive_retailers()`` (Store ``retailer_inactive_anonymise_days``).
 Writes go straight to the database: no controllers run, so nothing is pushed to the store.
 
 Everything else that holds the old values goes too: edit history (Version), emails
@@ -25,6 +25,7 @@ from frappe.utils import add_days, cint, now_datetime
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import get_store_value
 
 REDACTED = "Redacted"
 REDACTED_PHONE = "0000000000"  # Retailer.phone is mandatory and validated as a phone number
@@ -215,7 +216,9 @@ def _clear_sync_log_bodies(doctype: str, names: list[str]) -> int:
 	for chunk in _chunks(names, 500):
 		where = (log.reference_doctype == doctype) & log.reference_name.isin(chunk)
 		count += frappe.db.count("Sync Log", {"reference_doctype": doctype, "reference_name": ("in", chunk)})
-		frappe.qb.update(log).set(log.request_payload, None).set(log.response_payload, None).where(where).run()
+		frappe.qb.update(log).set(log.request_payload, None).set(log.response_payload, None).where(
+			where
+		).run()
 	return count
 
 
@@ -240,7 +243,7 @@ def anonymise_inactive_retailers() -> None:
 	changed for ``retailer_inactive_anonymise_days``. 0 (the default) turns it off.
 	"""
 	try:
-		days = cint(frappe.db.get_single_value("Store Connection", "retailer_inactive_anonymise_days"))
+		days = cint(get_store_value("retailer_inactive_anonymise_days"))
 		if days <= 0:
 			return
 		cutoff = add_days(now_datetime(), -days)
@@ -259,7 +262,7 @@ def anonymise_inactive_retailers() -> None:
 		orders = frappe.get_all("Field Order", filters={"retailer": ("in", retailers)}, pluck="name")
 		result = anonymise(retailers, orders)
 		log_sync(
-			platform=frappe.db.get_single_value("Store Connection", "platform") or "Shopify",
+			platform=get_store_value("platform") or "Shopify",
 			operation="Privacy Request",
 			status="Success",
 			response_payload=frappe.as_json({"job": "anonymise_inactive_retailers", "days": days, **result}),
@@ -271,4 +274,3 @@ def anonymise_inactive_retailers() -> None:
 		frappe.log_error(title="Field Sales scheduled job failed: anonymise_inactive_retailers")
 		safe_commit()
 		raise
-

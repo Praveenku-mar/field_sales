@@ -10,6 +10,7 @@ from frappe.tests import IntegrationTestCase
 
 from field_sales.connectors import get_connector
 from field_sales.connectors.shopify import LOCATIONS_QUERY, ShopifyConnector
+from field_sales.utils.store import set_store_value
 
 
 def node(location_id, name, active=True):
@@ -18,9 +19,13 @@ def node(location_id, name, active=True):
 
 class TestStoreLocations(IntegrationTestCase):
 	def setUp(self):
-		frappe.db.set_single_value(
-			"Store Connection",
-			{"platform": "Shopify", "enabled": 1, "store_url": "test-shop.myshopify.com", "shopify_api_version": "2026-10"},
+		set_store_value(
+			{
+				"platform": "Shopify",
+				"enabled": 1,
+				"store_url": "test-shop.myshopify.com",
+				"shopify_api_version": "2026-10",
+			},
 		)
 
 	def tearDown(self):
@@ -60,7 +65,12 @@ class TestStoreLocations(IntegrationTestCase):
 
 	def test_a_cursor_that_never_ends_stops(self):
 		def graphql(self_, query, variables=None, **kwargs):
-			return {"locations": {"nodes": [node(1, "Loop")], "pageInfo": {"hasNextPage": True, "endCursor": "again"}}}
+			return {
+				"locations": {
+					"nodes": [node(1, "Loop")],
+					"pageInfo": {"hasNextPage": True, "endCursor": "again"},
+				}
+			}
 
 		with patch.object(ShopifyConnector, "_graphql", graphql) as _patched:
 			locations = get_connector().get_locations()

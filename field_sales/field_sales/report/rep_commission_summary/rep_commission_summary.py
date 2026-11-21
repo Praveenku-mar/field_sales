@@ -28,6 +28,7 @@ from frappe import _
 from frappe.utils import flt, getdate
 
 from field_sales.permissions import get_allowed_reps, is_admin
+from field_sales.utils.store import store_scope
 
 
 def execute(filters=None):
@@ -43,7 +44,13 @@ def execute(filters=None):
 def get_columns() -> list[dict]:
 	money = {"fieldtype": "Currency", "options": "currency", "width": 120}
 	return [
-		{"fieldname": "sales_rep", "label": _("Rep"), "fieldtype": "Link", "options": "Sales Rep", "width": 180},
+		{
+			"fieldname": "sales_rep",
+			"label": _("Rep"),
+			"fieldtype": "Link",
+			"options": "Sales Rep",
+			"width": 180,
+		},
 		{"fieldname": "period", "label": _("Period"), "fieldtype": "Data", "width": 190},
 		{"fieldname": "sales", "label": _("Sales"), **money},
 		{"fieldname": "avg_discount", "label": _("Avg Discount %"), "fieldtype": "Percent", "width": 110},
@@ -54,7 +61,13 @@ def get_columns() -> list[dict]:
 		{"fieldname": "net", "label": _("Net"), **money},
 		{"fieldname": "paid", "label": _("Paid"), **money},
 		{"fieldname": "unpaid", "label": _("Unpaid"), **money},
-		{"fieldname": "currency", "label": _("Currency"), "fieldtype": "Link", "options": "Currency", "hidden": 1},
+		{
+			"fieldname": "currency",
+			"label": _("Currency"),
+			"fieldtype": "Link",
+			"options": "Currency",
+			"hidden": 1,
+		},
 	]
 
 
@@ -69,7 +82,8 @@ def get_data(filters) -> list[dict]:
 		"status": ("!=", "Cancelled"),
 	}
 	if filters.get("location_id"):
-		orders = frappe.get_all("Field Order", filters={"location_id": filters.location_id}, pluck="name")
+		order_filters = {"location_id": filters.location_id, "sales_rep": ("in", reps)}
+		orders = frappe.get_all("Field Order", filters=order_filters, pluck="name")
 		if not orders:
 			return []
 		entry_filters["source_order"] = ("in", orders)
@@ -154,7 +168,9 @@ def _paid_statements(entries) -> set[str]:
 	if not names:
 		return set()
 	return set(
-		frappe.get_all("Commission Statement", filters={"name": ("in", list(names)), "status": "Paid"}, pluck="name")
+		frappe.get_all(
+			"Commission Statement", filters={"name": ("in", list(names)), "status": "Paid"}, pluck="name"
+		)
 	)
 
 
@@ -173,15 +189,25 @@ def _reps_in_scope(filters) -> list[str]:
 		if not allowed:
 			return []
 
-	if allowed is None:
-		return frappe.get_all("Sales Rep", pluck="name")
-	return list(allowed)
+	# Every rep returned is in the user's store (an admin's too: Store Admin is an admin inside
+	# one store), so the Sales Rep and Manager filters cannot reach another store's reps.
+	scope = store_scope()
+	if scope == "":
+		return []
+	rep_filters = {} if scope is None else {"store": scope}
+	if allowed is not None:
+		if not allowed:
+			return []
+		rep_filters["name"] = ("in", list(allowed))
+	return frappe.get_all("Sales Rep", filters=rep_filters, pluck="name")
 
 
 def _reps_under(manager: str) -> set[str]:
 	"""Every rep below ``manager`` through reports_to, at all levels (the manager is not included)."""
 	reports = defaultdict(list)
-	for rep in frappe.get_all("Sales Rep", fields=["name", "reports_to"], filters={"reports_to": ("is", "set")}):
+	for rep in frappe.get_all(
+		"Sales Rep", fields=["name", "reports_to"], filters={"reports_to": ("is", "set")}
+	):
 		reports[rep.reports_to].append(rep.name)
 
 	seen = {manager}

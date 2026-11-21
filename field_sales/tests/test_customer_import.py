@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from field_sales.utils.store import get_store_value
+
 APP = __name__.split(".", 1)[0]
 customers = importlib.import_module(f"{APP}.sync.customers")
 api = importlib.import_module(f"{APP}.api")
@@ -39,7 +41,7 @@ class TestCustomerImport(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		self.conn = MagicMock()
-		self.conn.settings.platform = frappe.db.get_single_value("Store Connection", "platform") or "Odoo"
+		self.conn.settings.platform = get_store_value("platform") or "Odoo"
 		p = patch.object(customers, "get_connector", return_value=self.conn)
 		p.start()
 		self.addCleanup(p.stop)
@@ -56,45 +58,84 @@ class TestCustomerImport(IntegrationTestCase):
 		frappe.db.rollback()
 
 	def pages(self, *pages):
-		answers = [{"items": list(items), "next_cursor": str(i + 1) if i < len(pages) - 1 else None} for i, items in enumerate(pages)]
+		answers = [
+			{"items": list(items), "next_cursor": str(i + 1) if i < len(pages) - 1 else None}
+			for i, items in enumerate(pages)
+		]
 		self.conn.get_customers.side_effect = answers
 
 	def retailer(self, external_id):
 		return frappe.db.get_value(
 			"Retailer",
 			{"external_customer_id": external_id},
-			["name", "retailer_name", "owner_name", "email", "phone", "city", "sales_rep", "sync_status", "status"],
+			[
+				"name",
+				"retailer_name",
+				"owner_name",
+				"email",
+				"phone",
+				"city",
+				"sales_rep",
+				"sync_status",
+				"status",
+			],
 			as_dict=True,
 		)
 
 	def test_new_customers_become_shops_across_pages(self):
 		self.pages(
-			[customer("ci-1", company="Murugan Stores", first_name="Ravi", last_name="K", email="RAVI@Example.com", city="Salem")],
+			[
+				customer(
+					"ci-1",
+					company="Murugan Stores",
+					first_name="Ravi",
+					last_name="K",
+					email="RAVI@Example.com",
+					city="Salem",
+				)
+			],
 			[customer("ci-2", first_name="Asha", last_name="M")],
 		)
 		summary = customers.import_customers()
 		self.assertEqual((summary["created"], summary["failed"]), (2, 0))
 		shop = self.retailer("ci-1")
-		self.assertEqual((shop.retailer_name, shop.owner_name, shop.email, shop.city), ("Murugan Stores", "Ravi K", "ravi@example.com", "Salem"))
+		self.assertEqual(
+			(shop.retailer_name, shop.owner_name, shop.email, shop.city),
+			("Murugan Stores", "Ravi K", "ravi@example.com", "Salem"),
+		)
 		# Synced with the store, active, no rep yet (a manager assigns one), never pushed back.
 		self.assertEqual((shop.sync_status, shop.status, shop.sales_rep), ("Synced", "Active", None))
 		self.assertEqual(self.retailer("ci-2").retailer_name, "Asha M")
 		self.push.assert_not_called()
-		log = frappe.get_last_doc("Sync Log", filters={"operation": "Customer Sync", "reference_doctype": "Retailer"})
+		log = frappe.get_last_doc(
+			"Sync Log", filters={"operation": "Customer Sync", "reference_doctype": "Retailer"}
+		)
 		self.assertEqual(frappe.parse_json(log.response_payload)["created"], 2)
 
 	def test_existing_shop_is_linked_by_email_and_only_blanks_filled(self):
 		existing = frappe.get_doc(
-			{"doctype": "Retailer", "retailer_name": "Typed In App", "email": "shop@example.com", "city": "Erode", "address_line1": "1 Main Rd", "phone": "9876543210"}
+			{
+				"doctype": "Retailer",
+				"retailer_name": "Typed In App",
+				"email": "shop@example.com",
+				"city": "Erode",
+				"address_line1": "1 Main Rd",
+				"phone": "9876543210",
+			}
 		)
 		existing.flags.ignore_mandatory = True
 		existing.flags.ignore_sync = True
 		existing.insert(ignore_permissions=True)
-		self.pages([customer("ci-3", company="Store Name", email="shop@example.com", city="Salem", pincode="636001")])
+		self.pages(
+			[customer("ci-3", company="Store Name", email="shop@example.com", city="Salem", pincode="636001")]
+		)
 		self.assertEqual(customers.import_customers()["linked"], 1)
 		doc = frappe.get_doc("Retailer", existing.name)
 		# What was typed in the app wins; empty fields are filled; it is now linked.
-		self.assertEqual((doc.retailer_name, doc.city, doc.pincode, doc.external_customer_id), ("Typed In App", "Erode", "636001", "ci-3"))
+		self.assertEqual(
+			(doc.retailer_name, doc.city, doc.pincode, doc.external_customer_id),
+			("Typed In App", "Erode", "636001", "ci-3"),
+		)
 
 	def test_second_import_changes_nothing(self):
 		self.pages([customer("ci-4", company="Repeat Shop")])
@@ -117,7 +158,9 @@ class TestCustomerImport(IntegrationTestCase):
 	def test_store_error_is_logged_and_raised(self):
 		self.conn.get_customers.side_effect = RuntimeError("store down")
 		self.assertRaises(RuntimeError, customers.import_customers)
-		log = frappe.get_last_doc("Sync Log", filters={"operation": "Customer Sync", "reference_doctype": "Retailer"})
+		log = frappe.get_last_doc(
+			"Sync Log", filters={"operation": "Customer Sync", "reference_doctype": "Retailer"}
+		)
 		self.assertEqual(log.status, "Failed")
 
 	def test_only_managers_start_an_import(self):
@@ -125,7 +168,9 @@ class TestCustomerImport(IntegrationTestCase):
 			self.assertTrue(api.enqueue_customer_import()["queued"])
 		rep = "import.rep@example.com"
 		if not frappe.db.exists("User", rep):
-			frappe.get_doc({"doctype": "User", "email": rep, "first_name": "Import Rep", "send_welcome_email": 0}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{"doctype": "User", "email": rep, "first_name": "Import Rep", "send_welcome_email": 0}
+			).insert(ignore_permissions=True)
 		frappe.get_doc("User", rep).add_roles("Field Sales Rep")
 		frappe.set_user(rep)
 		self.assertRaises(frappe.PermissionError, api.enqueue_customer_import)
@@ -142,16 +187,42 @@ class TestShopifyCustomers(IntegrationTestCase):
 			"phone": None,
 			"firstName": "Asha",
 			"lastName": "M",
-			"defaultAddress": {"company": "Asha Traders", "address1": "2 Bazaar St", "address2": None, "city": "Salem", "province": "Tamil Nadu", "zip": "636001", "countryCodeV2": "in", "phone": "+919876543210"},
+			"defaultAddress": {
+				"company": "Asha Traders",
+				"address1": "2 Bazaar St",
+				"address2": None,
+				"city": "Salem",
+				"province": "Tamil Nadu",
+				"zip": "636001",
+				"countryCodeV2": "in",
+				"phone": "+919876543210",
+			},
 		}
-		with patch.object(ShopifyConnector, "_graphql", return_value={"customers": {"nodes": [node], "pageInfo": {"hasNextPage": True, "endCursor": "abc"}}}) as gql:
+		with patch.object(
+			ShopifyConnector,
+			"_graphql",
+			return_value={
+				"customers": {"nodes": [node], "pageInfo": {"hasNextPage": True, "endCursor": "abc"}}
+			},
+		) as gql:
 			page = conn.get_customers(None)
 		self.assertEqual(gql.call_args.args[1], {"cursor": None})
 		self.assertEqual(page["next_cursor"], "abc")
 		c = page["items"][0]
 		self.assertEqual(
-			(c["external_customer_id"], c["company"], c["phone"], c["state"], c["pincode"], c["country_code"]),
+			(
+				c["external_customer_id"],
+				c["company"],
+				c["phone"],
+				c["state"],
+				c["pincode"],
+				c["country_code"],
+			),
 			("77", "Asha Traders", "+919876543210", "Tamil Nadu", "636001", "IN"),
 		)
-		with patch.object(ShopifyConnector, "_graphql", return_value={"customers": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}):
+		with patch.object(
+			ShopifyConnector,
+			"_graphql",
+			return_value={"customers": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}},
+		):
 			self.assertIsNone(conn.get_customers("abc")["next_cursor"])

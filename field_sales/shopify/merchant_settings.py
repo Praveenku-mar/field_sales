@@ -159,16 +159,9 @@ def save_store_settings(values: dict | str) -> dict:
 
 def _queue_product_sync() -> None:
 	"""Like ``sync.products.enqueue_sync()``, but only once this request's save is committed."""
-	from field_sales.sync.products import JOB_ID
+	from field_sales.sync.products import enqueue_sync
 
-	frappe.enqueue(
-		"field_sales.sync.products.sync_products",
-		queue="long",
-		timeout=1500,
-		job_id=JOB_ID,
-		deduplicate=True,
-		enqueue_after_commit=True,
-	)
+	enqueue_sync(enqueue_after_commit=True)
 
 
 @frappe.whitelist(methods=["GET"])

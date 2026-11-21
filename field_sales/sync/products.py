@@ -21,8 +21,9 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.push.events import crossed_low_stock, notify_low_stock
 from field_sales.sync.stock import get_sell_locations, set_location_stock
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import get_store
+from field_sales.utils.store import get_store, get_store_name, use_store
 
+# One queued sync per store: f"{JOB_ID}:{store}" (sync_job_id), so one store's sync never hides another's.
 JOB_ID = "field_sales:product_sync"
 REALTIME_EVENT = "product_sync_done"
 
@@ -36,55 +37,81 @@ SCHEDULE_SLACK_MINUTES = 10
 FIELD_MAP = {"image_url": "image"}
 
 
-def enqueue_sync():
-	"""
-	Queue ``sync_products`` on the long queue.
+def sync_job_id(store: str | None = None) -> str:
+	"""The job id of ``store``'s product sync (default: the current store)."""
+	return f"{JOB_ID}:{get_store_name(store) or ''}"
 
-	:return: The queued job, or ``None`` if a product sync is already queued or running.
+
+def enqueue_sync(store: str | None = None, **kwargs):
 	"""
+	Queue ``sync_products`` for ``store`` (default: the current store) on the long queue.
+
+	:param kwargs: More ``frappe.enqueue`` options (e.g. ``enqueue_after_commit``).
+	:return: The queued job, or ``None`` if that store's product sync is already queued or running.
+	"""
+	store = get_store_name(store, required=True)
 	return frappe.enqueue(
 		"field_sales.sync.products.sync_products",
 		queue="long",
 		timeout=1500,
-		job_id=JOB_ID,
+		job_id=sync_job_id(store),
 		deduplicate=True,
+		store=store,
+		**kwargs,
 	)
 
 
 def scheduled_sync():
 	"""
-	Cron entry point (every 30 minutes).
+	Cron entry point (every 30 minutes), for every enabled Store.
 
-	Queues a sync when the Store is enabled, has a default location, and
-	at least ``product_sync_frequency`` has passed since the last product sync
-	activity (manual or scheduled, successful or not).
+	Queues a store's sync when it has a default location and at least its
+	``product_sync_frequency`` has passed since its last product sync activity (manual or
+	scheduled, successful or not). One store's failure is logged and the others still run; the
+	job then fails as before.
 	"""
-	try:
-		settings = get_store()
-		if not settings.enabled or not settings.default_location_id:
-			return
-
-		interval = SYNC_INTERVALS.get(settings.product_sync_frequency)
-		if not interval:
-			return
-
-		last_run = frappe.db.get_value(
-			"Sync Log", {"operation": "Product Sync"}, "creation", order_by="creation desc"
-		)
-		due_after = add_to_date(now_datetime(), minutes=-(interval - SCHEDULE_SLACK_MINUTES))
-		if last_run and get_datetime(last_run) > due_after:
-			return
-
-		enqueue_sync()
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: scheduled_sync")
-		safe_commit()
-		raise
+	failed = []
+	for store in frappe.get_all("Store", filters={"enabled": 1}, pluck="name", order_by="creation asc"):
+		try:
+			with use_store(store):
+				_schedule_store_sync(store)
+		except Exception:
+			# Keep a record of the failure (the job rolls back), then go on with the next store.
+			frappe.db.rollback()
+			frappe.log_error(title=f"Field Sales scheduled job failed: scheduled_sync ({store})")
+			safe_commit()
+			failed.append(store)
+	if failed:
+		frappe.throw(_("Scheduled product sync failed for {0}").format(", ".join(failed)))
 
 
-def sync_products() -> dict:
+def _schedule_store_sync(store: str) -> None:
+	settings = get_store(store)
+	if not settings.default_location_id:
+		return
+
+	interval = SYNC_INTERVALS.get(settings.product_sync_frequency)
+	if not interval:
+		return
+
+	last_run = frappe.db.get_value(
+		"Sync Log", {"operation": "Product Sync", "store": store}, "creation", order_by="creation desc"
+	)
+	due_after = add_to_date(now_datetime(), minutes=-(interval - SCHEDULE_SLACK_MINUTES))
+	if last_run and get_datetime(last_run) > due_after:
+		return
+
+	enqueue_sync(store)
+
+
+def sync_products(store: str | None = None) -> dict:
+	"""Run ``_sync_products`` for ``store`` (default: the current store); its logs and rows get that store."""
+	store = get_store_name(store, required=True)
+	with use_store(store):
+		return _sync_products(store)
+
+
+def _sync_products(store: str) -> dict:
 	"""
 		Pull every product variant from the store into Platform Product.
 
@@ -101,7 +128,7 @@ def sync_products() -> dict:
 
 		:return: ``{"created": n, "updated": n, "unchanged": n, "archived": n}``
 	"""
-	conn = get_connector()
+	conn = get_connector(store=store)
 	settings = conn.settings
 	platform = settings.platform
 	location_id = settings.default_location_id
@@ -126,7 +153,7 @@ def sync_products() -> dict:
 			]
 			stock = conn.get_stock(tracked, location_id) if tracked else {}
 
-			names = _upsert_page(platform, location_id, items, stock, seen, summary, low_stock)
+			names = _upsert_page(platform, location_id, items, stock, seen, summary, low_stock, store=store)
 			_save_location_stock(conn, location_id, items, names, stock)
 			safe_commit()
 
@@ -134,7 +161,7 @@ def sync_products() -> dict:
 			if not cursor:
 				break
 
-		summary["archived"] = _archive_missing(platform, seen)
+		summary["archived"] = _archive_missing(platform, seen, store)
 		safe_commit()
 
 	except Exception as e:
@@ -184,6 +211,7 @@ def sync_one_product(conn, external_product_id: str) -> dict:
 	"""
 	settings = conn.settings
 	platform = settings.platform
+	store = settings.name
 	location_id = settings.default_location_id
 	if not location_id:
 		frappe.throw(_("Set a Default Location on the Store before syncing products"))
@@ -198,10 +226,15 @@ def sync_one_product(conn, external_product_id: str) -> dict:
 	seen: set[str] = set()
 	low_stock: list[tuple[str, float]] = []
 	if items:
-		names = _upsert_page(platform, location_id, items, stock, seen, summary, low_stock)
+		names = _upsert_page(platform, location_id, items, stock, seen, summary, low_stock, store=store)
 		_save_location_stock(conn, location_id, items, names, stock)
 
-	filters = {"platform": platform, "external_product_id": external_product_id, "status": ("!=", "Archived")}
+	filters = {
+		"store": store,
+		"platform": platform,
+		"external_product_id": external_product_id,
+		"status": ("!=", "Archived"),
+	}
 	if seen:
 		filters["name"] = ("not in", list(seen))
 	summary["archived"] = _archive(frappe.get_all("Platform Product", filters=filters, pluck="name"))
@@ -217,12 +250,13 @@ def _upsert_page(
 	seen: set,
 	summary: dict,
 	low_stock: list | None = None,
+	store: str | None = None,
 ) -> dict[str, str]:
 	"""
 	Create or update the Platform Products for one page of normalized items.
 
 	Tracked products whose stock just fell to the low-stock level are appended to ``low_stock``
-	as ``(name, qty)``.
+	as ``(name, qty)``. Only ``store``'s products are matched, and new ones get that store.
 
 	:return: ``{external_variant_id: Platform Product name}`` for every item on the page, changed or not.
 	"""
@@ -232,7 +266,7 @@ def _upsert_page(
 			r.external_variant_id: r
 			for r in frappe.get_all(
 				"Platform Product",
-				filters={"platform": platform, "external_variant_id": ("in", variant_ids)},
+				filters={"store": store, "platform": platform, "external_variant_id": ("in", variant_ids)},
 				fields=["name", "external_variant_id", "sync_hash", "available_qty", "track_inventory"],
 			)
 		}
@@ -284,7 +318,8 @@ def _upsert_page(
 			_update_product(row.name, values)
 			summary["updated"] += 1
 		else:
-			name = _insert_product(values)
+			# The store is not in the hash: adding it would re-save every product once.
+			name = _insert_product({**values, "store": store} if store else values)
 			seen.add(name)
 			names[item["external_variant_id"]] = name
 			summary["created"] += 1
@@ -323,9 +358,9 @@ def _save_location_stock(conn, default_id: str, items: list[dict], names: dict, 
 			)
 
 
-def _archive_missing(platform: str, seen: set) -> int:
-	"""Mark this platform's products that were not returned in this run as Archived."""
-	filters = {"platform": platform, "status": ("!=", "Archived")}
+def _archive_missing(platform: str, seen: set, store: str) -> int:
+	"""Mark this store's products that were not returned in this run as Archived (never another store's)."""
+	filters = {"store": store, "platform": platform, "status": ("!=", "Archived")}
 	if seen:
 		filters["name"] = ("not in", list(seen))
 

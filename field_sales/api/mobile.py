@@ -1183,11 +1183,11 @@ def get_product_sync_status() -> dict:
 
 	from frappe.utils.background_jobs import is_job_enqueued
 
-	from field_sales.sync.products import JOB_ID
+	from field_sales.sync.products import sync_job_id
 
 	is_running = False
 	try:
-		is_running = bool(is_job_enqueued(JOB_ID))
+		is_running = bool(is_job_enqueued(sync_job_id()))
 	except Exception:
 		# Redis unreachable: report "not running" rather than fail the status card. Not logged:
 		# the screen polls this, so a Redis outage would flood the Error Log.

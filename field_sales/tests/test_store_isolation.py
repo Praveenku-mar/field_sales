@@ -469,3 +469,87 @@ class TestEndpointAudit(IntegrationTestCase):
 		self.assertEqual(
 			sorted(listed - found), [], "listed in inventory.md section 8 but no longer whitelisted"
 		)
+
+
+class TestStoreScopedJobs(StoreIsolationCase):
+	"""Jobs and handlers of one store leave every other store's data alone (review 2 of PR #43)."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.savepoint("store_scoped_jobs")
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="store_scoped_jobs")
+		super().tearDown()
+
+	def test_shop_redact_touches_only_the_requests_store(self):
+		from frappe.utils.password import get_decrypted_password, set_encrypted_password
+
+		from field_sales.shopify.privacy import shop_redact
+
+		set_encrypted_password("Store", "ISB", "b-token", "access_token")
+		b_retailer = frappe.db.get_value("Retailer", self.b.retailer, "retailer_name")
+		frappe.db.set_value("Sync Log", self.b.sync_log, "request_payload", '{"b": 1}')
+
+		shop_redact(frappe._dict(name="PRIV-TEST", store="ISA"), {})
+
+		self.assertFalse(frappe.db.exists("Platform Product", self.a.product))
+		self.assertTrue(frappe.db.exists("Platform Product", self.b.product))
+		self.assertTrue(frappe.db.exists("Product Stock", self.b.stock))
+		self.assertEqual(frappe.db.get_value("Retailer", self.b.retailer, "retailer_name"), b_retailer)
+		self.assertEqual(frappe.db.get_value("Sync Log", self.b.sync_log, "request_payload"), '{"b": 1}')
+		self.assertEqual(
+			get_decrypted_password("Store", "ISB", "access_token", raise_exception=False), "b-token"
+		)
+
+	def test_a_product_sync_archives_only_its_own_stores_products(self):
+		from field_sales.sync.products import _archive_missing
+
+		_archive_missing("Shopify", set(), "ISA")
+		self.assertEqual(frappe.db.get_value("Platform Product", self.a.product, "status"), "Archived")
+		self.assertEqual(frappe.db.get_value("Platform Product", self.b.product, "status"), "Active")
+
+	def test_product_sync_jobs_are_queued_per_store(self):
+		from field_sales.sync.products import sync_job_id
+
+		self.assertNotEqual(sync_job_id("ISA"), sync_job_id("ISB"))
+
+	def test_each_store_has_its_own_cached_plan(self):
+		from field_sales.shopify import billing
+		from field_sales.utils.store import use_store
+
+		plans = {"ISA": "starter", "ISB": "pro"}
+
+		def fetch(store=None):
+			return {"plan": plans[store], "trial_ends_at": None, "known": True}
+
+		for store in plans:
+			billing.clear_cache(store)
+			self.addCleanup(billing.clear_cache, store)
+		with patch.object(billing, "_fetch_plan", side_effect=fetch):
+			self.assertEqual(billing.get_active_plan("ISA")["plan"], "starter")
+			with use_store("ISB"):
+				self.assertEqual(billing.get_active_plan()["plan"], "pro")
+
+	def test_a_rep_hierarchy_never_reaches_into_another_store(self):
+		from field_sales.permissions import get_allowed_reps
+
+		# A rep of store B wrongly reporting to store A's manager is still not store A's.
+		frappe.db.set_value("Sales Rep", self.b.rep, "reports_to", self.a.manager_rep)
+		self.assertNotIn(self.b.rep, get_allowed_reps(self.a.manager))
+		self.assertIn(self.a.rep, get_allowed_reps(self.a.manager))
+
+	def test_the_shared_site_keeps_its_own_currency_and_time_zone(self):
+		from field_sales.sync.shop_settings import sync_shop_settings
+		from field_sales.utils.store import use_store
+
+		currency = frappe.db.get_default("currency")
+		time_zone = frappe.db.get_single_value("System Settings", "time_zone")
+		frappe.db.set_value("Store", "ISA", "match_shop_settings", 1)
+		other_tz = "America/New_York" if time_zone != "America/New_York" else "Asia/Kolkata"
+		with patch.dict(frappe.conf, MULTI), use_store("ISA"):
+			result = sync_shop_settings({"currency": "USD", "timezone": other_tz, "country": "US"})
+		self.assertEqual(result["changes"], [])
+		self.assertEqual(frappe.db.get_default("currency"), currency)
+		self.assertEqual(frappe.db.get_single_value("System Settings", "time_zone"), time_zone)
+		self.assertEqual(frappe.db.get_value("Store", "ISA", "shop_timezone"), other_tz)

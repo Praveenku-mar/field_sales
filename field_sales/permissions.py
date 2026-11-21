@@ -107,10 +107,13 @@ def get_allowed_reps(user: str | None = None) -> list[str]:
 	own_rep = get_own_rep(user)
 	if own_rep:
 		reports = defaultdict(list)
-		# One query for the whole hierarchy, read without these permission hooks (no recursion).
-		for rep in frappe.get_all(
-			"Sales Rep", fields=["name", "reports_to"], filters={"reports_to": ("is", "set")}
-		):
+		# One query for the hierarchy, read without these permission hooks (no recursion). Only the
+		# rep's own store: a team never spans stores, and a shared site holds every merchant's reps.
+		rep_filters = {"reports_to": ("is", "set")}
+		own_store = frappe.db.get_value("Sales Rep", own_rep, "store")
+		if own_store:
+			rep_filters["store"] = own_store
+		for rep in frappe.get_all("Sales Rep", fields=["name", "reports_to"], filters=rep_filters):
 			reports[rep.reports_to].append(rep.name)
 
 		seen = {own_rep}

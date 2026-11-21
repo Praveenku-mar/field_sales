@@ -26,6 +26,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync
 from field_sales.push.events import crossed_low_stock, notify_low_stock
 from field_sales.sync.products import _archive, sync_one_product
 from field_sales.sync.stock import get_sell_locations, set_location_stock
+from field_sales.utils.store import get_store_name
 
 REALTIME_EVENT = "stock_updated"
 PRICE_REALTIME_EVENT = "product_price_updated"
@@ -59,7 +60,7 @@ def process_event(platform: str, webhook: dict) -> dict:
 		elif topic == PRODUCT_UPDATE_TOPIC:
 			result = _process_product_update(conn, platform, event)
 		elif topic == PRODUCT_DELETE_TOPIC:
-			result = _process_product_delete(platform, event)
+			result = _process_product_delete(platform, event, conn.settings.name)
 		elif topic in ORDER_TOPICS:
 			result = _process_order_event(conn, event)
 		else:
@@ -95,6 +96,7 @@ def _process_stock(conn, platform: str, event: dict) -> dict:
 	products = frappe.get_all(
 		"Platform Product",
 		filters={
+			"store": conn.settings.name,
 			"platform": platform,
 			"external_inventory_id": stock["external_inventory_id"],
 			"track_inventory": 1,
@@ -174,16 +176,18 @@ def _process_product_update(conn, platform: str, event: dict) -> dict:
 	if not external_product_id:
 		return {"note": "Ignored: no product id"}
 
-	before = _apply_prices(platform, conn.handle_product_event(payload) or [])
+	before = _apply_prices(platform, conn.handle_product_event(payload) or [], conn.settings.name)
 	result = sync_one_product(conn, external_product_id)
 	result["price_changed"] = _publish_price_changes(before)
 	return result
 
 
-def _apply_prices(platform: str, prices: list[dict]) -> dict[str, tuple[float, float]]:
+def _apply_prices(
+	platform: str, prices: list[dict], store: str | None = None
+) -> dict[str, tuple[float, float]]:
 	"""
 	Write changed ``price`` / ``compare_at_price`` (and ``last_synced``) to the matching
-	Platform Products; unchanged ones are not written.
+	Platform Products of ``store`` (default: the current store); unchanged ones are not written.
 
 	:return: ``{Platform Product name: (price, compare_at_price)}`` as stored before, for every match.
 	"""
@@ -193,7 +197,11 @@ def _apply_prices(platform: str, prices: list[dict]) -> dict[str, tuple[float, f
 
 	products = frappe.get_all(
 		"Platform Product",
-		filters={"platform": platform, "external_variant_id": ("in", list(by_variant))},
+		filters={
+			"store": get_store_name(store),
+			"platform": platform,
+			"external_variant_id": ("in", list(by_variant)),
+		},
 		fields=["name", "external_variant_id", "price", "compare_at_price"],
 	)
 	before = {}
@@ -241,15 +249,15 @@ def _publish_price_changes(before: dict[str, tuple[float, float]]) -> int:
 	return changed
 
 
-def _process_product_delete(platform: str, event: dict) -> dict:
-	"""Archive every variant of the deleted product."""
+def _process_product_delete(platform: str, event: dict, store: str) -> dict:
+	"""Archive every variant of the deleted product (``store``'s only)."""
 	external_product_id = _plain_id((event.get("payload") or {}).get("id"))
 	if not external_product_id:
 		return {"note": "Ignored: no product id"}
 
 	names = frappe.get_all(
 		"Platform Product",
-		filters={"platform": platform, "external_product_id": external_product_id},
+		filters={"store": store, "platform": platform, "external_product_id": external_product_id},
 		pluck="name",
 	)
 	return {"archived": _archive(names)}

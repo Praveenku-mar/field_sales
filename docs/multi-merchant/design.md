@@ -226,4 +226,5 @@ Platform-neutral (D2).
   - Commission Plan names unique per store (`<name> (<store>)` when taken by another store)
   - audit of all 108 endpoints in `inventory.md` §8, enforced by a test; isolation suite `tests/test_store_isolation.py`
 - **Changed from the plan:** there is no `before_request` hook: API-key (mobile) and Shopify session-token logins happen after Frappe calls it, so `get_store_name()` reads the session user's store lazily instead. Refusing a user of an inactive store moves to Phase 6, because `Store.enabled` is also switched off by a failed token refresh and the merchant must still be able to open the app to reinstall.
-- **Still Phase 4:** webhooks, jobs and scheduled jobs need an explicit store (no session user); Shopify session token → store.
+- **Store-scoped already (review of PR #43):** product sync (per-store job id, scheduled for each enabled Store, upsert/archive/webhook queries by store), shop redaction and customer privacy lookups, plan cache per store, rep hierarchy query per store; the shared site never changes System Settings currency/time zone (per-store currency in records: Phase 5).
+- **Still Phase 4:** webhooks, other jobs and scheduled jobs need an explicit store (no session user); Shopify session token, OAuth install and webhooks → `store_for_shop()`.

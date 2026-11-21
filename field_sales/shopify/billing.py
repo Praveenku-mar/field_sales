@@ -33,6 +33,7 @@ from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
 from field_sales.utils.store import get_store, get_store_name, get_store_value
 
+# One cached plan per store: f"{CACHE_KEY}:{store}" (_cache_key).
 CACHE_KEY = "field_sales:shopify_active_plan"
 CACHE_SECONDS = 60 * 60
 NO_PLAN = "none"
@@ -44,27 +45,35 @@ query($appId: ID!, $shopId: ID!) {
 }"""
 
 
-def get_active_plan() -> dict:
+def _cache_key(store: str | None = None) -> str:
+	"""The plan cache key of ``store`` (default: the current store): each shop has its own plan."""
+	return f"{CACHE_KEY}:{get_store_name(store) or ''}"
+
+
+def get_active_plan(store: str | None = None) -> dict:
 	"""
-	``{"plan": handle | None, "trial_ends_at": str | None, "known": bool}``.
+	``{"plan": handle | None, "trial_ends_at": str | None, "known": bool}`` for ``store``
+	(default: the current store).
 
 	``known`` is False when the Partner API isn't configured or failed: limits are then not
 	enforced (a lookup problem must not stop reps from working).
 	"""
-	cached = frappe.cache.get_value(CACHE_KEY)
+	store = get_store_name(store)
+	key = _cache_key(store)
+	cached = frappe.cache.get_value(key)
 	if cached:
 		return cached
-	result = _fetch_plan()
+	result = _fetch_plan(store)
 	if result["known"]:
-		frappe.cache.set_value(CACHE_KEY, result, expires_in_sec=CACHE_SECONDS)
+		frappe.cache.set_value(key, result, expires_in_sec=CACHE_SECONDS)
 	return result
 
 
-def clear_cache() -> None:
-	frappe.cache.delete_value(CACHE_KEY)
+def clear_cache(store: str | None = None) -> None:
+	frappe.cache.delete_value(_cache_key(store))
 
 
-def _fetch_plan() -> dict:
+def _fetch_plan(store: str | None = None) -> dict:
 	unknown = {"plan": None, "trial_ends_at": None, "known": False}
 	org_id = (frappe.conf.get("shopify_partner_org_id") or "").strip()
 	token = (frappe.conf.get("shopify_partner_api_token") or "").strip()
@@ -76,7 +85,7 @@ def _fetch_plan() -> dict:
 
 	try:
 		# Also while disabled (e.g. waiting for a reinstall): the plan is the shop's either way.
-		shop_gid = get_connector(require_enabled=False).get_shop_id()
+		shop_gid = get_connector(require_enabled=False, store=store).get_shop_id()
 		response = requests.post(
 			f"https://partners.shopify.com/{org_id}/api/{PARTNER_API_VERSION}/graphql.json",
 			json={"query": ACTIVE_SUBSCRIPTION_QUERY, "variables": {"appId": app_gid, "shopId": shop_gid}},

@@ -7,6 +7,9 @@ store's country (the default country for new Retailers).
 
 The store is the source of truth: product prices come from it and order prices go back to it
 without conversion, so the site must use the store's currency.
+
+On the shared multi-store site (``is_multi_store()``) the site's currency and time zone are never
+changed: they belong to every merchant. Each store's values are only saved on its Store.
 """
 
 from zoneinfo import available_timezones
@@ -15,7 +18,7 @@ import frappe
 from frappe import _
 
 from field_sales.connectors import get_connector
-from field_sales.utils.store import get_store_value, set_store_value
+from field_sales.utils.store import get_store_value, is_multi_store, set_store_value
 
 
 def sync_shop_settings(shop: dict | None = None) -> dict:
@@ -45,7 +48,8 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		set_store_value(values)
 
 	changes = []
-	if get_store_value("match_shop_settings"):
+	# Never on the shared site: one store's sync would change every other store's currency and dates.
+	if get_store_value("match_shop_settings") and not is_multi_store():
 		if currency and _apply_currency(currency):
 			changes.append(_("Currency set to {0}").format(currency))
 		if timezone and _apply_timezone(timezone):

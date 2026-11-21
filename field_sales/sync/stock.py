@@ -96,8 +96,16 @@ def set_location_stock(
 	if name:
 		frappe.db.set_value("Product Stock", name, values, update_modified=False)
 	else:
+		# A stock row belongs to its product's store, whatever store the job runs for.
+		store = frappe.db.get_value("Platform Product", product, "store")
 		frappe.get_doc(
-			{"doctype": "Product Stock", "product": product, "location_id": location_id, **values}
+			{
+				"doctype": "Product Stock",
+				"product": product,
+				"location_id": location_id,
+				"store": store,
+				**values,
+			}
 		).insert(ignore_permissions=True)
 
 	if update_product and location_id == get_default_location():

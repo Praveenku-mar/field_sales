@@ -9,29 +9,45 @@ def execute():
 	"""
 	Move a single-location setup to multiple locations. Safe to run again.
 
-	- The Store Connection default location becomes a ``Sell from here`` Store Location row.
+	- The default location becomes a ``Sell from here`` Store Location row.
 	- Every tracked Platform Product gets a Product Stock row at the default location from its
 	  current ``available_qty`` (rows that exist are left alone).
 	- Field Orders without a location get the default one.
 	"""
-	default_id, default_name = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["default_location_id", "default_location_name"]
-	) or (None, None)
+	# Runs before (old sites) or after (re-run) per-store settings moved to Store (v2_0.create_first_store).
+	store = frappe.db.get_value("Store", {}, "name") if frappe.db.table_exists("Store") else None
+	parenttype = "Store" if store else "Store Connection"
+	parent = store or "Store Connection"
+	if store:
+		default_id, default_name = frappe.db.get_value(
+			"Store", store, ["default_location_id", "default_location_name"]
+		)
+	else:
+		default_id, default_name = frappe.db.get_value(
+			"Store Connection", "Store Connection", ["default_location_id", "default_location_name"]
+		) or (None, None)
 	if not default_id:
 		return
 
 	rows = frappe.get_all(
 		"Store Location",
-		filters={"parent": "Store Connection", "parenttype": "Store Connection", "location_id": default_id},
+		filters={"parent": parent, "parenttype": parenttype, "location_id": default_id},
 		fields=["name", "sell_from"],
 	)
 	if not rows:
-		settings = frappe.get_doc("Store Connection")
-		settings.append(
-			"locations", {"location_id": default_id, "location_name": default_name or default_id, "sell_from": 1}
-		)
-		settings.flags.ignore_validate = True
-		settings.save(ignore_permissions=True)
+		# Written directly: the parent's form may no longer have this table (it moved to Store).
+		frappe.get_doc(
+			{
+				"doctype": "Store Location",
+				"parent": parent,
+				"parenttype": parenttype,
+				"parentfield": "locations",
+				"idx": frappe.db.count("Store Location", {"parent": parent, "parenttype": parenttype}) + 1,
+				"location_id": default_id,
+				"location_name": default_name or default_id,
+				"sell_from": 1,
+			}
+		).db_insert()
 	elif not rows[0].sell_from:
 		frappe.db.set_value("Store Location", rows[0].name, "sell_from", 1, update_modified=False)
 

@@ -8,6 +8,7 @@ from frappe.tests import IntegrationTestCase
 
 from field_sales.permissions import field_order_query, visit_query
 from field_sales.tests import integration_fixtures
+from field_sales.utils.store import set_store_value
 
 PASSWORD = "it-fixture-password-123"
 
@@ -15,7 +16,7 @@ PASSWORD = "it-fixture-password-123"
 class TestIntegrationFixtures(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": "Shopify"})
+		set_store_value({"enabled": 0, "platform": "Shopify"})
 
 	def tearDown(self):
 		frappe.set_user("Administrator")

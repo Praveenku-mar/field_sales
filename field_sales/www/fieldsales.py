@@ -47,6 +47,15 @@ def has_app_access(user: str | None = None) -> bool:
 	return user == "Administrator" or bool(set(APP_ROLES) & set(frappe.get_roles(user)))
 
 
+def _boot_store() -> str | None:
+	from field_sales.utils.store import NoStoreContext, get_store_name
+
+	try:
+		return get_store_name()
+	except NoStoreContext:
+		return None
+
+
 def get_boot(embedded: dict | None = None) -> dict:
 	"""
 	Values the SPA reads from `window` before it mounts (see frontend/src/main.js).
@@ -64,6 +73,8 @@ def get_boot(embedded: dict | None = None) -> dict:
 			# server dates and times are in it, so "today" and expiry checks use it, not the
 			# browser's (utils/format.js). Read directly: the defaults copy can lag behind.
 			"time_zone": frappe.utils.get_system_timezone(),
+			# The Store this user works in (Settings forms edit it); None before one is connected.
+			"store": _boot_store(),
 			# Realtime socket (composables/useRealtime.js): its own port under bench start.
 			"socketio_port": frappe.conf.socketio_port,
 			"dev_server": frappe._dev_server,

@@ -8,6 +8,7 @@ from frappe.utils import cint, flt
 
 from field_sales.permissions import clear_allowed_reps_cache, get_own_rep, is_admin, is_manager_or_admin
 from field_sales.utils.limits import SALES_REPS, check_limit
+from field_sales.utils.store import get_store_value
 
 # What a rep earns and may give away: never set by the rep themselves (see _validate_not_own_terms).
 OWN_TERMS_FIELDS = ("commission_plan", "commission_active", "max_discount_pct")
@@ -30,7 +31,9 @@ def check_adoptable_user(user: str) -> None:
 		frappe.throw(_("{0} cannot be a Sales Rep.").format(user), frappe.PermissionError)
 	if set(frappe.get_roles(user)) - ADOPTABLE_ROLES:
 		frappe.throw(
-			_("{0} already has other roles, so only a System Manager can make them a Sales Rep.").format(user),
+			_("{0} already has other roles, so only a System Manager can make them a Sales Rep.").format(
+				user
+			),
 			frappe.PermissionError,
 		)
 
@@ -83,7 +86,9 @@ class SalesRep(Document):
 
 		# Re-pointing a rep at another user would hand that user the rep's team and roles.
 		if not self.is_new() and self.has_value_changed("user") and not is_admin():
-			frappe.throw(_("Only a System Manager can change the user of a Sales Rep."), frappe.PermissionError)
+			frappe.throw(
+				_("Only a System Manager can change the user of a Sales Rep."), frappe.PermissionError
+			)
 
 		self._validate_not_own_terms()
 		self._check_plan_limit()
@@ -102,7 +107,11 @@ class SalesRep(Document):
 				frappe.throw(_("Select at least one role: Sales Manager or Sales Rep."))
 
 		if not self.flags.ignore_permissions:
-			if self.is_new() or self.has_value_changed("sales_manager") or self.has_value_changed("sales_rep"):
+			if (
+				self.is_new()
+				or self.has_value_changed("sales_manager")
+				or self.has_value_changed("sales_rep")
+			):
 				if not is_manager_or_admin():
 					frappe.throw(
 						_("Only Administrator and Sales Manager can assign roles."),
@@ -123,7 +132,7 @@ class SalesRep(Document):
 			before = self.get_doc_before_save()
 			if before is None or cint(before.active):
 				return
-		if self.user and self.user == frappe.db.get_single_value("Store Connection", "embedded_user"):
+		if self.user and self.user == get_store_value("embedded_user"):
 			return
 		check_limit(SALES_REPS)
 

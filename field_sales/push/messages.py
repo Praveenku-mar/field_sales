@@ -13,9 +13,11 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, formatdate
 
+from field_sales.utils.store import get_store_value
+
 
 def _platform() -> str:
-	return frappe.db.get_single_value("Store Connection", "platform") or _("the store")
+	return get_store_value("platform") or _("the store")
 
 
 def render(kind: str, docname: str | None, params: dict | None) -> tuple[str, str]:
@@ -30,7 +32,9 @@ def render(kind: str, docname: str | None, params: dict | None) -> tuple[str, st
 	if kind == "visit_rescheduled":
 		return _("Visit rescheduled"), _("Your visit is now on {0}.").format(formatdate(params.get("date")))
 	if kind == "order_sync_failed":
-		return _("Order failed to sync"), _("Order {0} could not be sent to {1}.").format(docname, _platform())
+		return _("Order failed to sync"), _("Order {0} could not be sent to {1}.").format(
+			docname, _platform()
+		)
 	if kind == "shop_sync_failed":
 		return _("Shop failed to sync"), _("A shop could not be sent to {0}.").format(_platform())
 	if kind == "payment_received":

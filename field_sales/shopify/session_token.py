@@ -7,7 +7,7 @@ Shopify session tokens (App Bridge ID tokens) as a way to sign in to the API.
 Inside the Shopify admin the app runs in an iframe without Frappe cookies; App Bridge sends
 ``Authorization: Bearer <id token>`` with every request instead. ``authenticate`` is a Frappe
 ``auth_hooks`` entry: it runs after Frappe's own cookie / OAuth / API key checks and, for a
-request that carries a Shopify token, signs it in as Store Connection's ``embedded_user``.
+request that carries a Shopify token, signs it in as the Store's ``embedded_user``.
 
 A token is an HS256 JWT signed with the app's client secret, valid for one minute.
 """
@@ -18,6 +18,7 @@ import frappe
 import jwt
 
 from field_sales.shopify import config
+from field_sales.utils.store import get_store
 
 LEEWAY_SECONDS = 10
 RETRY_HEADER = "X-Shopify-Retry-Invalid-Session-Request"
@@ -34,12 +35,12 @@ def decode(token: str, require_connected: bool = True) -> dict:
 
 	Checks the HS256 signature with the app's client secret, ``exp`` / ``nbf`` (10 s leeway),
 	``aud`` == client id, and that ``iss`` (minus ``/admin``) and ``dest`` are the same
-	``https://{shop}``. A site whose Store Connection already points at a shop in Client
+	``https://{shop}``. A site whose Store already points at a shop in Client
 	Credentials mode never accepts one.
 
-	A token for another shop is refused while Store Connection is enabled for a shop.
+	A token for another shop is refused while the Store is enabled for a shop.
 
-	:param require_connected: Also require the shop to be Store Connection's, in OAuth mode.
+	:param require_connected: Also require the shop to be the Store's, in OAuth mode.
 		``False`` is for the first request after install, before the token exchange saved it.
 	:raises InvalidSessionToken:
 	"""
@@ -138,4 +139,4 @@ def _looks_like_session_token(token: str) -> bool:
 
 
 def _connection():
-	return frappe.get_single("Store Connection")
+	return get_store()

@@ -9,6 +9,7 @@ from frappe.utils import nowdate
 
 from field_sales.sync.customers import push_retailer
 from field_sales.sync.orders import push_order
+from field_sales.utils.store import set_store_value
 
 SHOP = "test-shop.myshopify.com"
 
@@ -30,12 +31,17 @@ class TestServerFields(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# set_single_value does not validate; everything rolls back after each test.
-		frappe.db.set_single_value(
-			"Store Connection",
-			{"platform": "Shopify", "enabled": 0, "store_url": SHOP, "default_location_id": "", "order_mode": "Draft"},
+		set_store_value(
+			{
+				"platform": "Shopify",
+				"enabled": 0,
+				"store_url": SHOP,
+				"default_location_id": "",
+				"order_mode": "Draft",
+			},
 		)
 		# The site's live sell-from rows would need a default; these tests assume no locations.
-		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
+		frappe.db.delete("Store Location", {"parenttype": "Store"})
 		self.product = frappe.get_doc(
 			{
 				"doctype": "Platform Product",
@@ -49,7 +55,9 @@ class TestServerFields(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 		self.rep_user = self.make_user("serverfields.rep@example.com", ["Field Sales Rep"])
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user}).insert(ignore_permissions=True)
+		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user}).insert(
+			ignore_permissions=True
+		)
 		self.sysman = self.make_user("serverfields.sysman@example.com", ["System Manager"])
 		self.retailer = frappe.get_doc(
 			{
@@ -102,12 +110,14 @@ class TestServerFields(IntegrationTestCase):
 		return frappe.db.get_value("Field Order", name or self.order.name, fieldname)
 
 	def enable_store(self):
-		frappe.db.set_single_value("Store Connection", "enabled", 1)
+		set_store_value("enabled", 1)
 
 	# -- Field Order -------------------------------------------------------
 
 	def test_rep_cannot_set_draft_id(self):
-		self.as_user(self.rep_user, frappe.client.set_value, "Field Order", self.order.name, "external_draft_id", "999")
+		self.as_user(
+			self.rep_user, frappe.client.set_value, "Field Order", self.order.name, "external_draft_id", "999"
+		)
 		self.assertFalse(self.order_value("external_draft_id"))
 
 	def test_rep_cannot_set_sync_state_on_save(self):
@@ -115,16 +125,26 @@ class TestServerFields(IntegrationTestCase):
 		doc.update(external_order_id="555", sync_status="Synced", platform="Shopify", sync_attempts=3)
 		self.as_user(self.rep_user, frappe.client.save, doc)
 		values = frappe.db.get_value(
-			"Field Order", self.order.name, ["external_order_id", "sync_status", "platform", "sync_attempts"], as_dict=True
+			"Field Order",
+			self.order.name,
+			["external_order_id", "sync_status", "platform", "sync_attempts"],
+			as_dict=True,
 		)
-		self.assertEqual((values.external_order_id, values.sync_status, values.platform, values.sync_attempts), (None, "Draft", None, 0))
+		self.assertEqual(
+			(values.external_order_id, values.sync_status, values.platform, values.sync_attempts),
+			(None, "Draft", None, 0),
+		)
 
 	def test_new_order_with_store_ids_starts_unsynced(self):
 		order = self.as_user(
-			self.rep_user, self.new_order(external_draft_id="999", external_order_id="555", sync_status="Synced").insert
+			self.rep_user,
+			self.new_order(external_draft_id="999", external_order_id="555", sync_status="Synced").insert,
 		)
 		self.assertEqual(
-			(self.order_value("external_draft_id", order.name), self.order_value("external_order_id", order.name)),
+			(
+				self.order_value("external_draft_id", order.name),
+				self.order_value("external_order_id", order.name),
+			),
 			(None, None),
 		)
 		self.assertEqual(self.order_value("sync_status", order.name), "Draft")
@@ -141,14 +161,23 @@ class TestServerFields(IntegrationTestCase):
 		frappe.db.set_value(
 			"Field Order",
 			self.order.name,
-			{"docstatus": 2, "external_draft_id": "D1", "external_order_id": "O1", "sync_status": "Synced", "platform": "Shopify"},
+			{
+				"docstatus": 2,
+				"external_draft_id": "D1",
+				"external_order_id": "O1",
+				"sync_status": "Synced",
+				"platform": "Shopify",
+			},
 		)
 		cancelled = frappe.get_doc("Field Order", self.order.name)
 		amended = frappe.copy_doc(cancelled)
 		amended.docstatus = 0  # as the form's Duplicate does
 		self.as_user(self.rep_user, amended.insert)
 		values = frappe.db.get_value(
-			"Field Order", amended.name, ["external_draft_id", "external_order_id", "sync_status", "platform"], as_dict=True
+			"Field Order",
+			amended.name,
+			["external_draft_id", "external_order_id", "sync_status", "platform"],
+			as_dict=True,
 		)
 		self.assertEqual(tuple(values.values()), (None, None, "Draft", None))
 
@@ -194,7 +223,9 @@ class TestServerFields(IntegrationTestCase):
 		self.assert_unpaid(copy.name)
 
 	def test_system_manager_may_correct_saved_order(self):
-		self.as_user(self.sysman, frappe.client.set_value, "Field Order", self.order.name, "external_order_id", "777")
+		self.as_user(
+			self.sysman, frappe.client.set_value, "Field Order", self.order.name, "external_order_id", "777"
+		)
 		self.assertEqual(self.order_value("external_order_id"), "777")
 
 	def test_order_sync_records_ids(self):
@@ -228,11 +259,25 @@ class TestServerFields(IntegrationTestCase):
 	# -- Retailer ----------------------------------------------------------
 
 	def test_rep_cannot_set_customer_id(self):
-		self.as_user(self.rep_user, frappe.client.set_value, "Retailer", self.retailer.name, "external_customer_id", "999")
+		self.as_user(
+			self.rep_user,
+			frappe.client.set_value,
+			"Retailer",
+			self.retailer.name,
+			"external_customer_id",
+			"999",
+		)
 		self.assertFalse(frappe.db.get_value("Retailer", self.retailer.name, "external_customer_id"))
 
 	def test_rep_cannot_set_last_visit(self):
-		self.as_user(self.rep_user, frappe.client.set_value, "Retailer", self.retailer.name, "last_visit", "2020-01-01 10:00:00")
+		self.as_user(
+			self.rep_user,
+			frappe.client.set_value,
+			"Retailer",
+			self.retailer.name,
+			"last_visit",
+			"2020-01-01 10:00:00",
+		)
 		self.assertFalse(frappe.db.get_value("Retailer", self.retailer.name, "last_visit"))
 
 	def test_new_retailer_with_customer_id_starts_unlinked(self):
@@ -250,15 +295,21 @@ class TestServerFields(IntegrationTestCase):
 				}
 			).insert,
 		)
-		values = frappe.db.get_value("Retailer", retailer.name, ["external_customer_id", "sync_status"], as_dict=True)
+		values = frappe.db.get_value(
+			"Retailer", retailer.name, ["external_customer_id", "sync_status"], as_dict=True
+		)
 		self.assertEqual((values.external_customer_id, values.sync_status), (None, "Draft"))
 
 	def test_retailer_sync_records_customer_id(self):
 		self.enable_store()
 		with (
-			patch("field_sales.connectors.shopify.ShopifyConnector.create_customer", return_value={"id": "C77"}),
+			patch(
+				"field_sales.connectors.shopify.ShopifyConnector.create_customer", return_value={"id": "C77"}
+			),
 			patch.object(frappe.db, "commit"),
 		):
 			push_retailer(self.retailer.name)
-		values = frappe.db.get_value("Retailer", self.retailer.name, ["external_customer_id", "sync_status"], as_dict=True)
+		values = frappe.db.get_value(
+			"Retailer", self.retailer.name, ["external_customer_id", "sync_status"], as_dict=True
+		)
 		self.assertEqual((values.external_customer_id, values.sync_status), ("C77", "Synced"))

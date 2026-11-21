@@ -12,6 +12,7 @@ from field_sales.connectors import ConnectorError
 from field_sales.sync.customers import push_retailer
 from field_sales.sync.notify import clear_role_users_cache
 from field_sales.sync.orders import push_order
+from field_sales.utils.store import set_store_value
 
 
 class TestSyncFailedNotification(IntegrationTestCase):
@@ -19,7 +20,7 @@ class TestSyncFailedNotification(IntegrationTestCase):
 
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"platform": "Shopify", "enabled": 1})
+		set_store_value({"platform": "Shopify", "enabled": 1, "store_url": "syncfail-shop.myshopify.com"})
 
 	def tearDown(self):
 		frappe.set_user("Administrator")
@@ -46,9 +47,9 @@ class TestSyncFailedNotification(IntegrationTestCase):
 			rep.reports_to = reports_to
 			rep.save(ignore_permissions=True)
 			return rep
-		return frappe.get_doc(
-			{"doctype": "Sales Rep", "user": user, "reports_to": reports_to}
-		).insert(ignore_permissions=True)
+		return frappe.get_doc({"doctype": "Sales Rep", "user": user, "reports_to": reports_to}).insert(
+			ignore_permissions=True
+		)
 
 	def make_retailer(self, email="test.retailer@example.com"):
 		return frappe.get_doc(
@@ -119,7 +120,7 @@ class TestSyncFailedNotification(IntegrationTestCase):
 		mgr1_user = self.make_user("syncfail.mgr1@example.com", ["Field Sales Rep", "Sales Manager"])
 		mgr1_rep = self.make_rep(mgr1_user)
 		mgr2_user = self.make_user("syncfail.mgr2@example.com", ["Field Sales Rep", "Sales Manager"])
-		mgr2_rep = self.make_rep(mgr2_user)
+		self.make_rep(mgr2_user)
 
 		rep1_user = self.make_user("syncfail.rep1@example.com", ["Field Sales Rep"])
 		rep1 = self.make_rep(rep1_user, reports_to=mgr1_rep.name)
@@ -191,7 +192,11 @@ class TestSyncFailedNotification(IntegrationTestCase):
 
 		admin_logs = frappe.get_all(
 			"Notification Log",
-			filters={"document_type": "Retailer", "document_name": retailer.name, "for_user": "Administrator"},
+			filters={
+				"document_type": "Retailer",
+				"document_name": retailer.name,
+				"for_user": "Administrator",
+			},
 			pluck="subject",
 		)
 		self.assertEqual(len(admin_logs), 1)

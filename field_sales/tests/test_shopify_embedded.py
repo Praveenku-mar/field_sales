@@ -21,6 +21,7 @@ from field_sales.tests.test_shopify_app import (
 	_response,
 	_token_body,
 )
+from field_sales.utils.store import get_store_name, get_store_value, set_store_value
 from field_sales.www import fieldsales
 
 
@@ -44,7 +45,7 @@ def make_token(shop=SHOP, secret=APP_SECRET, aud=APP_ID, exp_in=60, **overrides)
 class EmbeddedTestCase(ShopifyAppTestCase):
 	def setUp(self):
 		super().setUp()
-		frappe.db.set_single_value("Store Connection", "embedded_user", None)
+		set_store_value("embedded_user", None)
 		frappe.local.response_headers = frappe.local.response_headers.__class__()
 		enqueue = patch.object(oauth.frappe, "enqueue")
 		self.enqueue = enqueue.start()
@@ -96,7 +97,7 @@ class TestSessionToken(EmbeddedTestCase):
 		self.assertEqual(session_token.decode(make_token(exp_in=-5))["shop"], SHOP)
 
 	def test_client_credentials_site_rejects_tokens(self):
-		frappe.db.set_single_value("Store Connection", "shopify_auth_mode", "Client Credentials")
+		set_store_value("shopify_auth_mode", "Client Credentials")
 		self.assert_retry_401(make_token())
 
 	def test_other_requests_are_left_alone(self):
@@ -113,7 +114,7 @@ class TestSessionToken(EmbeddedTestCase):
 		self.assertEqual(user, expected)
 		self.assertIn("Sales Manager", frappe.get_roles(expected))
 		self.assertTrue(frappe.db.exists("Sales Rep", {"user": expected}))
-		self.assertEqual(frappe.db.get_single_value("Store Connection", "embedded_user"), expected)
+		self.assertEqual(get_store_value("embedded_user"), expected)
 		self.assertEqual(frappe.local.shopify_staff_id, "42")
 		# Second request: same user, nothing created again.
 		self.assertEqual(self.authenticate(make_token()), expected)
@@ -126,7 +127,7 @@ class TestSessionToken(EmbeddedTestCase):
 		self.assertEqual(frappe.local.form_dict, {"doctype": "Retailer", "key": "open_orders"})
 
 	def test_auth_hook_uses_configured_embedded_user(self):
-		frappe.db.set_single_value("Store Connection", "embedded_user", "Administrator")
+		set_store_value("embedded_user", "Administrator")
 		self.assertEqual(self.authenticate(make_token()), "Administrator")
 
 	def test_cookie_session_wins(self):
@@ -159,12 +160,8 @@ class TestTokenExchange(EmbeddedTestCase):
 		self.assertEqual(
 			(settings.enabled, settings.shopify_auth_mode, settings.store_url), (1, "OAuth", SHOP)
 		)
-		self.assertEqual(
-			get_decrypted_password("Store Connection", "Store Connection", "access_token"), "shpat_new"
-		)
-		self.assertEqual(
-			get_decrypted_password("Store Connection", "Store Connection", "refresh_token"), "shprt_new"
-		)
+		self.assertEqual(get_decrypted_password("Store", get_store_name(), "access_token"), "shpat_new")
+		self.assertEqual(get_decrypted_password("Store", get_store_name(), "refresh_token"), "shprt_new")
 		queued = [c.args[0] for c in self.enqueue.call_args_list]
 		self.assertIn("field_sales.shopify.webhooks.register_webhooks", queued)
 
@@ -190,7 +187,7 @@ class TestTokenExchange(EmbeddedTestCase):
 
 	def test_another_connected_shop_is_refused(self):
 		self.connect_oauth()
-		frappe.db.set_single_value("Store Connection", "store_url", "first-shop.myshopify.com")
+		set_store_value("store_url", "first-shop.myshopify.com")
 		with patch.object(embedded.requests, "post") as post:
 			self.assert_retry_401(make_token())
 		post.assert_not_called()
@@ -257,9 +254,7 @@ class TestEmbeddedPage(EmbeddedTestCase):
 			self.page("shop=other-shop.myshopify.com&host=YWRtaW4&embedded=1")
 
 	def test_first_load_after_install_exchanges_id_token(self):
-		frappe.db.set_single_value(
-			"Store Connection", {"enabled": 0, "store_url": "", "shopify_auth_mode": "Client Credentials"}
-		)
+		set_store_value({"enabled": 0, "store_url": "", "shopify_auth_mode": "Client Credentials"})
 		token = make_token()
 		with patch.object(embedded.requests, "post", return_value=_response(200, _token_body())):
 			context = self.page(f"shop={SHOP}&host=YWRtaW4&embedded=1&id_token={token}")

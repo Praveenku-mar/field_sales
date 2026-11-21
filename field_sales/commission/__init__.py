@@ -3,18 +3,19 @@
 
 import frappe
 from frappe import _
+from frappe.utils import cint
+
+from field_sales.utils.store import get_store_value
 
 
 def commission_enabled() -> bool:
 	"""
-	Whether this company pays commission (Store Connection → Pay Commission to Sales Reps).
+	Whether this store pays commission (Store → Pay Commission to Sales Reps).
 
-	Read from tabSingles so a site that has never saved the field (before the patch ran) counts as on.
+	A site with no Store yet counts as on (the field's default).
 	"""
-	rows = frappe.db.sql(
-		"select value from `tabSingles` where doctype = 'Store Connection' and field = 'enable_commission'"
-	)
-	return not rows or str(rows[0][0]) not in ("0", "", "None")
+	value = get_store_value("enable_commission")
+	return value is None or bool(cint(value))
 
 
 def require_commission_enabled() -> None:

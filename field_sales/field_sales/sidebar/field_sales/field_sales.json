@@ -31,12 +31,12 @@
    "indent": 0,
    "is_default_module": 0,
    "keep_closed": 0,
-   "label": "Store Connection",
+   "label": "Store",
    "link_type": "DocType",
    "open_in_new_tab": 0,
    "show_arrow": 0,
    "type": "Link",
-   "link_to": "Store Connection"
+   "link_to": "Store"
   },
   {
    "added": 0,
@@ -182,7 +182,7 @@
    "link_to": "Rep Performance"
   }
  ],
- "modified": "2026-10-10 18:00:00.000000",
+ "modified": "2026-11-21 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Sales",

@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Your Company and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on("Store Connection", {
+frappe.ui.form.on("Store", {
 	refresh(frm) {
 		frm.add_custom_button(__("Test Connection"), () =>
 			save_if_dirty(frm).then(() => test_connection(frm))

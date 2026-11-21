@@ -1,7 +1,7 @@
 app_name = "field_sales"
 app_title = "Agamsale"
 app_publisher = "Agamnxt Technologies"
-app_description = "Agamsale is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
+app_description = "Agamsale is a Frappe app that lets a brand's sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
 app_email = "praveenkumar@agamnxt.com"
 app_license = "mit"
 
@@ -198,13 +198,39 @@ has_permission = {
 # ---------------
 # Hook on document methods and events
 
+# Business doctypes that belong to one Store (required ``store`` link, set on insert).
+# Read elsewhere with utils/store.py -> store_doctypes().
+field_sales_store_doctypes = [
+	"Retailer",
+	"Field Order",
+	"Visit",
+	"Platform Product",
+	"Product Stock",
+	"Sales Rep",
+	"Commission Plan",
+	"Commission Entry",
+	"Commission Statement",
+	"Payment Transaction",
+	"Sync Log",
+	"Privacy Request",
+]
+# No moving another team's record to your own rep (permissions.check_owner_change).
+_OWNER_CHECKED = ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+
 doc_events = {
 	# Push bell notifications made by push.notify.notify_users to the mobile app.
 	"Notification Log": {"after_insert": "field_sales.push.notify.on_notification_log_insert"},
-	# No moving another team's record to your own rep (permissions.check_owner_change).
+	# A new record belongs to the current store (utils/store.py -> stamp_store).
 	**{
-		doctype: {"validate": "field_sales.permissions.check_owner_change"}
-		for doctype in ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+		doctype: {
+			"before_insert": "field_sales.utils.store.stamp_store",
+			**(
+				{"validate": "field_sales.permissions.check_owner_change"}
+				if doctype in _OWNER_CHECKED
+				else {}
+			),
+		}
+		for doctype in field_sales_store_doctypes
 	},
 }
 
@@ -217,7 +243,7 @@ scheduler_events = {
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 		# Keep the site's currency and time zone the same as the store's.
 		"field_sales.sync.shop_settings.scheduled_sync",
-		# Store Connection retailer_inactive_anonymise_days (0 = off).
+		# Store retailer_inactive_anonymise_days (0 = off).
 		"field_sales.utils.anonymise.anonymise_inactive_retailers",
 	],
 	# Razorpay payment links whose webhook never arrived (Link Sent, last 7 days, 50 a run).
@@ -226,7 +252,7 @@ scheduler_events = {
 		# Confirmed store orders paid on Razorpay that the store does not show as paid yet.
 		"field_sales.sync.orders.retry_store_payments",
 	],
-	# Ticks every 30 minutes; scheduled_sync itself honours Store Connection's sync frequency.
+	# Ticks every 30 minutes; scheduled_sync itself honours the Store's sync frequency.
 	"cron": {
 		"*/30 * * * *": [
 			"field_sales.sync.products.scheduled_sync",
@@ -325,7 +351,7 @@ after_request = ["field_sales.shopify.embedded.after_request"]
 # --------------------------------
 
 # Shopify admin (embedded app): requests with an App Bridge session token sign in as
-# Store Connection's embedded user. A no-op for every other request.
+# the Store's embedded user. A no-op for every other request.
 auth_hooks = ["field_sales.shopify.session_token.authenticate"]
 
 # Automatically update python controller files with type annotations for this app.

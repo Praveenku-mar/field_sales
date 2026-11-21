@@ -5,6 +5,7 @@
 frappe.get_list, so the Sales Rep hierarchy rules apply as they do in the desk."""
 
 from contextlib import suppress
+
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
@@ -13,11 +14,12 @@ from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.connectors.shopify import is_oauth
-from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason
+from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason, razorpay_enabled
 from field_sales.permissions import hierarchy_filters, is_manager_or_admin, is_retailer_user
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
+from field_sales.utils.store import get_store_value
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
 
 SEARCH_LIMIT = 6
@@ -210,7 +212,12 @@ def search(txt: str) -> dict:
 	like = f"%{escape_like(txt)}%"
 	retailers = frappe.get_list(
 		"Retailer",
-		or_filters={"name": ("like", like), "retailer_name": ("like", like), "city": ("like", like), "phone": ("like", like)},
+		or_filters={
+			"name": ("like", like),
+			"retailer_name": ("like", like),
+			"city": ("like", like),
+			"phone": ("like", like),
+		},
 		fields=["name", "retailer_name", "city", "sync_status"],
 		order_by="modified desc",
 		limit_page_length=SEARCH_LIMIT,
@@ -239,7 +246,16 @@ def get_dashboard() -> dict:
 	visits_today = frappe.get_list(
 		"Visit",
 		filters={"visit_date": today, "status": ("!=", "Cancelled")},
-		fields=["name", "retailer", "retailer_name", "city", "sales_rep_name", "status", "check_in_time", "time_on_site_min"],
+		fields=[
+			"name",
+			"retailer",
+			"retailer_name",
+			"city",
+			"sales_rep_name",
+			"status",
+			"check_in_time",
+			"time_on_site_min",
+		],
 		order_by="status desc, modified desc",
 		limit_page_length=50,
 	)
@@ -300,7 +316,15 @@ def get_product_activity(product: str) -> dict:
 	recent = frappe.get_list(
 		"Field Order",
 		filters=[["Field Order Item", "product", "=", product], ["Field Order", "docstatus", "!=", 2]],
-		fields=["name", "retailer_name", "order_date", "docstatus", "sync_status", "`tabField Order Item`.qty as qty", "`tabField Order Item`.amount as amount"],
+		fields=[
+			"name",
+			"retailer_name",
+			"order_date",
+			"docstatus",
+			"sync_status",
+			"`tabField Order Item`.qty as qty",
+			"`tabField Order Item`.amount as amount",
+		],
 		order_by="`tabField Order`.order_date desc",
 		limit_page_length=10,
 	)
@@ -376,8 +400,8 @@ def get_order_sync_info(field_order: str) -> dict:
 		as_dict=True,
 	)
 
-	location_id, location_name, order_mode = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["default_location_id", "default_location_name", "order_mode"]
+	location_id, location_name, order_mode = get_store_value(
+		["default_location_id", "default_location_name", "order_mode"]
 	) or (None, None, None)
 	order_url = draft_url = None
 	if doc.external_order_id or doc.external_draft_id:
@@ -482,18 +506,28 @@ def _charts(today: str) -> dict:
 		fields=["sales_rep", {"COUNT": "*", "as": "orders"}, {"SUM": "grand_total", "as": "value"}],
 		group_by="sales_rep",
 	)
-	names = dict(
-		frappe.get_all(
-			"Sales Rep", filters={"name": ("in", [r.sales_rep for r in by_rep])}, fields=["name", "full_name"], as_list=True
+	names = (
+		dict(
+			frappe.get_all(
+				"Sales Rep",
+				filters={"name": ("in", [r.sales_rep for r in by_rep])},
+				fields=["name", "full_name"],
+				as_list=True,
+			)
 		)
-	) if by_rep else {}
+		if by_rep
+		else {}
+	)
 
 	return {
 		"visits_30d": [{"date": str(d), "visits": visits.get(str(d), 0)} for d in days],
 		"order_value_30d": [{"date": str(d), "value": flt(value.get(str(d), 0.0), 2)} for d in days],
 		"visits_by_status": [{"status": r.status, "count": r.count} for r in by_status],
 		"orders_by_rep_7d": sorted(
-			[{"rep": names.get(r.sales_rep) or r.sales_rep, "orders": r.orders, "value": flt(r.value, 2)} for r in by_rep],
+			[
+				{"rep": names.get(r.sales_rep) or r.sales_rep, "orders": r.orders, "value": flt(r.value, 2)}
+				for r in by_rep
+			],
 			key=lambda r: -r["value"],
 		),
 	}
@@ -531,7 +565,16 @@ def _team_this_month(today: str) -> list[dict]:
 	)
 
 	rows = get_rep_stats(get_first_day(today), today, get_reps_in_scope({}))
-	keys = ("sales_rep", "sales_rep_name", "territory", "completed_visits", "orders", "order_value", "achievement_pct", "conversion_pct")
+	keys = (
+		"sales_rep",
+		"sales_rep_name",
+		"territory",
+		"completed_visits",
+		"orders",
+		"order_value",
+		"achievement_pct",
+		"conversion_pct",
+	)
 	return [{k: row.get(k) for k in keys} for row in rows[:10]]
 
 
@@ -558,7 +601,7 @@ def get_order_payment_info(field_order: str) -> dict:
 		"order_label": doc.store_order_name or doc.name,
 		"store_checkout_url": doc.store_checkout_url,
 		"retailer_name": doc.retailer_name,
-		"razorpay_enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
+		"razorpay_enabled": razorpay_enabled(),
 		"payment_links_available": payment_links_disabled_reason() is None,
 		"can_create_link": bool(doc.has_permission("write")),
 		"can_mark_paid": bool(
@@ -620,7 +663,7 @@ def _refund_info(doc) -> dict:
 		refundable > 0
 		and bool(set(frappe.get_roles()) & set(REFUND_ROLES))
 		and doc.has_permission("write")
-		and bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled")))
+		and razorpay_enabled()
 	)
 	return {"refundable_amount": refundable, "can_refund": bool(can)}
 
@@ -649,9 +692,7 @@ def _count(doctype: str, filters: dict | list) -> int:
 
 def _store_info() -> dict:
 	"""Store name for the sidebar header: the shop's domain without scheme or path."""
-	values = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["platform", "enabled", "store_url", "shopify_auth_mode"], as_dict=True
-	) or {}
+	values = get_store_value(["platform", "enabled", "store_url", "shopify_auth_mode"], as_dict=True) or {}
 	url = (values.get("store_url") or "").strip().lower()
 	host = url.split("://", 1)[-1].split("/", 1)[0]
 	return {

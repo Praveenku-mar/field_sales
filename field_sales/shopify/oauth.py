@@ -9,7 +9,7 @@ Shopify App Store install: the OAuth authorization code grant with an expiring o
    and redirects to the shop's ``/admin/oauth/authorize``.
 3. The merchant approves; Shopify redirects to ``callback`` with ``code``, ``state``, ``hmac``.
 4. ``callback`` checks everything again, swaps the code for tokens (``expiring=1``), saves
-   them on Store Connection (OAuth mode, enabled), queues webhook registration and
+   them on the Store (OAuth mode, enabled), queues webhook registration and
    redirects to the app.
 
 Neither endpoint needs a Frappe login (``allow_guest``) or a browser cookie: state lives in
@@ -39,6 +39,7 @@ from field_sales.connectors.shopify import (
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
 from field_sales.shopify import config
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import get_store, make_store_code, set_store_value
 
 STATE_TTL_SECONDS = 10 * 60
 STATE_KEY = "field_sales:shopify_oauth_state:{}"
@@ -149,7 +150,7 @@ def check_shop_allowed(shop: str) -> None:
 	retailers and orders. A different shop is allowed only after a System Manager clears the
 	connection (``reset_connection``). A first install (no ``store_url``) is allowed.
 	"""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.platform != "Shopify" or not settings.store_url:
 		return
 	if normalize_shop_domain(settings.store_url) != shop:
@@ -167,11 +168,12 @@ def reset_connection() -> dict:
 	mandatory on the form and locked in OAuth mode. Synced records are left as they are.
 	"""
 	frappe.only_for("System Manager")
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
+	if settings.is_new():
+		return {"reset": True, "previous_shop": None}
 	previous = settings.store_url
-	clear_oauth_tokens()
-	frappe.db.set_single_value(
-		"Store Connection",
+	clear_oauth_tokens(settings.name)
+	set_store_value(
 		{
 			"enabled": 0,
 			"store_url": None,
@@ -180,7 +182,7 @@ def reset_connection() -> dict:
 			"uninstalled_on": None,
 			"last_test_status": "Connection reset",
 			"last_tested_on": now_datetime(),
-		},
+		}
 	)
 	log_sync_durable(
 		platform="Shopify",
@@ -239,7 +241,7 @@ def _exchange_code(shop: str, code: str) -> dict:
 
 def save_installation(shop: str, body: dict) -> list[str]:
 	"""
-	Point Store Connection at ``shop`` in OAuth mode with the new tokens, then queue
+	Point the Store at ``shop`` (creating it on a site with none) in OAuth mode with the new tokens, then queue
 	webhook registration. Saved as Administrator (the request is a guest's).
 
 	:return: Requested scopes the merchant did not grant.
@@ -247,7 +249,7 @@ def save_installation(shop: str, body: dict) -> list[str]:
 	previous_user = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
-		settings = frappe.get_single("Store Connection")
+		settings = get_store()
 		settings.update(
 			{
 				"platform": "Shopify",
@@ -260,10 +262,12 @@ def save_installation(shop: str, body: dict) -> list[str]:
 				"last_tested_on": now_datetime(),
 			}
 		)
+		if settings.is_new():
+			settings.store_code = make_store_code(shop)
 		settings.flags.from_store_install = True
 		settings.save(ignore_permissions=True)
 		# After the save: validate() may clear tokens of the previous shop or mode.
-		save_oauth_tokens(body)
+		save_oauth_tokens(body, settings.name)
 	finally:
 		frappe.set_user(previous_user)
 
@@ -271,7 +275,7 @@ def save_installation(shop: str, body: dict) -> list[str]:
 		"field_sales.shopify.webhooks.register_webhooks",
 		queue="short",
 		enqueue_after_commit=True,
-		job_id="field_sales_shopify_register_webhooks",
+		job_id=f"field_sales:register_webhooks:{settings.name}",
 		deduplicate=True,
 	)
 	# A fresh install has no default location: pick one so products start syncing.
@@ -279,7 +283,7 @@ def save_installation(shop: str, body: dict) -> list[str]:
 		"field_sales.shopify.merchant_settings.setup_new_store",
 		queue="short",
 		enqueue_after_commit=True,
-		job_id="field_sales_shopify_setup_new_store",
+		job_id=f"field_sales:setup_new_store:{settings.name}",
 		deduplicate=True,
 	)
 	return config.missing_scopes(body.get("scope"))

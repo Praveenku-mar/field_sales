@@ -12,6 +12,7 @@ from frappe.utils import add_days, now_datetime, nowdate
 from field_sales.commission import engine
 from field_sales.connectors import ConnectorError
 from field_sales.field_sales.doctype.field_order import field_order as field_order_module
+from field_sales.utils.store import set_store_value
 
 PRICE = 100
 
@@ -19,14 +20,21 @@ PRICE = 100
 class TestOrderCancel(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": "Shopify"})
-		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
+		set_store_value({"enabled": 0, "platform": "Shopify"})
+		frappe.db.delete("Store Location", {"parenttype": "Store"})
 
 		user = frappe.get_doc(
-			{"doctype": "User", "email": "cancel.rep@example.com", "first_name": "Cancel", "send_welcome_email": 0}
+			{
+				"doctype": "User",
+				"email": "cancel.rep@example.com",
+				"first_name": "Cancel",
+				"send_welcome_email": 0,
+			}
 		).insert(ignore_permissions=True)
 		user.add_roles("Field Sales Rep")
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": user.name}).insert(ignore_permissions=True).name
+		self.rep = (
+			frappe.get_doc({"doctype": "Sales Rep", "user": user.name}).insert(ignore_permissions=True).name
+		)
 		retailer = frappe.get_doc(
 			{
 				"doctype": "Retailer",
@@ -132,8 +140,8 @@ class TestOrderCancel(IntegrationTestCase):
 
 	def test_store_connection_off_refuses(self):
 		self.set_store(external_order_id="O1")
-		self.get_connector.side_effect = frappe.ValidationError("Store Connection is disabled")
-		with self.assertRaisesRegex(frappe.ValidationError, "Store Connection is off"):
+		self.get_connector.side_effect = frappe.ValidationError("The store connection is disabled")
+		with self.assertRaisesRegex(frappe.ValidationError, "store connection is off"):
 			self.cancel()
 		self.assertEqual(self.docstatus(), 1)
 
@@ -167,7 +175,7 @@ class TestOrderCancel(IntegrationTestCase):
 
 	def test_reconcile_follows_a_cancelled_order_without_new_entries(self):
 		self.set_store(external_order_id="O1", docstatus=2)
-		frappe.db.set_single_value("Store Connection", "enable_commission", 1)
+		set_store_value("enable_commission", 1)
 		with (
 			patch.object(engine, "get_connector", return_value=self.conn),
 			patch.object(engine._Context, "create_missing_entries") as create,
@@ -231,17 +239,25 @@ class TestOrderCancel(IntegrationTestCase):
 	def test_draft_linker_skips_drafts_pushed_long_ago(self):
 		from field_sales.sync import orders as sync_orders
 
-		frappe.db.set_single_value("Store Connection", "enabled", 1)
+		set_store_value("enabled", 1)
 		frappe.db.set_value(
 			"Field Order",
-			{"docstatus": 1, "sync_status": "Synced", "external_draft_id": ("is", "set"), "name": ("!=", self.order)},
+			{
+				"docstatus": 1,
+				"sync_status": "Synced",
+				"external_draft_id": ("is", "set"),
+				"name": ("!=", self.order),
+			},
 			"last_sync_attempt",
 			add_days(now_datetime(), -(sync_orders.DRAFT_LINK_DAYS + 1)),
 			update_modified=False,
 		)
 		self.conn.get_completed_drafts.return_value = {}
 		with patch.object(sync_orders, "get_connector", return_value=self.conn):
-			self.set_store(external_draft_id="D-OLD", last_sync_attempt=add_days(now_datetime(), -(sync_orders.DRAFT_LINK_DAYS + 1)))
+			self.set_store(
+				external_draft_id="D-OLD",
+				last_sync_attempt=add_days(now_datetime(), -(sync_orders.DRAFT_LINK_DAYS + 1)),
+			)
 			sync_orders.link_completed_drafts()
 			self.conn.get_completed_drafts.assert_not_called()
 

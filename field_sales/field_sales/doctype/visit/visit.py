@@ -2,7 +2,6 @@
 # For license information, please see license.txt
 
 import math
-
 import re
 
 import frappe
@@ -53,7 +52,11 @@ class Visit(Document):
 			before = self.get_doc_before_save()
 			if before:
 				self.client_temp_id = before.client_temp_id
-			stored = before.client_temp_key if before else frappe.db.get_value("Visit", self.name, "client_temp_key")
+			stored = (
+				before.client_temp_key
+				if before
+				else frappe.db.get_value("Visit", self.name, "client_temp_key")
+			)
 			if self.status == "Cancelled":
 				self.client_temp_key = None  # a cancelled visit frees its id
 			elif before and before.status == "Cancelled":
@@ -152,9 +155,9 @@ class Visit(Document):
 					old, new = old and getdate(old), new and getdate(new)
 				if (old or None) != (new or None):
 					frappe.throw(
-						_("{0} cannot be changed after Check In. Cancel this visit and plan a new one.").format(
-							_(self.meta.get_label(fieldname))
-						),
+						_(
+							"{0} cannot be changed after Check In. Cancel this visit and plan a new one."
+						).format(_(self.meta.get_label(fieldname))),
 						frappe.PermissionError,
 					)
 		for fieldname in CHECK_IN_FIELDS:
@@ -313,3 +316,5 @@ def get_geofence_radius(retailer: str) -> int:
 def on_doctype_update():
 	# Rep Performance and list filters read visits by rep over a date range.
 	frappe.db.add_index("Visit", ["sales_rep", "visit_date"])
+	# The same, inside one store (every list and report filters by store).
+	frappe.db.add_index("Visit", ["store", "sales_rep", "visit_date"])

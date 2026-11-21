@@ -16,6 +16,7 @@ from field_sales.connectors.shopify import (
 	ShopifyConnector,
 	_order_metafields,
 )
+from field_sales.utils.store import get_store, set_store_value
 
 SHOP = "test-shop.myshopify.com"
 
@@ -23,26 +24,31 @@ SHOP = "test-shop.myshopify.com"
 class TestOrderMetafields(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
 				"store_url": SHOP,
 				"shopify_api_version": "2026-10",
 				"order_mode": "Confirmed",
-			},
+			}
 		)
-		# Not set up yet (an empty Datetime single would read back as 0001-01-01).
-		frappe.db.delete("Singles", {"doctype": "Store Connection", "field": "metafields_ready_on"})
+		# Not set up yet.
+		set_store_value("metafields_ready_on", None)
 		self.conn = get_connector()
 
 		user = frappe.get_doc(
-			{"doctype": "User", "email": "meta.rep@example.com", "first_name": "Meta", "last_name": "Rep", "send_welcome_email": 0}
+			{
+				"doctype": "User",
+				"email": "meta.rep@example.com",
+				"first_name": "Meta",
+				"last_name": "Rep",
+				"send_welcome_email": 0,
+			}
 		).insert(ignore_permissions=True)
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": user.name, "full_name": "Meta Rep"}).insert(
-			ignore_permissions=True
-		)
+		self.rep = frappe.get_doc(
+			{"doctype": "Sales Rep", "user": user.name, "full_name": "Meta Rep"}
+		).insert(ignore_permissions=True)
 		self.order = frappe._dict(name="FO-META-1", sales_rep=self.rep.name)
 
 	def tearDown(self):
@@ -74,15 +80,18 @@ class TestOrderMetafields(IntegrationTestCase):
 			self.assertTrue(self.conn.ensure_order_metafields())
 
 		self.assertEqual(len(calls), len(METAFIELD_OWNER_TYPES) * len(ORDER_METAFIELDS))
-		self.assertEqual({(c["ownerType"], c["key"]) for c in calls}, {(o, k) for o in METAFIELD_OWNER_TYPES for k in ORDER_METAFIELDS})
+		self.assertEqual(
+			{(c["ownerType"], c["key"]) for c in calls},
+			{(o, k) for o in METAFIELD_OWNER_TYPES for k in ORDER_METAFIELDS},
+		)
 		self.assertTrue(all(c["access"] == {"admin": "MERCHANT_READ"} for c in calls))
-		self.assertTrue(frappe.get_single("Store Connection").metafields_ready_on)
+		self.assertTrue(get_store().metafields_ready_on)
 
 	def test_ensure_failure_is_reported_and_not_marked_done(self):
 		error = ConnectorError("bad", code="USER_ERROR", details=[{"code": "INVALID"}])
 		with patch.object(ShopifyConnector, "_graphql", side_effect=error):
 			self.assertFalse(self.conn.ensure_order_metafields())
-		self.assertFalse(frappe.get_single("Store Connection").metafields_ready_on)
+		self.assertFalse(get_store().metafields_ready_on)
 
 	def test_find_order_uses_source_identifier_then_the_old_tag(self):
 		queries = []
@@ -100,8 +109,16 @@ class TestOrderMetafields(IntegrationTestCase):
 
 	def test_find_draft_matches_the_field_order_no_or_an_older_note(self):
 		retailer = frappe._dict(external_customer_id="77")
-		other = {"id": "gid://shopify/DraftOrder/10", "note2": "Field Order FO-META-10 \u00b7 Rep x", "metafield": {"value": "FO-META-10"}}
-		by_note = {"id": "gid://shopify/DraftOrder/11", "note2": "Field Order FO-META-1 \u00b7 Rep x", "metafield": None}
+		other = {
+			"id": "gid://shopify/DraftOrder/10",
+			"note2": "Field Order FO-META-10 \u00b7 Rep x",
+			"metafield": {"value": "FO-META-10"},
+		}
+		by_note = {
+			"id": "gid://shopify/DraftOrder/11",
+			"note2": "Field Order FO-META-1 \u00b7 Rep x",
+			"metafield": None,
+		}
 		by_field = {"id": "gid://shopify/DraftOrder/12", "note2": "", "metafield": {"value": "FO-META-1"}}
 		queries = []
 
@@ -118,7 +135,7 @@ class TestOrderMetafields(IntegrationTestCase):
 		self.assertEqual(set(queries), {"customer_id:77 tag:field-sales"})
 
 	def test_only_a_retry_looks_for_a_lost_draft(self):
-		frappe.db.set_single_value("Store Connection", "order_mode", "Draft")
+		set_store_value("order_mode", "Draft")
 		conn = get_connector()
 		retailer = frappe._dict(name="RET-X", external_customer_id="77")
 		found = {"id": "gid://shopify/DraftOrder/12", "name": "#D12", "status": "OPEN", "order": None}
@@ -128,12 +145,16 @@ class TestOrderMetafields(IntegrationTestCase):
 			return retailer if args[:1] == ("Retailer",) else real_get_doc(*args, **kwargs)
 
 		for attempts, expect_search in ((1, False), (2, True)):
-			order = frappe._dict(name="FO-META-1", retailer="RET-X", external_draft_id=None, sync_attempts=attempts)
+			order = frappe._dict(
+				name="FO-META-1", retailer="RET-X", external_draft_id=None, sync_attempts=attempts
+			)
 			with (
 				patch.object(frappe, "get_doc", side_effect=get_doc),
 				patch.object(ShopifyConnector, "ensure_order_metafields"),
 				patch.object(ShopifyConnector, "_find_draft", return_value=found) as find,
-				patch.object(ShopifyConnector, "_create_draft", return_value={"id": "gid://shopify/DraftOrder/99"}) as create,
+				patch.object(
+					ShopifyConnector, "_create_draft", return_value={"id": "gid://shopify/DraftOrder/99"}
+				) as create,
 			):
 				result = conn.create_order(order)
 			self.assertEqual(find.called, expect_search)
@@ -148,7 +169,9 @@ class TestOrderMetafields(IntegrationTestCase):
 			name="FO-META-1",
 			sales_rep=self.rep.name,
 			location_name=None,
-			items=[frappe._dict(idx=1, external_variant_id="501", qty=2, rate=10, product="P", product_title="P")],
+			items=[
+				frappe._dict(idx=1, external_variant_id="501", qty=2, rate=10, product="P", product_title="P")
+			],
 			tax_amount=0,
 			tax_percent=0,
 			discount_amount=0,
@@ -163,10 +186,15 @@ class TestOrderMetafields(IntegrationTestCase):
 				sent["order"] = variables["order"]
 				return {"orderCreate": {"order": {"id": "gid://shopify/Order/9", "name": "#9"}}}
 			sent["draft"] = variables["input"]
-			return {"draftOrderCreate": {"draftOrder": {"id": "gid://shopify/DraftOrder/3", "status": "OPEN", "order": None}}}
+			return {
+				"draftOrderCreate": {
+					"draftOrder": {"id": "gid://shopify/DraftOrder/3", "status": "OPEN", "order": None}
+				}
+			}
 
-		with patch.object(ShopifyConnector, "_graphql", side_effect=graphql), patch(
-			"field_sales.connectors.shopify._customer_address", return_value={}
+		with (
+			patch.object(ShopifyConnector, "_graphql", side_effect=graphql),
+			patch("field_sales.connectors.shopify._customer_address", return_value={}),
 		):
 			self.conn._create_confirmed_order(order, retailer)
 			self.conn._create_draft(order, retailer)

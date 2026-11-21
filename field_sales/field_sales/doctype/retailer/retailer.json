@@ -46,7 +46,8 @@
   "sync_attempts",
   "sync_error",
   "activity_section",
-  "last_visit"
+  "last_visit",
+  "store"
  ],
  "fields": [
   {
@@ -296,6 +297,16 @@
    "label": "Last Visit",
    "read_only": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "in_create": 0,
@@ -312,7 +323,7 @@
    "group": "Activity"
   }
  ],
- "modified": "2026-11-18 16:59:09.233868",
+ "modified": "2026-11-21 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Retailer",

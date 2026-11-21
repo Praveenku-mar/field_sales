@@ -28,6 +28,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.anonymise import anonymise as _redact
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import set_store_value
 
 RETAILER_EXPORT_FIELDS = [
 	"name", "retailer_name", "owner_name", "phone", "email", "gstin", "retailer_type", "status",
@@ -211,7 +212,7 @@ def shop_redact(doc, payload: dict) -> dict:
 	result["exports_deleted"] = len(exports)
 
 	clear_oauth_tokens()
-	frappe.db.set_single_value("Store Connection", {"enabled": 0, "shopify_scopes": None})
+	set_store_value({"enabled": 0, "shopify_scopes": None})
 	result["tokens_cleared"] = True
 	return result
 

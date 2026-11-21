@@ -29,7 +29,8 @@
   "paid_on",
   "col_break_payment",
   "payment_reference",
-  "amended_from"
+  "amended_from",
+  "store"
  ],
  "fields": [
   {
@@ -195,11 +196,21 @@
    "read_only": 1,
    "no_copy": 1,
    "print_hide": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-10-15 10:00:00.000000",
+ "modified": "2026-11-21 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Commission Statement",

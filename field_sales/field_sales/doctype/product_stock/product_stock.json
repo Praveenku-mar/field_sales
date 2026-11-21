@@ -11,7 +11,8 @@
   "location_name",
   "col_break_stock",
   "available_qty",
-  "stock_updated_at"
+  "stock_updated_at",
+  "store"
  ],
  "fields": [
   {
@@ -55,11 +56,21 @@
    "fieldtype": "Datetime",
    "label": "Stock Updated At",
    "read_only": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-18 16:59:09.233868",
+ "modified": "2026-11-21 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Product Stock",

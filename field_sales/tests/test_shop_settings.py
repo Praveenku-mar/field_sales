@@ -10,6 +10,7 @@ from field_sales.connectors.base import ConnectorError
 from field_sales.connectors.shopify import SHOP_INFO_QUERY, TEST_CONNECTION_QUERY, ShopifyConnector
 from field_sales.sync import shop_settings
 from field_sales.sync.shop_settings import get_mismatch, scheduled_sync, sync_shop_settings
+from field_sales.utils.store import get_store, get_store_value, set_store_value
 
 
 class TestShopSettings(IntegrationTestCase):
@@ -17,8 +18,7 @@ class TestShopSettings(IntegrationTestCase):
 
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
@@ -27,7 +27,7 @@ class TestShopSettings(IntegrationTestCase):
 				"match_shop_settings": 1,
 				"shop_currency": None,
 				"shop_timezone": None,
-			},
+			}
 		)
 		for code in ("INR", "USD"):
 			if not frappe.db.exists("Currency", code):
@@ -69,9 +69,7 @@ class TestShopSettings(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_single_value("System Settings", "time_zone"), "America/New_York")
 		self.assertEqual(frappe.db.get_default("time_zone"), "America/New_York")
 		self.assertEqual(frappe.db.get_value("Currency", "USD", "enabled"), 1)
-		saved = frappe.db.get_value(
-			"Store Connection", None, ["shop_currency", "shop_timezone"], as_dict=True
-		)
+		saved = get_store_value(["shop_currency", "shop_timezone"], as_dict=True)
 		self.assertEqual((saved.shop_currency, saved.shop_timezone), ("USD", "America/New_York"))
 
 	def test_same_settings_change_nothing(self):
@@ -84,13 +82,13 @@ class TestShopSettings(IntegrationTestCase):
 		clear.assert_not_called()
 
 	def test_match_off_only_saves_and_reports(self):
-		frappe.db.set_single_value("Store Connection", "match_shop_settings", 0)
+		set_store_value("match_shop_settings", 0)
 		with self.store(currencyCode="USD", ianaTimezone="America/New_York"):
 			result = sync_shop_settings()
 		self.assertEqual(result["changes"], [])
 		self.assertEqual(len(result["mismatch"]), 2)
 		self.assertEqual(frappe.db.get_default("currency"), "INR")
-		self.assertEqual(frappe.db.get_single_value("Store Connection", "shop_currency"), "USD")
+		self.assertEqual(get_store_value("shop_currency"), "USD")
 
 	def test_unknown_currency_and_timezone_are_skipped(self):
 		with (
@@ -104,9 +102,7 @@ class TestShopSettings(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_single_value("System Settings", "time_zone"), "Asia/Kolkata")
 
 	def test_get_mismatch_uses_saved_store_values(self):
-		frappe.db.set_single_value(
-			"Store Connection", {"shop_currency": "USD", "shop_timezone": "Asia/Kolkata"}
-		)
+		set_store_value({"shop_currency": "USD", "shop_timezone": "Asia/Kolkata"})
 		(line,) = get_mismatch()
 		self.assertIn("USD", line)
 
@@ -126,9 +122,7 @@ class TestShopSettings(IntegrationTestCase):
 	def test_scheduled_sync_skips_when_disabled_or_off(self):
 		for values in ({"enabled": 0}, {"match_shop_settings": 0}):
 			with self.subTest(values):
-				frappe.db.set_single_value(
-					"Store Connection", {"enabled": 1, "match_shop_settings": 1, **values}
-				)
+				set_store_value({"enabled": 1, "match_shop_settings": 1, **values})
 				with patch.object(shop_settings, "sync_shop_settings") as sync:
 					scheduled_sync()
 				sync.assert_not_called()
@@ -145,10 +139,10 @@ class TestShopSettings(IntegrationTestCase):
 		log.assert_called_once()
 		publish.assert_not_called()
 
-	# -- Store Connection save ---------------------------------------------------
+	# -- Store save -------------------------------------------------------------
 
 	def test_saving_the_connection_queues_a_background_sync(self):
-		doc = frappe.get_single("Store Connection")
+		doc = get_store()
 		with patch.object(frappe, "enqueue") as enqueue:
 			doc.save()
 		self.assertEqual(enqueue.call_args.args[0], "field_sales.sync.shop_settings.scheduled_sync")
@@ -156,8 +150,8 @@ class TestShopSettings(IntegrationTestCase):
 		self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
 
 		# Nothing relevant changed and the store's values are known: no job.
-		frappe.db.set_single_value("Store Connection", "shop_currency", "INR")
-		doc = frappe.get_single("Store Connection")
+		set_store_value("shop_currency", "INR")
+		doc = get_store()
 		doc.default_location_name = "Changed"
 		with patch.object(frappe, "enqueue") as enqueue:
 			doc.save()

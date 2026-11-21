@@ -46,7 +46,8 @@
   "no_order_reason",
   "no_order_remarks",
   "client_temp_id",
-  "client_temp_key"
+  "client_temp_key",
+  "store"
  ],
  "fields": [
   {
@@ -315,6 +316,16 @@
    "no_copy": 1,
    "read_only": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "in_create": 0,
@@ -326,7 +337,7 @@
    "group": "Orders"
   }
  ],
- "modified": "2026-11-12 12:00:00.000000",
+ "modified": "2026-11-21 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Visit",

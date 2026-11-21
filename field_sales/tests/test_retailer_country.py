@@ -21,15 +21,14 @@ from field_sales.frontend_api import get_order_payment_info
 from field_sales.patches.v1_0 import retailer_country_india
 from field_sales.sync.shop_settings import sync_shop_settings
 from field_sales.utils import phone
+from field_sales.utils.store import get_store, get_store_value, set_store_value
 
 
 class TestRetailerCountry(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# Disabled: saving a Retailer then queues no store push.
-		frappe.db.set_single_value(
-			"Store Connection", {"enabled": 0, "shop_country": None, "match_shop_settings": 0}
-		)
+		set_store_value({"enabled": 0, "shop_country": None, "match_shop_settings": 0})
 		# Reads below must see the values set here, not an earlier test's cached ones.
 		frappe.db.value_cache.clear()
 		# The site's global "country" default (from System Settings) pre-fills new retailers
@@ -132,20 +131,18 @@ class TestRetailerCountry(IntegrationTestCase):
 	# -- defaults, shop country, WhatsApp ----------------------------------
 
 	def test_new_retailer_gets_shop_country(self):
-		frappe.db.set_single_value("Store Connection", "shop_country", "AE")
+		set_store_value("shop_country", "AE")
 		self.assertEqual(get_default_country(), "United Arab Emirates")
 		doc = self.retailer(None, "050 123 4567")
 		self.assertEqual(doc.country, "United Arab Emirates")
 
-		frappe.db.set_single_value("Store Connection", "shop_country", None)
+		set_store_value("shop_country", None)
 		self.assertEqual(
 			get_default_country(), frappe.db.get_single_value("System Settings", "country") or None
 		)
 
 	def test_shop_country_is_fetched_and_saved(self):
-		frappe.db.set_single_value(
-			"Store Connection", {"platform": "Shopify", "store_url": "c.myshopify.com"}
-		)
+		set_store_value({"platform": "Shopify", "store_url": "c.myshopify.com"})
 		data = {
 			"shop": {
 				"currencyCode": "AED",
@@ -154,10 +151,10 @@ class TestRetailerCountry(IntegrationTestCase):
 			}
 		}
 		with patch.object(ShopifyConnector, "_graphql", return_value=data):
-			shop = ShopifyConnector(frappe.get_single("Store Connection")).get_shop_settings()
+			shop = ShopifyConnector(get_store()).get_shop_settings()
 		self.assertEqual(shop, {"currency": "AED", "timezone": "Asia/Dubai", "country": "AE"})
 		sync_shop_settings(shop)
-		self.assertEqual(frappe.db.get_single_value("Store Connection", "shop_country"), "AE")
+		self.assertEqual(get_store_value("shop_country"), "AE")
 
 	def test_whatsapp_number_follows_retailer_country(self):
 		user = frappe.get_doc(

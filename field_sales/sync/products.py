@@ -21,11 +21,12 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.push.events import crossed_low_stock, notify_low_stock
 from field_sales.sync.stock import get_sell_locations, set_location_stock
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import get_store
 
 JOB_ID = "field_sales:product_sync"
 REALTIME_EVENT = "product_sync_done"
 
-# Store Connection.product_sync_frequency -> minutes between runs.
+# Store.product_sync_frequency -> minutes between runs.
 SYNC_INTERVALS = {"Every 30 minutes": 30, "Hourly": 60, "Daily": 24 * 60}
 # The scheduler ticks every 30 minutes and a run's own log lands a little after
 # its tick, so allow some slack or "Hourly" would only ever run every 90 minutes.
@@ -54,12 +55,12 @@ def scheduled_sync():
 	"""
 	Cron entry point (every 30 minutes).
 
-	Queues a sync when Store Connection is enabled, has a default location, and
+	Queues a sync when the Store is enabled, has a default location, and
 	at least ``product_sync_frequency`` has passed since the last product sync
 	activity (manual or scheduled, successful or not).
 	"""
 	try:
-		settings = frappe.db.get_singles_dict("Store Connection", cast=True)
+		settings = get_store()
 		if not settings.enabled or not settings.default_location_id:
 			return
 
@@ -83,30 +84,29 @@ def scheduled_sync():
 		raise
 
 
-
 def sync_products() -> dict:
 	"""
-	Pull every product variant from the store into Platform Product.
+		Pull every product variant from the store into Platform Product.
 
-	- Upserts by (platform, external_variant_id); unchanged rows (same
-	  ``sync_hash``) are not saved. ``available_qty`` (and so the hash) is the
-	  default location's stock.
-- Fetches stock at every ``Sell from here`` location and saves it as Product
-	  Stock rows (tracked products only; untracked ones have no stock rows).
-	- Commits after each page, so a failure keeps the pages already synced.
-	- Once all pages are in, marks this platform's products that the store no
-	  longer returned as Archived (skipped if the run fails part-way).
-	- Writes one "Product Sync" Sync Log with the summary and publishes the
-	  ``product_sync_done`` realtime event, on success and on failure.
+		- Upserts by (platform, external_variant_id); unchanged rows (same
+		  ``sync_hash``) are not saved. ``available_qty`` (and so the hash) is the
+		  default location's stock.
+	- Fetches stock at every ``Sell from here`` location and saves it as Product
+		  Stock rows (tracked products only; untracked ones have no stock rows).
+		- Commits after each page, so a failure keeps the pages already synced.
+		- Once all pages are in, marks this platform's products that the store no
+		  longer returned as Archived (skipped if the run fails part-way).
+		- Writes one "Product Sync" Sync Log with the summary and publishes the
+		  ``product_sync_done`` realtime event, on success and on failure.
 
-	:return: ``{"created": n, "updated": n, "unchanged": n, "archived": n}``
+		:return: ``{"created": n, "updated": n, "unchanged": n, "archived": n}``
 	"""
 	conn = get_connector()
 	settings = conn.settings
 	platform = settings.platform
 	location_id = settings.default_location_id
 	if not location_id:
-		frappe.throw(_("Set a Default Location on Store Connection before syncing products"))
+		frappe.throw(_("Set a Default Location on the Store before syncing products"))
 
 	summary = {"created": 0, "updated": 0, "unchanged": 0, "archived": 0}
 	seen: set[str] = set()
@@ -119,7 +119,11 @@ def sync_products() -> dict:
 			page = conn.get_products(cursor)
 			items = page["items"]
 
-			tracked = [i["external_inventory_id"] for i in items if i["track_inventory"] and i["external_inventory_id"]]
+			tracked = [
+				i["external_inventory_id"]
+				for i in items
+				if i["track_inventory"] and i["external_inventory_id"]
+			]
 			stock = conn.get_stock(tracked, location_id) if tracked else {}
 
 			names = _upsert_page(platform, location_id, items, stock, seen, summary, low_stock)
@@ -148,7 +152,9 @@ def sync_products() -> dict:
 			response_payload=frappe.as_json(summary),
 		)
 		safe_commit()
-		frappe.publish_realtime(REALTIME_EVENT, {"ok": False, "message": message, **summary}, doctype="Platform Product")
+		frappe.publish_realtime(
+			REALTIME_EVENT, {"ok": False, "message": message, **summary}, doctype="Platform Product"
+		)
 		raise
 
 	log_sync(
@@ -180,10 +186,12 @@ def sync_one_product(conn, external_product_id: str) -> dict:
 	platform = settings.platform
 	location_id = settings.default_location_id
 	if not location_id:
-		frappe.throw(_("Set a Default Location on Store Connection before syncing products"))
+		frappe.throw(_("Set a Default Location on the Store before syncing products"))
 
 	items = conn.get_product(external_product_id)
-	tracked = [i["external_inventory_id"] for i in items if i["track_inventory"] and i["external_inventory_id"]]
+	tracked = [
+		i["external_inventory_id"] for i in items if i["track_inventory"] and i["external_inventory_id"]
+	]
 	stock = conn.get_stock(tracked, location_id) if tracked else {}
 
 	summary = {"created": 0, "updated": 0, "unchanged": 0, "archived": 0}
@@ -219,14 +227,18 @@ def _upsert_page(
 	:return: ``{external_variant_id: Platform Product name}`` for every item on the page, changed or not.
 	"""
 	variant_ids = [i["external_variant_id"] for i in items]
-	existing = {
-		r.external_variant_id: r
-		for r in frappe.get_all(
-			"Platform Product",
-			filters={"platform": platform, "external_variant_id": ("in", variant_ids)},
-			fields=["name", "external_variant_id", "sync_hash", "available_qty", "track_inventory"],
-		)
-	} if variant_ids else {}
+	existing = (
+		{
+			r.external_variant_id: r
+			for r in frappe.get_all(
+				"Platform Product",
+				filters={"platform": platform, "external_variant_id": ("in", variant_ids)},
+				fields=["name", "external_variant_id", "sync_hash", "available_qty", "track_inventory"],
+			)
+		}
+		if variant_ids
+		else {}
+	)
 	now = now_datetime()
 	names = {}
 
@@ -351,7 +363,9 @@ def _insert_product(values: dict) -> str:
 def _hash(values: dict) -> str:
 	"""Stable md5 of the synced values, used to skip unchanged rows."""
 	# A change fingerprint, not security: usedforsecurity=False keeps the same digests.
-	return hashlib.md5(json.dumps(values, sort_keys=True, default=str).encode(), usedforsecurity=False).hexdigest()
+	return hashlib.md5(
+		json.dumps(values, sort_keys=True, default=str).encode(), usedforsecurity=False
+	).hexdigest()
 
 
 def _elapsed_ms(start: float) -> int:

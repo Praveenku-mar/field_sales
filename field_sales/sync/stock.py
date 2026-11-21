@@ -19,24 +19,27 @@ from frappe import _
 from frappe.utils import now_datetime
 
 from field_sales.connectors import get_connector
+from field_sales.utils.store import get_store_name, get_store_value
 
 
 def get_sell_locations() -> list[dict]:
 	"""
-	Locations a rep can sell from: the Store Connection's ``Sell from here`` rows.
+	Locations a rep can sell from: the Store's ``Sell from here`` rows.
 
 	The default location is always included, even if the table has no row for it
 	yet (a connection set up before locations existed), and is listed first.
 
 	:return: ``[{"location_id", "location_name", "is_default"}]``
 	"""
-	default_id, default_name = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["default_location_id", "default_location_name"]
-	) or (None, None)
+	store = get_store_name()
+	default_id, default_name = get_store_value(["default_location_id", "default_location_name"], store) or (
+		None,
+		None,
+	)
 
 	rows = frappe.get_all(
 		"Store Location",
-		filters={"parent": "Store Connection", "parenttype": "Store Connection", "sell_from": 1},
+		filters={"parent": store or "", "parenttype": "Store", "sell_from": 1},
 		fields=["location_id", "location_name"],
 		order_by="idx asc",
 	)
@@ -49,15 +52,17 @@ def get_sell_locations() -> list[dict]:
 		for r in rows
 	]
 	if default_id and not any(loc["is_default"] for loc in locations):
-		locations.append({"location_id": default_id, "location_name": default_name or default_id, "is_default": True})
+		locations.append(
+			{"location_id": default_id, "location_name": default_name or default_id, "is_default": True}
+		)
 
 	locations.sort(key=lambda loc: not loc["is_default"])  # stable: default first, table order otherwise
 	return locations
 
 
 def get_default_location() -> str | None:
-	"""Store Connection's default location id, or ``None`` if it has none."""
-	return frappe.db.get_single_value("Store Connection", "default_location_id") or None
+	"""The Store's default location id, or ``None`` if it has none."""
+	return get_store_value("default_location_id") or None
 
 
 def set_location_stock(
@@ -170,7 +175,7 @@ def fetch_live_stock(products: list[str], location_id: str | None = None) -> dic
 	sell_locations = {loc["location_id"]: loc for loc in get_sell_locations()}
 	location_id = location_id or get_default_location()
 	if not location_id:
-		frappe.throw(_("Set a Default Location on Store Connection before checking stock"))
+		frappe.throw(_("Set a Default Location on the Store before checking stock"))
 	if location_id not in sell_locations:
 		frappe.throw(_("Location {0} is not one the shop sells from").format(location_id))
 
@@ -191,11 +196,13 @@ def fetch_live_stock(products: list[str], location_id: str | None = None) -> dic
 	live = {}
 	for product, inventory_id in inventory_ids.items():
 		live[product] = stock.get(inventory_id, 0)
-		set_location_stock(product, location_id, live[product], sell_locations[location_id]["location_name"], now)
+		set_location_stock(
+			product, location_id, live[product], sell_locations[location_id]["location_name"], now
+		)
 	return live
 
 
 def live_stock_enabled() -> bool:
 	"""True when the store can be asked for live stock (connection enabled with a default location)."""
-	settings = frappe.db.get_singles_dict("Store Connection", cast=True)
-	return bool(settings.enabled and settings.default_location_id)
+	enabled, default_location_id = get_store_value(["enabled", "default_location_id"])
+	return bool(enabled and default_location_id)

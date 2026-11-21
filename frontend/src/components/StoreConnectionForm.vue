@@ -244,11 +244,11 @@ import { createMerchantStoreDoc, merchantLocationsUrl } from '@/shopify/merchant
 import { daysAgo, formatDate, formatDateTime, formatTime, msUntil, nowSql } from '@/utils/format'
 
 const embedded = isEmbedded()
-// Store Connection is a Single; its name is the doctype itself. Inside the Shopify admin the
+// The Store this user works in (boot value `store`). Inside the Shopify admin the
 // merchant endpoints are used instead (only locations, defaults and similar can change there).
 const doc = embedded
   ? createMerchantStoreDoc()
-  : createDocumentResource({ doctype: 'Store Connection', name: 'Store Connection' })
+  : createDocumentResource({ doctype: 'Store', name: window.store })
 const d = computed(() => doc.doc || {})
 const errorText = computed(() => String(doc.get.error?.messages?.[0] || doc.get.error || ''))
 

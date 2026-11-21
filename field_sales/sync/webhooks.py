@@ -14,8 +14,8 @@ import time
 import frappe
 from frappe.utils import convert_utc_to_system_timezone, flt, get_datetime, now_datetime
 
-from field_sales.connectors import get_connector
 from field_sales.commission.engine import reconcile_order
+from field_sales.connectors import get_connector
 from field_sales.connectors.base import (
 	ORDER_TOPICS,
 	PRODUCT_DELETE_TOPIC,
@@ -23,8 +23,8 @@ from field_sales.connectors.base import (
 	STOCK_TOPIC,
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
-from field_sales.sync.products import _archive, sync_one_product
 from field_sales.push.events import crossed_low_stock, notify_low_stock
+from field_sales.sync.products import _archive, sync_one_product
 from field_sales.sync.stock import get_sell_locations, set_location_stock
 
 REALTIME_EVENT = "stock_updated"
@@ -38,7 +38,7 @@ def process_event(platform: str, webhook: dict) -> dict:
 	A failure writes a Failed Sync Log (kept even though the job rolls back)
 	and is re-raised so the job shows as failed.
 
-	:param platform: Platform the event came from (``Store Connection.platform``).
+	:param platform: Platform the event came from (``Store.platform``).
 	:param webhook: Neutral event from ``BaseConnector.parse_webhook``. Not named ``event``:
 		``frappe.enqueue`` reserves that keyword and would swallow it.
 	:return: Small summary of what was done (also the Sync Log's response).
@@ -94,7 +94,11 @@ def _process_stock(conn, platform: str, event: dict) -> dict:
 
 	products = frappe.get_all(
 		"Platform Product",
-		filters={"platform": platform, "external_inventory_id": stock["external_inventory_id"], "track_inventory": 1},
+		filters={
+			"platform": platform,
+			"external_inventory_id": stock["external_inventory_id"],
+			"track_inventory": 1,
+		},
 		fields=["name", "stock_updated_at", "available_qty"],
 	)
 	if not products:
@@ -114,7 +118,9 @@ def _process_stock(conn, platform: str, event: dict) -> dict:
 	event_time = _to_system_datetime(event.get("updated_at"))
 	updated = []
 	for product in products:
-		last_updated = rows.get(product.name) or (product.stock_updated_at if location["is_default"] else None)
+		last_updated = rows.get(product.name) or (
+			product.stock_updated_at if location["is_default"] else None
+		)
 		if event_time and last_updated and event_time < get_datetime(last_updated):
 			continue
 		set_location_stock(
@@ -125,7 +131,9 @@ def _process_stock(conn, platform: str, event: dict) -> dict:
 			event_time or now_datetime(),
 		)
 		if location["is_default"]:
-			frappe.db.set_value("Platform Product", product.name, "last_synced", now_datetime(), update_modified=False)
+			frappe.db.set_value(
+				"Platform Product", product.name, "last_synced", now_datetime(), update_modified=False
+			)
 		updated.append(product.name)
 
 	if not updated:
@@ -146,7 +154,11 @@ def _process_stock(conn, platform: str, event: dict) -> dict:
 		{"products": updated, "available_qty": stock["available"], "location_id": location["location_id"]},
 		doctype="Platform Product",
 	)
-	return {"updated": len(updated), "available_qty": stock["available"], "location_id": location["location_id"]}
+	return {
+		"updated": len(updated),
+		"available_qty": stock["available"],
+		"location_id": location["location_id"],
+	}
 
 
 def _process_product_update(conn, platform: str, event: dict) -> dict:
@@ -193,7 +205,11 @@ def _apply_prices(platform: str, prices: list[dict]) -> dict[str, tuple[float, f
 		frappe.db.set_value(
 			"Platform Product",
 			product.name,
-			{"price": flt(new["price"]), "compare_at_price": flt(new["compare_at_price"]), "last_synced": now_datetime()},
+			{
+				"price": flt(new["price"]),
+				"compare_at_price": flt(new["compare_at_price"]),
+				"last_synced": now_datetime(),
+			},
 			update_modified=False,
 		)
 	return before
@@ -205,13 +221,19 @@ def _publish_price_changes(before: dict[str, tuple[float, float]]) -> int:
 		return 0
 	changed = 0
 	for product in frappe.get_all(
-		"Platform Product", filters={"name": ("in", list(before))}, fields=["name", "price", "compare_at_price"]
+		"Platform Product",
+		filters={"name": ("in", list(before))},
+		fields=["name", "price", "compare_at_price"],
 	):
 		if (flt(product.price), flt(product.compare_at_price)) == before[product.name]:
 			continue
 		frappe.publish_realtime(
 			PRICE_REALTIME_EVENT,
-			{"product": product.name, "price": flt(product.price), "compare_at_price": flt(product.compare_at_price)},
+			{
+				"product": product.name,
+				"price": flt(product.price),
+				"compare_at_price": flt(product.compare_at_price),
+			},
 			doctype="Platform Product",
 			after_commit=True,
 		)

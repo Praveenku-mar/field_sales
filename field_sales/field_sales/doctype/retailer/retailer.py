@@ -13,6 +13,7 @@ from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 from field_sales.utils.geo import has_coords
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.phone import example_number, is_valid
+from field_sales.utils.store import get_store_value
 
 # Written only by the server: the customer sync (_record_result) and Visit (last_visit).
 SERVER_FIELDS = (
@@ -95,7 +96,7 @@ class Retailer(Document):
 		# Set by the sync itself when it saves the result, so it does not re-trigger.
 		if self.flags.ignore_sync:
 			return
-		if not frappe.db.get_single_value("Store Connection", "enabled"):
+		if not get_store_value("enabled"):
 			return
 		if any(self.has_value_changed(field) for field in SYNCED_FIELDS):
 			enqueue_push(self.name)
@@ -152,8 +153,10 @@ class Retailer(Document):
 		"""
 		if not self.user:
 			return
-		if not self.is_new() and self.has_value_changed("user") and not (
-			LOGIN_EDIT_ROLES & set(frappe.get_roles())
+		if (
+			not self.is_new()
+			and self.has_value_changed("user")
+			and not (LOGIN_EDIT_ROLES & set(frappe.get_roles()))
 		):
 			frappe.throw(_("Only a Sales Manager can change a retailer's login user"), frappe.PermissionError)
 		if self.user in ("Administrator", "Guest"):
@@ -169,18 +172,13 @@ class Retailer(Document):
 			self.email = frappe.db.get_value("User", self.user, "email") or None
 
 	def _validate_coordinates(self):
-
 		# Converted to a number first: at validate time the value may still be a string
 		# (a value set from a client form), and comparing a string with a number raises.
 		if self.latitude and not (-90 <= flt(self.latitude) <= 90):
-			frappe.throw(
-				_("Latitude must be between -90 and 90. Received: {0}").format(self.latitude)
-			)
+			frappe.throw(_("Latitude must be between -90 and 90. Received: {0}").format(self.latitude))
 
 		if self.longitude and not (-180 <= flt(self.longitude) <= 180):
-			frappe.throw(
-				_("Longitude must be between -180 and 180. Received: {0}").format(self.longitude)
-			)
+			frappe.throw(_("Longitude must be between -180 and 180. Received: {0}").format(self.longitude))
 
 
 def country_code_of(country: str | None) -> str:
@@ -193,11 +191,11 @@ def country_code_of(country: str | None) -> str:
 @frappe.whitelist(methods=["GET"])
 def get_default_country() -> str | None:
 	"""
-	Country for a new retailer: the store's (Store Connection ``shop_country``), else
+	Country for a new retailer: the store's (Store ``shop_country``), else
 	System Settings' country.
 	"""
 	frappe.has_permission("Retailer", "read", throw=True)
-	shop_country = (frappe.db.get_single_value("Store Connection", "shop_country") or "").strip()
+	shop_country = (get_store_value("shop_country") or "").strip()
 	if shop_country:
 		country = frappe.db.get_value("Country", {"code": shop_country.lower()}, "name")
 		if country:

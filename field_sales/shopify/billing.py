@@ -30,6 +30,7 @@ from frappe.utils import add_months, cint, get_first_day, nowdate
 
 from field_sales.connectors.shopify import REQUEST_TIMEOUT, is_oauth
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
+from field_sales.utils.store import get_store, get_store_value
 
 CACHE_KEY = "field_sales:shopify_active_plan"
 CACHE_SECONDS = 60 * 60
@@ -105,7 +106,7 @@ def _fetch_plan() -> dict:
 
 def pricing_url() -> str | None:
 	"""Shopify's plan selection page for this shop and app, or ``None`` if the app handle is unknown."""
-	store = (frappe.db.get_single_value("Store Connection", "store_url") or "").lower()
+	store = (get_store_value("store_url") or "").lower()
 	app_handle = (frappe.conf.get("shopify_app_handle") or "").strip()
 	if not store.endswith(".myshopify.com") or not app_handle:
 		return None
@@ -125,7 +126,7 @@ def plan_limits() -> dict:
 
 def check_limit(kind: str) -> None:
 	"""``field_sales_limit_checks`` hook: refuse one more ``kind`` when the plan's limit is reached."""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.platform != "Shopify" or not is_oauth(settings):
 		return
 	limits = plan_limits()
@@ -156,7 +157,7 @@ def check_limit(kind: str) -> None:
 def usage(kind: str) -> int:
 	"""How many of ``kind`` are used now (the embedded app's own Sales Rep is not counted)."""
 	if kind == SALES_REPS:
-		embedded_user = frappe.db.get_single_value("Store Connection", "embedded_user")
+		embedded_user = get_store_value("embedded_user")
 		filters = {"active": 1}
 		if embedded_user:
 			filters["user"] = ("!=", embedded_user)
@@ -183,7 +184,7 @@ def get_plan_info() -> dict:
 		and frappe.session.user != "Administrator"
 	):
 		frappe.throw(_("Only managers can see the plan"), frappe.PermissionError)
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
 	if settings.platform != "Shopify" or not is_oauth(settings):
 		return {"oauth": False}
 	plan = get_active_plan()

@@ -9,6 +9,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from field_sales.shopify import merchant_settings as ms
+from field_sales.utils.store import get_store, get_store_value, set_store_value
 
 SHOP = "merchant-shop.myshopify.com"
 
@@ -16,8 +17,7 @@ SHOP = "merchant-shop.myshopify.com"
 class TestMerchantSettings(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
@@ -29,9 +29,9 @@ class TestMerchantSettings(IntegrationTestCase):
 				"match_shop_settings": 0,
 				# A site may already use Administrator here; the save test checks it is not set.
 				"embedded_user": None,
-			},
+			}
 		)
-		settings = frappe.get_single("Store Connection")
+		settings = get_store()
 		settings.set("locations", [])
 		settings.save(ignore_permissions=True)
 		self.manager = self.user("merchant.manager@example.com", "Sales Manager")
@@ -107,7 +107,7 @@ class TestMerchantSettings(IntegrationTestCase):
 				"embedded_user": "Administrator",
 			}
 		)
-		settings = frappe.get_single("Store Connection")
+		settings = get_store()
 		self.assertEqual(
 			(settings.order_mode, settings.company_name, settings.default_location_id),
 			("Confirmed", "Merchant Co", "100"),
@@ -129,16 +129,16 @@ class TestMerchantSettings(IntegrationTestCase):
 			patch.object(frappe.db, "commit"),
 		):
 			ms.setup_new_store()
-			settings = frappe.get_single("Store Connection")
+			settings = get_store()
 			self.assertEqual(
 				(settings.default_location_id, settings.default_location_name), ("7", "Warehouse")
 			)
 			self.assertEqual([(r.location_id, r.sell_from) for r in settings.locations], [("7", 1)])
 			sync.assert_called_once()
 
-			frappe.db.set_single_value("Store Connection", "default_location_id", "8")
+			set_store_value("default_location_id", "8")
 			ms.setup_new_store()  # a choice is never overridden
-			self.assertEqual(frappe.db.get_single_value("Store Connection", "default_location_id"), "8")
+			self.assertEqual(get_store_value("default_location_id"), "8")
 
 	def test_email_accounts_need_the_shops_session(self):
 		frappe.set_user(self.manager)
@@ -157,8 +157,7 @@ class TestMerchantEmailAccounts(IntegrationTestCase):
 
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_auth_mode": "OAuth"},
 		)
 		frappe.db.set_default(ms.MERCHANT_EMAIL_ACCOUNTS_KEY, "[]")
@@ -207,8 +206,12 @@ class TestMerchantEmailAccounts(IntegrationTestCase):
 	def test_merchant_cannot_edit_the_sites_own_account(self):
 		self.as_merchant()
 		with self.assertRaises(frappe.PermissionError):
-			ms.save_email_account({"smtp_server": "smtp.attacker.example", "password": "x"}, name=self.site_account)
-		self.assertEqual(frappe.db.get_value("Email Account", self.site_account, "smtp_server"), "smtp.site-host.example")
+			ms.save_email_account(
+				{"smtp_server": "smtp.attacker.example", "password": "x"}, name=self.site_account
+			)
+		self.assertEqual(
+			frappe.db.get_value("Email Account", self.site_account, "smtp_server"), "smtp.site-host.example"
+		)
 
 	def test_merchant_lists_only_accounts_added_from_the_tab(self):
 		mine = self.merchant_account()
@@ -234,7 +237,13 @@ class TestMerchantEmailAccounts(IntegrationTestCase):
 	def test_unchanged_connection_needs_no_password(self):
 		mine = self.merchant_account()
 		ms.save_email_account(
-			{"smtp_server": "SMTP.shop-host.example ", "smtp_port": "587", "use_tls": 1, "enable_outgoing": 0}, name=mine
+			{
+				"smtp_server": "SMTP.shop-host.example ",
+				"smtp_port": "587",
+				"use_tls": 1,
+				"enable_outgoing": 0,
+			},
+			name=mine,
 		)
 		self.assertEqual(frappe.db.get_value("Email Account", mine, "enable_outgoing"), 0)
 
@@ -242,5 +251,9 @@ class TestMerchantEmailAccounts(IntegrationTestCase):
 		self.assertIn(self.site_account, {a.name for a in ms.get_email_accounts()})
 		with self.assertRaises(frappe.ValidationError):
 			ms.save_email_account({"smtp_server": "smtp.new-host.example"}, name=self.site_account)
-		ms.save_email_account({"smtp_server": "smtp.new-host.example", "password": "s"}, name=self.site_account)
-		self.assertEqual(frappe.db.get_value("Email Account", self.site_account, "smtp_server"), "smtp.new-host.example")
+		ms.save_email_account(
+			{"smtp_server": "smtp.new-host.example", "password": "s"}, name=self.site_account
+		)
+		self.assertEqual(
+			frappe.db.get_value("Email Account", self.site_account, "smtp_server"), "smtp.new-host.example"
+		)

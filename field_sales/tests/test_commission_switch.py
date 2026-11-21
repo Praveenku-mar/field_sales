@@ -16,6 +16,7 @@ from field_sales.commission.api import (
 from field_sales.commission.engine import enqueue_create_entries, reconcile_order
 from field_sales.commission.statements import generate_monthly_statements
 from field_sales.frontend_api import get_session
+from field_sales.utils.store import set_store_value
 
 
 class TestCommissionSwitch(IntegrationTestCase):
@@ -26,14 +27,14 @@ class TestCommissionSwitch(IntegrationTestCase):
 		frappe.db.rollback()
 
 	def turn_off(self):
-		frappe.db.set_single_value("Store Connection", "enable_commission", 0)
+		set_store_value("enable_commission", 0)
 
-	def test_on_when_never_saved(self):
-		frappe.db.delete("Singles", {"doctype": "Store Connection", "field": "enable_commission"})
-		self.assertTrue(commission_enabled())
+	def test_on_when_no_store_yet(self):
+		with patch("field_sales.commission.get_store_value", return_value=None):
+			self.assertTrue(commission_enabled())
 
 	def test_on_and_off(self):
-		frappe.db.set_single_value("Store Connection", "enable_commission", 1)
+		set_store_value("enable_commission", 1)
 		self.assertTrue(commission_enabled())
 		self.turn_off()
 		self.assertFalse(commission_enabled())

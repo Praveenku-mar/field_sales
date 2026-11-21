@@ -91,7 +91,7 @@ const fields = [
     label: 'Operation',
     options: ['', 'Test Connection', 'Token Refresh', 'Product Sync', 'Stock Check', 'Create Customer', 'Update Customer', 'Create Order', 'Confirm Order', 'Other'],
   },
-  { fieldname: 'reference_doctype', label: 'Record type', options: ['', 'Field Order', 'Retailer', 'Platform Product', 'Store Connection'] },
+  { fieldname: 'reference_doctype', label: 'Record type', options: ['', 'Field Order', 'Retailer', 'Platform Product', 'Store'] },
 ]
 const columns = [
   { key: 'creation', label: 'When', width: '150px' },

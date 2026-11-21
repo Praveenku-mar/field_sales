@@ -1,0 +1,452 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:store_code",
+ "creation": "2026-11-21 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "in_create": 0,
+ "issingle": 0,
+ "links": [],
+ "modified": "2026-11-21 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Field Sales",
+ "name": "Store",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "title_field": "shop_name",
+ "show_title_field_in_link": 1,
+ "search_fields": "shop_name,store_url",
+ "naming_rule": "By fieldname",
+ "fields": [
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Store"
+  },
+  {
+   "fieldname": "store_code",
+   "fieldtype": "Data",
+   "label": "Store Code",
+   "reqd": 1,
+   "unique": 1,
+   "length": 4,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "description": "2–4 letters or digits. Used in order and invoice numbers; fixed once the store has issued an invoice.",
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "col_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tax_mode",
+   "fieldtype": "Select",
+   "label": "Tax Mode",
+   "options": "GST\nNone",
+   "default": "GST",
+   "description": "GST prints a GST tax invoice and needs the GSTIN. None prints a plain invoice."
+  },
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "fieldname": "platform",
+   "fieldtype": "Select",
+   "label": "Platform",
+   "default": "Shopify",
+   "options": "Shopify",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_connection",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "store_url",
+   "fieldtype": "Data",
+   "label": "Store URL",
+   "reqd": 1,
+   "description": "Shopify: store.myshopify.com",
+   "read_only_depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'",
+   "in_list_view": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "shopify_section",
+   "fieldtype": "Section Break",
+   "label": "Shopify Credentials",
+   "depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "shopify_auth_mode",
+   "fieldtype": "Select",
+   "label": "Auth Mode",
+   "options": "Client Credentials\nOAuth",
+   "default": "Client Credentials",
+   "depends_on": "eval:doc.platform=='Shopify'",
+   "description": "Client Credentials: a store in our own Shopify organization, credentials entered here. OAuth: installed from the Shopify App Store; the install fills the Store URL and tokens."
+  },
+  {
+   "fieldname": "shopify_client_id",
+   "fieldtype": "Data",
+   "label": "Client ID",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode!='OAuth'",
+   "mandatory_depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "col_break_shopify",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "shopify_client_secret",
+   "fieldtype": "Password",
+   "label": "Client Secret",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode!='OAuth'",
+   "mandatory_depends_on": "eval:doc.platform=='Shopify'"
+  },
+  {
+   "fieldname": "shopify_api_version",
+   "fieldtype": "Data",
+   "label": "API Version",
+   "default": "2026-10",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode!='OAuth'"
+  },
+  {
+   "fieldname": "shopify_scopes",
+   "fieldtype": "Small Text",
+   "label": "Granted Scopes",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "installed_on",
+   "fieldtype": "Datetime",
+   "label": "Installed On",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "uninstalled_on",
+   "fieldtype": "Datetime",
+   "label": "Uninstalled On",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "embedded_user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Embedded App User",
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'",
+   "description": "Requests from inside the Shopify admin run as this user. Left empty, shopify-admin@<site> is created on first use (Sales Manager, with its own Sales Rep)."
+  },
+  {
+   "fieldname": "token_section",
+   "fieldtype": "Section Break",
+   "label": "Token",
+   "collapsible": 1,
+   "collapsible_depends_on": "eval:0"
+  },
+  {
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Access Token",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "refresh_token",
+   "fieldtype": "Password",
+   "label": "Refresh Token",
+   "hidden": 1,
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "col_break_token",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "token_expiry",
+   "fieldtype": "Datetime",
+   "label": "Token Expiry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "refresh_token_expiry",
+   "fieldtype": "Datetime",
+   "label": "Refresh Token Expiry",
+   "read_only": 1,
+   "depends_on": "eval:doc.platform=='Shopify' && doc.shopify_auth_mode=='OAuth'"
+  },
+  {
+   "fieldname": "defaults_section",
+   "fieldtype": "Section Break",
+   "label": "Defaults"
+  },
+  {
+   "fieldname": "default_location_id",
+   "fieldtype": "Data",
+   "label": "Default Location ID",
+   "description": "Shopify location to sell from (must match a location marked Sell from here below)"
+  },
+  {
+   "fieldname": "col_break_defaults",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_location_name",
+   "fieldtype": "Data",
+   "label": "Default Location Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "order_mode",
+   "fieldtype": "Select",
+   "label": "Order Mode",
+   "options": "Draft\nConfirmed",
+   "default": "Draft"
+  },
+  {
+   "fieldname": "product_sync_frequency",
+   "fieldtype": "Select",
+   "label": "Product Sync Frequency",
+   "options": "Every 30 minutes\nHourly\nDaily",
+   "default": "Every 30 minutes"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "last_test_status",
+   "fieldtype": "Data",
+   "label": "Last Test Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_tested_on",
+   "fieldtype": "Datetime",
+   "label": "Last Tested On",
+   "read_only": 1
+  },
+  {
+   "description": "Store name from the last successful Test Connection; shown next to the page title.",
+   "fieldname": "shop_name",
+   "fieldtype": "Data",
+   "label": "Shop Name",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "description": "When the Field Order No and Sales Rep order fields were set up on the store (Test Connection, or before the first order).",
+   "fieldname": "metafields_ready_on",
+   "fieldtype": "Datetime",
+   "label": "Order Fields Set Up On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "locations_section",
+   "fieldtype": "Section Break",
+   "label": "Locations"
+  },
+  {
+   "fieldname": "locations",
+   "fieldtype": "Table",
+   "label": "Locations",
+   "options": "Store Location",
+   "description": "Stock locations reps can sell from. The default location is always one of them."
+  },
+  {
+   "fieldname": "invoice_section",
+   "fieldtype": "Section Break",
+   "label": "Invoice"
+  },
+  {
+   "fieldname": "send_order_confirmation",
+   "fieldtype": "Check",
+   "label": "Send Order Confirmation",
+   "default": "1",
+   "description": "Email the customer a tax invoice once the store confirms the order"
+  },
+  {
+   "fieldname": "company_name",
+   "fieldtype": "Data",
+   "label": "Company Name"
+  },
+  {
+   "fieldname": "company_address",
+   "fieldtype": "Small Text",
+   "label": "Company Address"
+  },
+  {
+   "fieldname": "col_break_invoice",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_state",
+   "fieldtype": "Data",
+   "label": "State",
+   "description": "Decides CGST + SGST (same state as the customer) or IGST"
+  },
+  {
+   "fieldname": "company_gstin",
+   "fieldtype": "Data",
+   "label": "GSTIN"
+  },
+  {
+   "fieldname": "company_phone",
+   "fieldtype": "Data",
+   "label": "Phone"
+  },
+  {
+   "fieldname": "company_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "default": "1",
+   "description": "Use the store's currency and time zone for this site (System Settings), checked on save and daily. Shopify prices are used as they are, so the site must use the store's currency.",
+   "fieldname": "match_shop_settings",
+   "fieldtype": "Check",
+   "label": "Match Store Currency and Timezone"
+  },
+  {
+   "description": "The store's currency, from the last check.",
+   "fieldname": "shop_currency",
+   "fieldtype": "Data",
+   "label": "Store Currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "shop_country",
+   "fieldtype": "Data",
+   "label": "Store Country",
+   "read_only": 1,
+   "description": "Country code of the store's address (from the store); new Retailers start in this country."
+  },
+  {
+   "description": "The store's time zone, from the last check.",
+   "fieldname": "shop_timezone",
+   "fieldtype": "Data",
+   "label": "Store Time Zone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "commission_section",
+   "fieldtype": "Section Break",
+   "label": "Commission"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_commission",
+   "fieldtype": "Check",
+   "label": "Pay Commission to Sales Reps",
+   "description": "Turn off if this company does not pay commission. New orders then create no commission entries, no monthly statements are made, and the Commission screens are hidden. Existing records are kept."
+  },
+  {
+   "fieldname": "privacy_section",
+   "fieldtype": "Section Break",
+   "label": "Data Retention"
+  },
+  {
+   "fieldname": "retailer_inactive_anonymise_days",
+   "fieldtype": "Int",
+   "label": "Anonymise Inactive Retailers After (days)",
+   "default": "0",
+   "non_negative": 1,
+   "description": "Inactive retailers not changed for this many days get their name, contact, address and location removed (orders keep amounts and dates). 0 turns it off."
+  }
+ ],
+ "field_order": [
+  "identity_section",
+  "store_code",
+  "col_break_identity",
+  "tax_mode",
+  "connection_section",
+  "platform",
+  "col_break_connection",
+  "enabled",
+  "store_url",
+  "shopify_section",
+  "shopify_auth_mode",
+  "shopify_client_id",
+  "col_break_shopify",
+  "shopify_client_secret",
+  "shopify_api_version",
+  "shopify_scopes",
+  "installed_on",
+  "uninstalled_on",
+  "embedded_user",
+  "token_section",
+  "access_token",
+  "refresh_token",
+  "col_break_token",
+  "token_expiry",
+  "refresh_token_expiry",
+  "defaults_section",
+  "default_location_id",
+  "col_break_defaults",
+  "default_location_name",
+  "order_mode",
+  "product_sync_frequency",
+  "status_section",
+  "last_test_status",
+  "col_break_status",
+  "last_tested_on",
+  "shop_name",
+  "metafields_ready_on",
+  "locations_section",
+  "locations",
+  "invoice_section",
+  "send_order_confirmation",
+  "company_name",
+  "company_address",
+  "col_break_invoice",
+  "company_state",
+  "company_gstin",
+  "company_phone",
+  "company_email",
+  "match_shop_settings",
+  "shop_currency",
+  "shop_country",
+  "shop_timezone",
+  "commission_section",
+  "enable_commission",
+  "privacy_section",
+  "retailer_inactive_anonymise_days"
+ ]
+}

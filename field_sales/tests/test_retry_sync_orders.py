@@ -14,30 +14,45 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
+from field_sales.utils.store import set_store_value
+
 APP = __name__.split(".", 1)[0]
 api = importlib.import_module(f"{APP}.api")
-PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[APP]
+PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[
+	APP
+]
 
 
 class TestRetrySyncOrders(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": PLATFORM})
+		set_store_value({"enabled": 0, "platform": PLATFORM})
 		user = frappe.get_doc(
-			{"doctype": "User", "email": "retry.rep@example.com", "first_name": "Retry", "send_welcome_email": 0}
+			{
+				"doctype": "User",
+				"email": "retry.rep@example.com",
+				"first_name": "Retry",
+				"send_welcome_email": 0,
+			}
 		).insert(ignore_permissions=True)
 		user.add_roles("Field Sales Rep")
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": user.name}).insert(ignore_permissions=True).name
-		self.retailer = frappe.get_doc(
-			{
-				"doctype": "Retailer",
-				"retailer_name": "Retry Stores",
-				"phone": "9876543210",
-				"address_line1": "1 Main Road",
-				"city": "Salem",
-				"sales_rep": self.rep,
-			}
-		).insert(ignore_permissions=True).name
+		self.rep = (
+			frappe.get_doc({"doctype": "Sales Rep", "user": user.name}).insert(ignore_permissions=True).name
+		)
+		self.retailer = (
+			frappe.get_doc(
+				{
+					"doctype": "Retailer",
+					"retailer_name": "Retry Stores",
+					"phone": "9876543210",
+					"address_line1": "1 Main Road",
+					"city": "Salem",
+					"sales_rep": self.rep,
+				}
+			)
+			.insert(ignore_permissions=True)
+			.name
+		)
 		self.product = frappe.get_doc(
 			{
 				"doctype": "Platform Product",
@@ -69,7 +84,9 @@ class TestRetrySyncOrders(IntegrationTestCase):
 			.insert(ignore_permissions=True)
 			.name
 		)
-		frappe.db.set_value("Field Order", name, {"docstatus": 1, "sync_status": sync_status}, update_modified=False)
+		frappe.db.set_value(
+			"Field Order", name, {"docstatus": 1, "sync_status": sync_status}, update_modified=False
+		)
 		return name
 
 	def test_failed_orders_are_queued_in_one_call(self):
@@ -88,7 +105,12 @@ class TestRetrySyncOrders(IntegrationTestCase):
 
 	def test_another_reps_order_is_refused(self):
 		other_user = frappe.get_doc(
-			{"doctype": "User", "email": "retry.other@example.com", "first_name": "Other", "send_welcome_email": 0}
+			{
+				"doctype": "User",
+				"email": "retry.other@example.com",
+				"first_name": "Other",
+				"send_welcome_email": 0,
+			}
 		).insert(ignore_permissions=True)
 		other_user.add_roles("Field Sales Rep")
 		frappe.get_doc({"doctype": "Sales Rep", "user": other_user.name}).insert(ignore_permissions=True)

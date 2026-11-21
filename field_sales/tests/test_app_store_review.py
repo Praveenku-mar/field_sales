@@ -17,24 +17,33 @@ from frappe.tests import IntegrationTestCase
 from field_sales import frontend_api
 from field_sales.shopify import config
 from field_sales.sync import orders
+from field_sales.utils.store import get_store_name, set_store_value
 
 
 class AppStoreSite:
 	def use(self, auth_mode, platform="Shopify"):
-		frappe.db.set_single_value(
-			"Store Connection", {"platform": platform, "shopify_auth_mode": auth_mode, "enabled": 1, "store_url": "kovai-mart.myshopify.com"}
+		set_store_value(
+			{
+				"platform": platform,
+				"shopify_auth_mode": auth_mode,
+				"enabled": 1,
+				"store_url": "kovai-mart.myshopify.com",
+			}
 		)
-		frappe.clear_document_cache("Store Connection", "Store Connection")
+		frappe.clear_document_cache("Store", get_store_name())
 
 
 class TestNoStorePaymentsOnAppStore(AppStoreSite, IntegrationTestCase):
 	def tearDown(self):
 		frappe.db.rollback()
-		frappe.clear_document_cache("Store Connection", "Store Connection")
+		frappe.clear_document_cache("Store", get_store_name())
 
 	def test_app_store_install_never_marks_the_shopify_order_paid(self):
 		self.use(config.OAUTH_MODE)
-		with patch.object(orders, "get_connector") as get_connector, patch.object(orders.frappe, "get_doc", wraps=frappe.get_doc) as get_doc:
+		with (
+			patch.object(orders, "get_connector") as get_connector,
+			patch.object(orders.frappe, "get_doc", wraps=frappe.get_doc) as get_doc,
+		):
 			orders.mark_store_order_paid("FO-ANY")
 			orders.retry_store_payments()
 		get_connector.assert_not_called()
@@ -65,21 +74,32 @@ class TestHttpsOnly(IntegrationTestCase):
 		with patch.dict(frappe.local.conf, {"shopify_app_url": "http://fs.example.com"}):
 			self.assertRaises(frappe.ValidationError, config.public_url, "/cb")
 		# No app URL: the site's own URL only when it is HTTPS.
-		with patch.dict(frappe.local.conf, {"shopify_app_url": ""}), patch.object(config, "get_url", return_value="http://site.local:8000"):
+		with (
+			patch.dict(frappe.local.conf, {"shopify_app_url": ""}),
+			patch.object(config, "get_url", return_value="http://site.local:8000"),
+		):
 			self.assertRaises(frappe.ValidationError, config.public_url, "/cb")
-		with patch.dict(frappe.local.conf, {"shopify_app_url": ""}), patch.object(config, "get_url", return_value="https://sales.example.com"):
+		with (
+			patch.dict(frappe.local.conf, {"shopify_app_url": ""}),
+			patch.object(config, "get_url", return_value="https://sales.example.com"),
+		):
 			self.assertEqual(config.public_url("/cb"), "https://sales.example.com/cb")
 
 
 class TestAdminLanding(IntegrationTestCase):
 	def test_embedded_app_url(self):
 		with patch.dict(frappe.local.conf, {"shopify_app_client_id": "abc123"}):
-			self.assertEqual(config.embedded_app_url("kovai-mart.myshopify.com"), "https://kovai-mart.myshopify.com/admin/apps/abc123")
+			self.assertEqual(
+				config.embedded_app_url("kovai-mart.myshopify.com"),
+				"https://kovai-mart.myshopify.com/admin/apps/abc123",
+			)
 
 
 class TestAppConfig(IntegrationTestCase):
 	def test_toml_declares_uninstall_and_privacy_webhooks(self):
-		toml = tomllib.loads((Path(frappe.get_app_path("field_sales")).parent / "shopify.app.toml").read_text())
+		toml = tomllib.loads(
+			(Path(frappe.get_app_path("field_sales")).parent / "shopify.app.toml").read_text()
+		)
 		subs = toml["webhooks"]["subscriptions"]
 		receive = [s for s in subs if s["uri"].endswith("field_sales.shopify.webhooks.receive")]
 		self.assertIn("app/uninstalled", [t for s in receive for t in s.get("topics", [])])
@@ -95,28 +115,45 @@ class TestMobileStorePaymentAction(AppStoreSite, IntegrationTestCase):
 
 	def tearDown(self):
 		frappe.db.rollback()
-		frappe.clear_document_cache("Store Connection", "Store Connection")
+		frappe.clear_document_cache("Store", get_store_name())
 
 	def action(self, manager=True, retailer=False, **values):
 		doc = frappe._dict(
-			{"docstatus": 1, "payment_status": "Paid", "store_marked_paid_on": None, "external_order_id": "555", "external_draft_id": None, **values}
+			{
+				"docstatus": 1,
+				"payment_status": "Paid",
+				"store_marked_paid_on": None,
+				"external_order_id": "555",
+				"external_draft_id": None,
+				**values,
+			}
 		)
-		conn = frappe._dict(get_order_url=lambda order_id, draft_id=None: f"https://kovai-mart.myshopify.com/admin/{'orders/' + order_id if order_id else 'draft_orders/' + draft_id}")
-		with patch.object(frontend_api, "is_manager_or_admin", return_value=manager), patch.object(
-			frontend_api, "is_retailer_user", return_value=retailer
-		), patch.object(frontend_api, "get_connector", return_value=conn):
+		conn = frappe._dict(
+			get_order_url=lambda order_id,
+			draft_id=None: f"https://kovai-mart.myshopify.com/admin/{'orders/' + order_id if order_id else 'draft_orders/' + draft_id}"
+		)
+		with (
+			patch.object(frontend_api, "is_manager_or_admin", return_value=manager),
+			patch.object(frontend_api, "is_retailer_user", return_value=retailer),
+			patch.object(frontend_api, "get_connector", return_value=conn),
+		):
 			return frontend_api._store_payment_action(doc)
 
 	def test_paid_in_field_sales_sends_the_manager_to_mark_it_paid(self):
 		self.use(config.OAUTH_MODE)
 		got = self.action()
-		self.assertEqual((got["action"], got["url"]), ("mark_paid", "https://kovai-mart.myshopify.com/admin/orders/555"))
+		self.assertEqual(
+			(got["action"], got["url"]), ("mark_paid", "https://kovai-mart.myshopify.com/admin/orders/555")
+		)
 		self.assertTrue(got["note"])
 
 	def test_unpaid_draft_offers_collect_payment_on_the_draft(self):
 		self.use(config.OAUTH_MODE)
 		got = self.action(payment_status="Unpaid", external_order_id=None, external_draft_id="777")
-		self.assertEqual((got["action"], got["url"]), ("collect", "https://kovai-mart.myshopify.com/admin/draft_orders/777"))
+		self.assertEqual(
+			(got["action"], got["url"]),
+			("collect", "https://kovai-mart.myshopify.com/admin/draft_orders/777"),
+		)
 
 	def test_nothing_when_not_needed_or_not_allowed(self):
 		self.use(config.OAUTH_MODE)

@@ -348,6 +348,90 @@ class TestWritePathIsolation(StoreIsolationCase):
 		self.assertEqual(log.store, "ISB")
 
 
+class TestStoreAdminLimits(StoreIsolationCase):
+	"""Store Admin is an admin inside its store, never vendor staff (review of PR #43)."""
+
+	# These tests change Store ISA: undo each one (the class itself rolls back only once).
+	def setUp(self):
+		super().setUp()
+		frappe.db.savepoint("store_admin_limits")
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="store_admin_limits")
+		super().tearDown()
+
+	def test_a_store_admin_cannot_change_the_embedded_user_or_credentials(self):
+		self.as_user(self.a.admin)
+		for field, value in (
+			("embedded_user", "Administrator"),
+			("embedded_user", self.vendor),
+			("shopify_client_id", "someone-elses-app"),
+			("shopify_api_version", "2020-01"),
+		):
+			doc = frappe.get_doc("Store", "ISA")
+			doc.set(field, value)
+			with self.subTest(field=field, value=value), self.assertRaises(frappe.PermissionError):
+				doc.save()
+
+	def test_a_store_admin_can_still_edit_their_store_settings(self):
+		self.as_user(self.a.admin)
+		doc = frappe.get_doc("Store", "ISA")
+		doc.company_name = "ISA Traders"
+		doc.save()
+		self.assertEqual(frappe.db.get_value("Store", "ISA", "company_name"), "ISA Traders")
+
+	def test_the_embedded_user_is_never_administrator_or_another_stores_user(self):
+		for user in ("Administrator", self.b.manager):
+			doc = frappe.get_doc("Store", "ISA")
+			doc.embedded_user = user
+			with self.subTest(user=user), self.assertRaises(frappe.ValidationError):
+				doc.save()
+
+	def test_a_shopify_token_never_signs_in_as_administrator(self):
+		from field_sales.shopify.embedded import get_embedded_user
+		from field_sales.utils.store import use_store
+
+		frappe.db.set_value("Store", "ISA", "embedded_user", "Administrator")
+		# It commits once it has made the store's own embedded user; not in a test.
+		with use_store("ISA"), patch("field_sales.shopify.embedded.safe_commit"):
+			self.assertNotEqual(get_embedded_user(), "Administrator")
+
+	def test_rep_performance_shows_only_the_own_stores_reps(self):
+		from field_sales.field_sales.report.rep_performance.rep_performance import get_reps_in_scope
+
+		self.as_user(self.a.admin)
+		reps = get_reps_in_scope({})
+		self.assertIn(self.a.rep, reps)
+		self.assertEqual(
+			{
+				r.store
+				for r in frappe.get_all("Sales Rep", filters={"name": ("in", list(reps))}, fields=["store"])
+			},
+			{"ISA"},
+		)
+		self.assertEqual(get_reps_in_scope({"sales_rep": self.b.rep}), {})
+
+	def test_commission_summary_shows_only_the_own_stores_reps(self):
+		from field_sales.field_sales.report.rep_commission_summary.rep_commission_summary import (
+			_reps_in_scope,
+		)
+
+		self.as_user(self.a.admin)
+		reps = _reps_in_scope(frappe._dict())
+		self.assertIn(self.a.rep, reps)
+		self.assertNotIn(self.b.rep, reps)
+		self.assertEqual(_reps_in_scope(frappe._dict(sales_rep=self.b.rep)), [])
+		self.assertEqual(_reps_in_scope(frappe._dict(manager=self.b.manager_rep)), [])
+
+	def test_a_store_admin_cannot_move_a_rep_to_another_user(self):
+		self.as_user(self.a.admin)
+		rep = frappe.get_doc("Sales Rep", self.a.rep)
+		rep.user = self.vendor
+		with self.assertRaises(frappe.PermissionError):
+			rep.save()
+		self.assertIsNone(user_store(self.vendor))
+
+
 class TestEndpointAudit(IntegrationTestCase):
 	"""Every whitelisted function is in docs/multi-merchant/inventory.md section 8, with how it stays in the store."""
 

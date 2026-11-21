@@ -182,7 +182,8 @@ def get_embedded_user() -> str:
 	Sales Rep, so the manager screens and Reports To work for it).
 	"""
 	user = get_store_value("embedded_user")
-	if user and frappe.db.get_value("User", user, "enabled"):
+	# Never sign a Shopify token in as Administrator, whatever the Store says.
+	if user and user not in ("Administrator", "Guest") and frappe.db.get_value("User", user, "enabled"):
 		return user
 
 	store = get_store_name(required=True)

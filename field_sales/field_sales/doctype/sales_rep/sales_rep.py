@@ -96,7 +96,10 @@ class SalesRep(Document):
 			frappe.throw(_("Max Discount % must be between 0 and 100."))
 
 		# Re-pointing a rep at another user would hand that user the rep's team and roles.
-		if not self.is_new() and self.has_value_changed("user") and not is_admin():
+		# Vendor staff only: a Store Admin is an admin inside one store, and on_update would move
+		# the new user into this store and rewrite their roles.
+		user_changed = not self.is_new() and self.has_value_changed("user")
+		if user_changed and not is_vendor():
 			frappe.throw(
 				_("Only a System Manager can change the user of a Sales Rep."), frappe.PermissionError
 			)

@@ -7,10 +7,20 @@ from frappe.model.document import Document
 from frappe.utils.password import remove_encrypted_password
 
 from field_sales.connectors import CONNECTORS
-from field_sales.utils.store import CODE_PATTERN, clear_store_cache, is_multi_store
+from field_sales.utils.store import CODE_PATTERN, clear_store_cache, is_multi_store, is_vendor, user_store
 
 # Set by the Shopify install flow: store_url is then filled by it, not typed by the user.
 OAUTH_MODE = "OAuth"
+# Changed only by vendor staff: who embedded requests run as, and the connection credentials.
+VENDOR_ONLY_FIELDS = (
+	"embedded_user",
+	"platform",
+	"shopify_auth_mode",
+	"store_url",
+	"shopify_client_id",
+	"shopify_client_secret",
+	"shopify_api_version",
+)
 
 
 class Store(Document):
@@ -19,6 +29,8 @@ class Store(Document):
 		self.name = self.store_code
 
 	def validate(self):
+		self._guard_vendor_fields()
+		self._validate_embedded_user()
 		self._validate_store_code()
 		self._validate_order_mode()
 		self._normalize_store_url()
@@ -49,6 +61,40 @@ class Store(Document):
 	def after_rename(self, old: str, new: str, merge: bool = False) -> None:
 		self.db_set("store_code", new, update_modified=False)
 		clear_store_cache()
+
+	def _guard_vendor_fields(self):
+		"""
+		Store Admin may edit its Store, but not who embedded requests sign in as, nor the
+		connection and app credentials: only vendor staff (``is_vendor()``) change those. The
+		install flow saves as Administrator; code paths write them with ``set_store_value``.
+		"""
+		if self.is_new() or is_vendor():
+			return
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		for field in VENDOR_ONLY_FIELDS:
+			new, old = self.get(field), before.get(field)
+			if field == "shopify_client_secret":
+				changed = (bool(new) and not self.is_dummy_password(new)) or (not new and bool(old))
+			else:
+				changed = (new or None) != (old or None)
+			if changed:
+				frappe.throw(
+					_("Only a System Manager can change {0}").format(_(self.meta.get_label(field))),
+					frappe.PermissionError,
+				)
+
+	def _validate_embedded_user(self):
+		"""Embedded requests run as this user: never Administrator, Guest or another store's user."""
+		user = self.embedded_user
+		if not user:
+			return
+		if user in ("Administrator", "Guest"):
+			frappe.throw(_("{0} cannot be the Embedded User").format(user))
+		own = user_store(user)
+		if own and not self.is_new() and own != self.name:
+			frappe.throw(_("{0} belongs to another store").format(user))
 
 	def _validate_store_code(self):
 		self.store_code = (self.store_code or "").strip().upper()

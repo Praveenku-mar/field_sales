@@ -8,7 +8,13 @@ from frappe.utils import cint, flt
 
 from field_sales.permissions import clear_allowed_reps_cache, get_own_rep, is_admin, is_manager_or_admin
 from field_sales.utils.limits import SALES_REPS, check_limit
-from field_sales.utils.store import get_store_value
+from field_sales.utils.store import (
+	assign_user_to_store,
+	get_store_value,
+	is_vendor,
+	store_scope,
+	user_store,
+)
 
 # What a rep earns and may give away: never set by the rep themselves (see _validate_not_own_terms).
 OWN_TERMS_FIELDS = ("commission_plan", "commission_active", "max_discount_pct")
@@ -25,10 +31,15 @@ def check_adoptable_user(user: str) -> None:
 	it sets the roles, and marks it in ``frappe.flags.field_sales_checked_rep_user`` for this
 	request, so the insert that follows is not refused for the roles it has just given.
 	"""
-	if not user or is_admin() or user == frappe.flags.field_sales_checked_rep_user:
+	if not user or is_vendor() or user == frappe.flags.field_sales_checked_rep_user:
 		return
 	if user in ("Administrator", "Guest"):
 		frappe.throw(_("{0} cannot be a Sales Rep.").format(user), frappe.PermissionError)
+	own, scope = user_store(user), store_scope()
+	if own and own != scope:
+		frappe.throw(_("{0} belongs to another store.").format(user), frappe.PermissionError)
+	if own and own == scope:
+		return  # one of this store's own users
 	if set(frappe.get_roles(user)) - ADOPTABLE_ROLES:
 		frappe.throw(
 			_("{0} already has other roles, so only a System Manager can make them a Sales Rep.").format(
@@ -158,6 +169,9 @@ class SalesRep(Document):
 		# The hierarchy may have changed; later checks in this request must see it.
 		clear_allowed_reps_cache()
 		self.sync_user_roles()
+		# A rep's user belongs to the rep's store (refuses a user of another store).
+		if self.user and self.store:
+			assign_user_to_store(self.user, self.store)
 
 	def sync_user_roles(self):
 		sync_sales_rep_roles(self.user, bool(cint(self.sales_manager)), bool(cint(self.sales_rep)))

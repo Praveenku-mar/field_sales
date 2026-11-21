@@ -1,6 +1,6 @@
 # Copyright (c) 2026, Your Company and contributors
 # For license information, please see license.txt
-# ruff: noqa: RUF001, RUF002
+# ruff: noqa: RUF001
 
 """
 Commission Statements: group a rep's Earned entries for a period into one payable document.
@@ -20,11 +20,9 @@ from frappe.utils import add_days, cint, flt, get_first_day, getdate, nowdate
 
 from field_sales.commission import commission_enabled, require_commission_enabled
 from field_sales.commission.engine import load_plans, penalty_multiplier, slab_rate
-from field_sales.permissions import get_own_rep, is_admin
+from field_sales.permissions import MANAGER_ROLES, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
 from field_sales.utils.db import safe_commit
-
-MANAGER_ROLES = {"Sales Manager", "System Manager"}
 
 
 def generate_monthly_statements():
@@ -59,7 +57,6 @@ def generate_monthly_statements():
 		raise
 
 
-
 def build_statement(sales_rep: str, period_start, period_end):
 	"""Create and save a Draft Commission Statement from the rep's open entries up to ``period_end``."""
 	doc = frappe.new_doc("Commission Statement")
@@ -89,7 +86,11 @@ def regenerate_statement(name: str) -> dict:
 		frappe.throw(_("Only a Draft Commission Statement can be regenerated."))
 
 	frappe.db.set_value(
-		"Commission Entry", {"commission_statement": doc.name}, "commission_statement", None, update_modified=False
+		"Commission Entry",
+		{"commission_statement": doc.name},
+		"commission_statement",
+		None,
+		update_modified=False,
 	)
 	_fill(doc)
 	doc.save(ignore_permissions=True)
@@ -150,7 +151,8 @@ def check_not_own_commission(sales_rep: str | None) -> None:
 def _statement_exists(sales_rep: str, period_start) -> bool:
 	return bool(
 		frappe.db.exists(
-			"Commission Statement", {"sales_rep": sales_rep, "period_start": period_start, "docstatus": ("!=", 2)}
+			"Commission Statement",
+			{"sales_rep": sales_rep, "period_start": period_start, "docstatus": ("!=", 2)},
 		)
 	)
 
@@ -259,10 +261,16 @@ def check_statement_current(doc) -> None:
 	frappe.db.savepoint(savepoint)
 	try:
 		frappe.db.set_value(
-			"Commission Entry", {"commission_statement": doc.name}, "commission_statement", None, update_modified=False
+			"Commission Entry",
+			{"commission_statement": doc.name},
+			"commission_statement",
+			None,
+			update_modified=False,
 		)
 		fresh = frappe.new_doc("Commission Statement")
-		fresh.update({"sales_rep": doc.sales_rep, "period_start": doc.period_start, "period_end": doc.period_end})
+		fresh.update(
+			{"sales_rep": doc.sales_rep, "period_start": doc.period_start, "period_end": doc.period_end}
+		)
 		_fill(fresh)
 	finally:
 		frappe.db.rollback(save_point=savepoint)
@@ -281,7 +289,9 @@ def _summary(doc) -> tuple:
 	"""What approval pays: the totals and each entry's net amount."""
 	money = lambda value: flt(value, 2)  # noqa: E731
 	return (
-		tuple(money(doc.get(f)) for f in ("gross_commission", "reversals", "override_commission", "net_payable")),
+		tuple(
+			money(doc.get(f)) for f in ("gross_commission", "reversals", "override_commission", "net_payable")
+		),
 		tuple(sorted((row.commission_entry, money(row.net_amount)) for row in doc.get("entries") or [])),
 	)
 
@@ -290,7 +300,11 @@ def _link_entries(doc) -> None:
 	names = [row.commission_entry for row in doc.entries]
 	if names:
 		frappe.db.set_value(
-			"Commission Entry", {"name": ("in", names)}, "commission_statement", doc.name, update_modified=False
+			"Commission Entry",
+			{"name": ("in", names)},
+			"commission_statement",
+			doc.name,
+			update_modified=False,
 		)
 
 
@@ -343,7 +357,9 @@ def _apply_slabs(rep_orders: list, sales_rep: str) -> float:
 			old_amount, old_reversed = flt(e.amount), flt(e.reversed_amount)
 			effective = flt(rate * ratio, 4)
 			amount = flt(flt(e.base_amount) * effective / 100, amount_precision)
-			reversed_amount = flt(amount * old_reversed / old_amount, amount_precision) if old_amount else old_reversed
+			reversed_amount = (
+				flt(amount * old_reversed / old_amount, amount_precision) if old_amount else old_reversed
+			)
 			note = (
 				f"Slab ({mode}) {flt(rate, 4):g}% on period sales {total:,.2f}"
 				+ (f" × penalty {flt(ratio, 4):g}" if ratio != 1 else "")

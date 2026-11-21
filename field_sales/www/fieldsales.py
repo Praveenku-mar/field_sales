@@ -13,7 +13,7 @@ from field_sales.utils.db import safe_commit
 
 no_cache = 1
 
-APP_ROLES = ("System Manager", "Sales Manager", "Field Sales Rep", "Field Sales Retailer")
+APP_ROLES = ("System Manager", "Store Admin", "Sales Manager", "Field Sales Rep", "Field Sales Retailer")
 
 
 def get_context(context):

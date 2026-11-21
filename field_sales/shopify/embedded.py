@@ -29,18 +29,26 @@ from frappe.utils import get_datetime, now_datetime
 
 from field_sales.connectors.shopify import REQUEST_TIMEOUT, TOKEN_LOCK_KEY, TOKEN_LOCK_SECONDS
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
+from field_sales.permissions import MANAGER_ROLES, STORE_ADMIN_ROLE
 from field_sales.shopify import config
 from field_sales.shopify.oauth import InstallError, check_shop_allowed, save_installation
 from field_sales.shopify.session_token import InvalidSessionToken, decode
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import get_store, get_store_value, set_store_value
+from field_sales.utils.store import (
+	assign_user_to_store,
+	get_store,
+	get_store_name,
+	get_store_value,
+	is_multi_store,
+	set_store_value,
+)
 
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 ID_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id_token"
 OFFLINE_TOKEN_TYPE = "urn:shopify:params:oauth:token-type:offline-access-token"
 
-EMBEDDED_ROLE = "Sales Manager"
-MANAGER_ROLES = {"System Manager", "Sales Manager"}
+# The embedded user is the merchant's owner: a manager, and Store Admin for the store's settings.
+EMBEDDED_ROLES = ("Sales Manager", STORE_ADMIN_ROLE)
 
 
 class ConnectError(Exception):
@@ -160,6 +168,13 @@ def _log_install(status: str, shop: str, message: str, **fields) -> None:
 # ----------------------------------------------------------------------
 
 
+def embedded_email(store: str) -> str:
+	"""The embedded user's login: one per store on the shared site, else the site's single one."""
+	if is_multi_store():
+		return f"shopify-admin-{store.lower()}@{frappe.local.site}"
+	return f"shopify-admin@{frappe.local.site}"
+
+
 def get_embedded_user() -> str:
 	"""
 	The user requests from the Shopify admin run as: the Store's ``embedded_user``,
@@ -170,7 +185,8 @@ def get_embedded_user() -> str:
 	if user and frappe.db.get_value("User", user, "enabled"):
 		return user
 
-	email = f"shopify-admin@{frappe.local.site}"
+	store = get_store_name(required=True)
+	email = embedded_email(store)
 	previous_user = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
@@ -183,17 +199,24 @@ def get_embedded_user() -> str:
 					"last_name": "Admin",
 					"user_type": "System User",
 					"send_welcome_email": 0,
-					"roles": [{"role": EMBEDDED_ROLE}],
+					"roles": [{"role": role} for role in EMBEDDED_ROLES],
 				}
 			).insert(ignore_permissions=True)
+		assign_user_to_store(email, store)
 		if not frappe.db.exists("Sales Rep", {"user": email}):
 			rep = frappe.get_doc(
-				{"doctype": "Sales Rep", "user": email, "full_name": "Shopify Admin", "active": 1}
+				{
+					"doctype": "Sales Rep",
+					"user": email,
+					"full_name": "Shopify Admin",
+					"active": 1,
+					"store": store,
+				}
 			)
 			# Not counted against the plan (billing.usage), and embedded_user is only set below.
 			rep.flags.ignore_plan_limit = True
 			rep.insert(ignore_permissions=True)
-		set_store_value("embedded_user", email)
+		set_store_value("embedded_user", email, store)
 		safe_commit()
 	finally:
 		frappe.set_user(previous_user)

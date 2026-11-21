@@ -13,7 +13,7 @@ from field_sales.commission.engine import enqueue_create_entries
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.visit.visit import update_order_taken
 from field_sales.payments.razorpay import cancel_link_for_cancelled_order
-from field_sales.permissions import get_allowed_reps, is_admin
+from field_sales.permissions import MANAGER_ROLES, get_allowed_reps, is_admin
 from field_sales.sync.orders import enqueue_push_order
 from field_sales.sync.stock import (
 	fetch_live_stock,
@@ -27,7 +27,7 @@ from field_sales.utils.money import site_currency
 from field_sales.utils.store import order_series
 
 # May set a line's rate other than the product's price.
-PRICE_OVERRIDE_ROLES = {"Sales Manager", "System Manager"}
+PRICE_OVERRIDE_ROLES = MANAGER_ROLES
 # Written only by the store sync (db_set); location_id is the user's pick and is validated instead.
 SYNC_FIELDS = (
 	"platform",
@@ -397,7 +397,7 @@ class FieldOrder(Document):
 			return
 		if percent <= 0 or frappe.session.user == "Administrator":
 			return
-		if {"Sales Manager", "System Manager"} & set(frappe.get_roles()):
+		if MANAGER_ROLES & set(frappe.get_roles()):
 			return
 
 		rep = (

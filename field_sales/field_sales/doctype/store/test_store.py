@@ -7,11 +7,14 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils.password import get_decrypted_password, set_encrypted_password
 
-from field_sales.patches.v2_0 import create_first_store
+from field_sales.patches.v2_0 import assign_users_to_store, create_first_store
 from field_sales.payments.razorpay import razorpay_enabled
+from field_sales.shopify.embedded import embedded_email
+from field_sales.tests.store_fixtures import make_user
 from field_sales.utils.store import (
 	NoStoreContext,
 	clear_store_cache,
+	clear_user_store_cache,
 	current_store,
 	get_store,
 	get_store_name,
@@ -19,6 +22,7 @@ from field_sales.utils.store import (
 	make_store_code,
 	order_series,
 	use_store,
+	user_store,
 )
 
 MULTI = {"field_sales_multi_store": 1}
@@ -193,3 +197,44 @@ class TestCreateFirstStorePatch(IntegrationTestCase):
 		self.assertIn("failed_log_retention_days", left)
 		self.assertNotIn("store_url", left)
 		self.assertFalse(frappe.db.exists("__Auth", {"doctype": source}))
+
+
+class TestAssignUsersPatch(IntegrationTestCase):
+	def setUp(self):
+		clear_store_cache()
+		clear_user_store_cache()
+
+	def tearDown(self):
+		frappe.db.rollback()
+		clear_store_cache()
+		clear_user_store_cache()
+
+	def test_the_users_of_a_single_store_site_join_its_store(self):
+		rep = make_user("assign.rep@example.com", ["Field Sales Rep"])
+		manager = make_user("assign.manager@example.com", ["Sales Manager"])
+		sysman = make_user("assign.sysman@example.com", ["System Manager"])
+		frappe.db.delete("User Permission", {"allow": "Store", "user": ("in", (rep, manager, sysman))})
+		clear_user_store_cache()
+
+		assign_users_to_store.execute()
+		assign_users_to_store.execute()  # safe to repeat
+
+		store = get_store_name()
+		self.assertEqual(user_store(rep), store)
+		self.assertEqual(user_store(manager), store)
+		self.assertEqual(frappe.db.count("User Permission", {"user": rep, "allow": "Store"}), 1)
+		# A System Manager with no store stays vendor staff.
+		self.assertIsNone(user_store(sysman))
+
+	def test_the_embedded_user_gets_store_admin(self):
+		store = get_store_name()
+		email = embedded_email(store)
+		make_user(email, ["Sales Manager"])
+		frappe.db.set_value("Store", store, "embedded_user", email)
+		assign_users_to_store.execute()
+		self.assertIn("Store Admin", frappe.get_roles(email))
+
+	def test_each_store_has_its_own_embedded_user_on_the_shared_site(self):
+		with patch.dict(frappe.conf, MULTI):
+			self.assertNotEqual(embedded_email("AAA"), embedded_email("BBB"))
+		self.assertEqual(embedded_email("AAA"), embedded_email("BBB"))  # single-store: one login

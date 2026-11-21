@@ -8,12 +8,12 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, validate_email_address
 
-from field_sales.permissions import STAFF_ROLES, get_own_rep, is_admin
+from field_sales.permissions import MANAGER_ROLES, STAFF_ROLES, get_own_rep, is_admin
 from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 from field_sales.utils.geo import has_coords
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.phone import example_number, is_valid
-from field_sales.utils.store import get_store_value
+from field_sales.utils.store import assign_user_to_store, get_store_value
 
 # Written only by the server: the customer sync (_record_result) and Visit (last_visit).
 SERVER_FIELDS = (
@@ -27,7 +27,7 @@ SERVER_FIELDS = (
 	"last_visit",
 )
 # May move a located retailer or change its geofence radius (both decide check-in distance).
-LOCATION_EDIT_ROLES = {"Sales Manager", "System Manager"}
+LOCATION_EDIT_ROLES = MANAGER_ROLES
 # May link or re-point a retailer's login user (the Login Access card and its APIs).
 LOGIN_EDIT_ROLES = LOCATION_EDIT_ROLES
 
@@ -89,6 +89,9 @@ class Retailer(Document):
 			)
 
 	def on_update(self):
+		# A retailer's login belongs to the retailer's store (refuses a user of another store).
+		if self.user and self.store:
+			assign_user_to_store(self.user, self.store)
 		self._push_to_store_if_changed()
 
 	def _push_to_store_if_changed(self):

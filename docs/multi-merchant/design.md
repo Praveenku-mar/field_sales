@@ -218,4 +218,12 @@ Platform-neutral (D2).
 
 ## 11. Status
 - **Phase 2 done (21 Nov 2026):** Store DocType, `utils/store.py`, `store` links + indexes, all Store Connection uses moved to Store, shared-site rules behind `field_sales_multi_store`, patch `v2_0/create_first_store` (run on `fieldsales-test`). Store Connection keeps `failed_log_retention_days` and `plan_limits` only; `shopify_api_version` and the client id/secret stay per store, since single-store sites still use client credentials.
-- **Moved to Phase 3:** per-user Store User Permissions (so existing and new users are treated the same), and per-store Commission Plan names (needs the Sales Rep plan picker changed with it). `client_temp_key`, `invoice_no` and `dedupe_key` stay globally unique: their values are already unique across stores.
+- **Phase 3 done (21 Nov 2026):**
+  - one user = one store through a default User Permission on Store (`utils/store.py → assign_user_to_store()`), set when a Sales Rep, a retailer login or the embedded user is created (patch `v2_0/assign_users_to_store` for existing users)
+  - new **Store Admin** role; the role sets live only in `permissions.py`; frontend role lists updated
+  - the store comes first in every permission query, `has_permission`, `scope_criterion` and `hierarchy_filters`; store-only hooks for Platform Product, Product Stock, Sync Log, Commission Plan, Privacy Request; the mobile raw-SQL lists add it centrally
+  - alert recipients (`users_with_roles`) and plan usage are per store; a new record takes its rep's store
+  - Commission Plan names unique per store (`<name> (<store>)` when taken by another store)
+  - audit of all 108 endpoints in `inventory.md` §8, enforced by a test; isolation suite `tests/test_store_isolation.py`
+- **Changed from the plan:** there is no `before_request` hook: API-key (mobile) and Shopify session-token logins happen after Frappe calls it, so `get_store_name()` reads the session user's store lazily instead. Refusing a user of an inactive store moves to Phase 6, because `Store.enabled` is also switched off by a failed token refresh and the merchant must still be able to open the app to reinstall.
+- **Still Phase 4:** webhooks, jobs and scheduled jobs need an explicit store (no session user); Shopify session token → store.

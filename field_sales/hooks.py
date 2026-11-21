@@ -182,6 +182,11 @@ permission_query_conditions = {
 	"Commission Entry": "field_sales.permissions.commission_entry_query",
 	"Commission Statement": "field_sales.permissions.commission_statement_query",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_query",
+	"Platform Product": "field_sales.permissions.platform_product_query",
+	"Product Stock": "field_sales.permissions.product_stock_query",
+	"Sync Log": "field_sales.permissions.sync_log_query",
+	"Commission Plan": "field_sales.permissions.commission_plan_query",
+	"Privacy Request": "field_sales.permissions.privacy_request_query",
 }
 
 has_permission = {
@@ -192,6 +197,10 @@ has_permission = {
 	"Commission Entry": "field_sales.permissions.commission_entry_has_permission",
 	"Commission Statement": "field_sales.permissions.commission_statement_has_permission",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_has_permission",
+	**{
+		doctype: "field_sales.permissions.store_only_has_permission"
+		for doctype in ("Platform Product", "Product Stock", "Sync Log", "Commission Plan", "Privacy Request")
+	},
 }
 
 # Document Events

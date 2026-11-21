@@ -26,6 +26,18 @@
    "role": "System Manager",
    "share": 0,
    "write": 1
+  },
+  {
+   "read": 1,
+   "write": 1,
+   "report": 1,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "create": 0,
+   "delete": 0,
+   "share": 0,
+   "role": "Store Admin"
   }
  ],
  "sort_field": "modified",

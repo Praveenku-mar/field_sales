@@ -15,7 +15,13 @@ from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.connectors.shopify import is_oauth
 from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason, razorpay_enabled
-from field_sales.permissions import hierarchy_filters, is_manager_or_admin, is_retailer_user
+from field_sales.permissions import (
+	ADMIN_ROLES,
+	MANAGER_ROLES,
+	hierarchy_filters,
+	is_manager_or_admin,
+	is_retailer_user,
+)
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
@@ -153,8 +159,8 @@ def get_session() -> dict:
 		"full_name": info.get("full_name") or user,
 		"user_image": info.get("user_image"),
 		"roles": roles,
-		"is_admin": "System Manager" in roles,
-		"is_manager": bool({"System Manager", "Sales Manager"} & set(roles)),
+		"is_admin": bool(ADMIN_ROLES & set(roles)),
+		"is_manager": bool(MANAGER_ROLES & set(roles)),
 		"is_retailer": bool(retailer),
 		"retailer": retailer,
 		"sales_rep": frappe.db.get_value(
@@ -556,7 +562,7 @@ def _failures() -> list[dict]:
 
 def _team_this_month(today: str) -> list[dict]:
 	"""Month-to-date per rep for managers (same numbers as Rep Performance); empty for reps."""
-	if not ({"System Manager", "Sales Manager"} & set(frappe.get_roles())):
+	if not (MANAGER_ROLES & set(frappe.get_roles())):
 		return []
 
 	from field_sales.field_sales.report.rep_performance.rep_performance import (

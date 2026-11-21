@@ -882,7 +882,12 @@ def _stale_link(doc, link_entity: dict) -> bool:
 
 def notify_payment_received(doc) -> None:
 	"""Bell notification and a realtime event for the order's rep and every Sales Manager."""
-	users = {doc.sales_rep, *users_with_roles(PAYMENT_NOTIFY_ROLES)} - {None, "", "Guest", "Administrator"}
+	users = {doc.sales_rep, *users_with_roles(PAYMENT_NOTIFY_ROLES, doc.get("store"))} - {
+		None,
+		"",
+		"Guest",
+		"Administrator",
+	}
 	users = [u for u in sorted(users) if frappe.db.get_value("User", u, "enabled")]
 	if not users:
 		return

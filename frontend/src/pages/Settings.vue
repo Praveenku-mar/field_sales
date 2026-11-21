@@ -56,7 +56,7 @@
         <EmptyState
           :icon="NOT_ADMIN[tab].icon"
           :title="NOT_ADMIN[tab].title"
-          :description="`Only a ${NOT_ADMIN[tab].who || 'System Manager'} can change ${NOT_ADMIN[tab].what}.`"
+          :description="`Only a ${NOT_ADMIN[tab].who || 'Store Admin'} can change ${NOT_ADMIN[tab].what}.`"
         >
         </EmptyState>
       </div>

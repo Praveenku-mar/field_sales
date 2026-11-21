@@ -21,6 +21,8 @@ from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sales_rep.sales_rep import check_adoptable_user, sync_sales_rep_roles
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import (
+	ADMIN_ROLES,
+	MANAGER_ROLES,
 	RETAILER_ROLE,
 	STAFF_ROLES,
 	get_allowed_reps,
@@ -44,14 +46,14 @@ from field_sales.utils.geo import (
 	point_geojson,
 )
 from field_sales.utils.limits import SALES_REPS, check_limit
-from field_sales.utils.store import get_store_value, set_store_value
+from field_sales.utils.store import get_store_value, set_store_value, user_is_reachable
 from field_sales.utils.urls import public_url
 
-VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
+VISIT_MANAGER_ROLES = MANAGER_ROLES
 # Roles a user may hold for a manager to reset their password (the rest are automatic roles).
 REP_ONLY_ROLES = {"Field Sales Rep", "All", "Guest", "Desk User"}
 # May manage a retailer's login (the Login Access card); mirrors Retailer's LOGIN_EDIT_ROLES.
-LOGIN_ROLES = {"Sales Manager", "System Manager"}
+LOGIN_ROLES = MANAGER_ROLES
 # A retailer login user holds the retailer role plus Frappe's automatic roles, nothing else.
 RETAILER_LOGIN_ROLES = {"Field Sales Retailer", "All", "Guest"}
 
@@ -69,7 +71,7 @@ def _retailer_login_url() -> str:
 
 @frappe.whitelist(methods=["POST"])
 def test_connection() -> dict:
-	frappe.only_for("System Manager")
+	frappe.only_for(list(ADMIN_ROLES))
 
 	conn = get_connector()
 	result = conn.test_connection()
@@ -106,7 +108,7 @@ def _sync_shop_settings(result: dict) -> dict:
 
 @frappe.whitelist()
 def get_locations() -> list[dict]:
-	frappe.only_for("System Manager")
+	frappe.only_for(list(ADMIN_ROLES))
 
 	try:
 		return get_connector().get_locations()
@@ -127,7 +129,7 @@ def get_sell_locations() -> list[dict]:
 
 @frappe.whitelist(methods=["POST"])
 def enqueue_product_sync() -> dict:
-	frappe.only_for(["System Manager", "Sales Manager"])
+	frappe.only_for(list(MANAGER_ROLES))
 
 	get_connector()
 	if not get_store_value("default_location_id"):
@@ -141,7 +143,7 @@ def enqueue_product_sync() -> dict:
 @frappe.whitelist(methods=["POST"])
 def enqueue_customer_import() -> dict:
 	"""Queue an import of the store's customers as Retailers (``sync.customers.import_customers``)."""
-	frappe.only_for(["System Manager", "Sales Manager"])
+	frappe.only_for(list(MANAGER_ROLES))
 
 	get_connector()  # fails fast if the store is disabled
 	if enqueue_import():
@@ -215,6 +217,8 @@ def get_user_for_sales_rep(email: str) -> dict:
 	frappe.has_permission("Sales Rep", "create", throw=True)
 	email = (email or "").strip().lower()
 	user = frappe.db.get_value("User", email, ["name", "full_name"], as_dict=True)
+	if user and not user_is_reachable(email):
+		user = None  # a user of another store is not shown, nor told apart from "no such user"
 	user_roles = (
 		[r for r in frappe.get_roles(email) if r in ("Sales Manager", "Field Sales Rep", "Sales Rep")]
 		if user
@@ -804,6 +808,7 @@ def check_out(
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)
+	doc.check_permission("write")
 	_check_visit_access(doc)
 	if doc.status != "In Progress":
 		frappe.throw(

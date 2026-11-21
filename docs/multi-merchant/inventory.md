@@ -140,3 +140,120 @@ Measured on `develop` at `dc2dc4d`, 21 Nov 2026. Tests are excluded throughout.
 | `orders.retry_failed_orders` | Loop stores |
 | `daily_summary.send_daily_summary` (`0 20 * * *`) | **Must run hourly** and send for stores where it is 20:00 in their time zone (D1) |
 | `statements.generate_monthly_statements` (`0 2 1 * *`) | Run hourly on day 1–2; generate for stores whose local month has ended (D1) |
+
+## 8. Whitelisted endpoints and how each stays inside the user's store
+
+All 108 `@frappe.whitelist` functions (Phase 3 audit). `tests/test_store_isolation.py::TestEndpointAudit` fails when a function is added or removed without updating this list.
+
+Mechanisms: **doc permission** = `check_permission` / `has_permission` (the store + hierarchy hooks in `permissions.py`); **get_list** = `frappe.get_list` (permission query hooks add the store); **scope_criterion** / **hierarchy+store** = `permissions.py` helpers that include the store; **keyset store clause** = `api/mobile.py _execute_keyset_query`; **store filter** = `store_filters()`; **current store** = the user's own store through `utils/store.py`; **role gate** = `only_for` / role check.
+
+| Endpoint | Guest | Stays in the store by |
+|---|---|---|
+| `field_sales.api.test_connection` |  | role gate; acts on the user's own store |
+| `field_sales.api.get_locations` |  | role gate; acts on the user's own store |
+| `field_sales.api.get_sell_locations` |  | doc permission |
+| `field_sales.api.enqueue_product_sync` |  | role gate; syncs the user's own store (job id per store: Phase 4) |
+| `field_sales.api.enqueue_customer_import` |  | role gate; imports into the user's own store (job context: Phase 4) |
+| `field_sales.api.create_order` |  | doc permission |
+| `field_sales.api.set_order_location` |  | saves the order: permission hooks (store + rep) |
+| `field_sales.api.get_user_for_sales_rep` |  | doc permission, store user check |
+| `field_sales.api.create_sales_rep` |  | doc permission |
+| `field_sales.api.set_sales_rep_password` |  | doc permission |
+| `field_sales.api.send_sales_rep_password_reset` |  | doc permission |
+| `field_sales.api.get_retailer_login` |  | doc permission |
+| `field_sales.api.create_retailer_login` |  | doc permission |
+| `field_sales.api.send_retailer_password_reset` |  | doc permission |
+| `field_sales.api.revoke_retailer_login` |  | doc permission |
+| `field_sales.api.sync_retailers` |  | current store, doc permission |
+| `field_sales.api.check_in` |  | only the visit's own rep; a rep belongs to one store |
+| `field_sales.api.check_out` |  | `check_permission(write)` on the visit (store + rep) + rep/manager gate |
+| `field_sales.api.get_live_stock` |  | doc permission |
+| `field_sales.api.refresh_stock` |  | doc permission |
+| `field_sales.api.retry_sync` |  | current store, doc permission |
+| `field_sales.api.retry_sync_orders` |  | current store, doc permission |
+| `field_sales.api.get_store_order_url` |  | current store, doc permission |
+| `field_sales.api.get_sync_failures` |  | get_list (hooks), hierarchy+store, role gate |
+| `field_sales.api.retry_all_sync_failures` |  | current store, get_list (hooks), hierarchy+store, role gate |
+| `field_sales.api.get_sync_failure_count` |  | get_list (hooks), hierarchy+store |
+| `field_sales.api.get_territories` |  | doc permission, get_list (hooks) |
+| `field_sales.api.get_retailer_cities` |  | doc permission, get_list (hooks) |
+| `field_sales.api.get_retailer_summary` |  | doc permission, scope_criterion |
+| `field_sales.api.get_visit_orders` |  | doc permission, get_list (hooks) |
+| `field_sales.api.mobile_login` | yes | guest; signs in one user, returns only their own data |
+| `field_sales.api.dashboard.get_dashboard` |  | get_list (hooks) |
+| `field_sales.api.mobile.get_orders_list` |  | hierarchy, keyset store clause, staff gate |
+| `field_sales.api.mobile.get_visits_list` |  | hierarchy, keyset store clause, staff gate |
+| `field_sales.api.mobile.get_customers_list` |  | hierarchy, keyset store clause, staff gate |
+| `field_sales.api.mobile.get_products_list` |  | doc permission, get_list (hooks), keyset store clause, staff gate |
+| `field_sales.api.mobile.get_team_list` |  | keyset store clause, staff gate |
+| `field_sales.api.mobile.get_commission_statements_list` |  | hierarchy, keyset store clause, staff gate |
+| `field_sales.api.mobile.get_retailer_orders_list` |  | keyset store clause + the user's own retailer |
+| `field_sales.api.mobile.get_retailer_payments_list` |  | keyset store clause, staff gate |
+| `field_sales.api.mobile.get_order_detail` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.api.mobile.get_customer_detail_records` |  | doc permission, staff gate |
+| `field_sales.api.mobile.get_visit_detail` |  | doc permission, staff gate |
+| `field_sales.api.mobile.get_product_detail_stock` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.api.mobile.get_product_sync_status` |  | role gate, staff gate, store filter |
+| `field_sales.api.mobile.get_mobile_count` |  | get_list (hooks), staff gate |
+| `field_sales.api.mobile.mobile_search` |  | doc permission, staff gate |
+| `field_sales.api.mobile.find_order_by_client_temp_id` |  | get_list (hooks), staff gate |
+| `field_sales.api.mobile.find_visit_by_client_temp_id` |  | get_list (hooks), staff gate |
+| `field_sales.api.mobile.get_mobile_manifest` | yes | guest; static contract, no store data |
+| `field_sales.api.mobile.register_device` |  | the session user's own device row |
+| `field_sales.api.mobile.unregister_device` |  | the session user's own device row |
+| `field_sales.api.mobile.set_device_push_enabled` |  | the session user's own device row |
+| `field_sales.api.webhooks.receive` | yes | guest webhook: which store is Phase 4 (shop header) |
+| `field_sales.chatter.get_chatter` |  | `_readable()`: `check_permission(read)` on the record |
+| `field_sales.chatter.post_note` |  | `_readable()`: `check_permission(read)` on the record |
+| `field_sales.commission.api.get_my_commission_summary` |  | the session user's own rep |
+| `field_sales.commission.api.get_team_commission` |  | doc permission, get_list (hooks), hierarchy, staff gate |
+| `field_sales.commission.api.get_commission_entries` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.commission.api.get_commission_statements` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.commission.api.get_commission_statement` |  | doc permission |
+| `field_sales.commission.api.approve_statement` |  | `check_permission(write)` on the statement (store + rep) |
+| `field_sales.commission.api.get_commission_plans` |  | doc permission, get_list (hooks) |
+| `field_sales.commission.api.save_commission_plan` |  | doc permission |
+| `field_sales.commission.api.assign_commission_plan` |  | doc permission |
+| `field_sales.commission.api.create_adjustment` |  | `has_permission` on the rep; the entry is stamped with the rep's store |
+| `field_sales.commission.api.generate_statements` |  | get_list (hooks), hierarchy |
+| `field_sales.commission.statements.regenerate_statement` |  | doc permission |
+| `field_sales.commission.statements.mark_paid` |  | doc permission |
+| `field_sales.field_sales.doctype.mobile_push_settings.mobile_push_settings.get_push_status` |  | vendor only (System Manager) |
+| `field_sales.field_sales.doctype.mobile_push_settings.mobile_push_settings.users_with_phones` |  | get_list (hooks), role gate |
+| `field_sales.field_sales.doctype.mobile_push_settings.mobile_push_settings.send_test_notification` |  | vendor only (System Manager) |
+| `field_sales.field_sales.doctype.retailer.retailer.get_default_country` |  | current store, doc permission |
+| `field_sales.field_sales.doctype.retailer.retailer.get_phone_hint` |  | doc permission |
+| `field_sales.frontend_api.get_list_preset` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.frontend_api.get_session` |  | the session user's own roles, rep and store |
+| `field_sales.frontend_api.get_sidebar_counts` |  | counts through `get_list` (store + hierarchy hooks) |
+| `field_sales.frontend_api.get_notifications` |  | the session user's own Notification Log rows |
+| `field_sales.frontend_api.search` |  | get_list (hooks), staff gate |
+| `field_sales.frontend_api.get_dashboard` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.frontend_api.get_product_activity` |  | doc permission, get_list (hooks), staff gate |
+| `field_sales.frontend_api.get_order_sync_info` |  | current store, doc permission, staff gate |
+| `field_sales.frontend_api.get_rep_month_stats` |  | doc permission, hierarchy+store, staff gate |
+| `field_sales.frontend_api.get_order_payment_info` |  | doc permission, staff gate |
+| `field_sales.payments.manual.mark_order_paid` |  | doc permission |
+| `field_sales.payments.razorpay.get_webhook_url` |  | Razorpay Settings: single-store sites only (off on the shared site) |
+| `field_sales.payments.razorpay.test_connection` |  | Razorpay Settings: single-store sites only (off on the shared site) |
+| `field_sales.payments.razorpay.create_link_for_order` |  | doc permission |
+| `field_sales.payments.razorpay.get_payment_config` |  | doc permission, staff gate |
+| `field_sales.payments.razorpay.webhook` | yes | guest; refused on the shared site (Razorpay off); single-store sites only |
+| `field_sales.payments.razorpay.refresh_payment_status` |  | doc permission |
+| `field_sales.payments.refunds.refund_order_payment` |  | doc permission, role gate |
+| `field_sales.shopify.billing.get_plan_info` |  | the user's own store (usage counted per store) |
+| `field_sales.shopify.embedded.get_store_status` |  | the user's own store |
+| `field_sales.shopify.merchant_settings.get_store_settings` |  | the user's own store |
+| `field_sales.shopify.merchant_settings.save_store_settings` |  | the user's own store |
+| `field_sales.shopify.merchant_settings.fetch_locations` |  | the user's own store |
+| `field_sales.shopify.merchant_settings.get_email_accounts` |  | site-wide Email Accounts: Phase 5 (vendor sender, D3) |
+| `field_sales.shopify.merchant_settings.save_email_account` |  | site-wide Email Accounts: Phase 5 (vendor sender, D3) |
+| `field_sales.shopify.oauth.install` | yes | guest; install of a shop: Phase 6 (a Store per shop) |
+| `field_sales.shopify.oauth.callback` | yes | guest; install of a shop: Phase 6 (a Store per shop) |
+| `field_sales.shopify.oauth.reset_connection` |  | vendor role gate; acts on the current store |
+| `field_sales.shopify.webhooks.receive` | yes | guest webhook: which store is Phase 4 (shop header) |
+| `field_sales.sync.confirmation.resend_order_confirmation` |  | doc permission |
+| `field_sales.visit_import.download_visit_template` |  | reps and customers through `get_list` (store + hierarchy hooks) |
+| `field_sales.visit_import.preview_visit_import` |  | reps/customers through `get_list`; each visit re-checked on create |
+| `field_sales.visit_import.create_visits_from_import` |  | Visit insert: permission hooks (rep's store + hierarchy) |
+| `field_sales.www.fieldsales.get_context_for_dev` | yes | guest; dev helper, returns the page boot only |

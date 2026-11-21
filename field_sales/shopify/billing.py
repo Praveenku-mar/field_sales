@@ -29,8 +29,9 @@ from frappe import _
 from frappe.utils import add_months, cint, get_first_day, nowdate
 
 from field_sales.connectors.shopify import REQUEST_TIMEOUT, is_oauth
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
-from field_sales.utils.store import get_store, get_store_value
+from field_sales.utils.store import get_store, get_store_name, get_store_value
 
 CACHE_KEY = "field_sales:shopify_active_plan"
 CACHE_SECONDS = 60 * 60
@@ -156,9 +157,11 @@ def check_limit(kind: str) -> None:
 
 def usage(kind: str) -> int:
 	"""How many of ``kind`` are used now (the embedded app's own Sales Rep is not counted)."""
+	store = get_store_name()
+	in_store = {"store": store} if store else {}
 	if kind == SALES_REPS:
 		embedded_user = get_store_value("embedded_user")
-		filters = {"active": 1}
+		filters = {"active": 1, **in_store}
 		if embedded_user:
 			filters["user"] = ("!=", embedded_user)
 		return frappe.db.count("Sales Rep", filters)
@@ -168,6 +171,7 @@ def usage(kind: str) -> int:
 		return frappe.db.count(
 			"Field Order",
 			[
+				*([["store", "=", store]] if store else []),
 				["docstatus", "=", 1],
 				["submitted_on", ">=", f"{first} 00:00:00"],
 				["submitted_on", "<", f"{add_months(first, 1)} 00:00:00"],
@@ -179,10 +183,7 @@ def usage(kind: str) -> int:
 @frappe.whitelist(methods=["GET"])
 def get_plan_info() -> dict:
 	"""Settings page: the shop's plan, limits and usage (managers; OAuth mode only)."""
-	if (
-		not ({"System Manager", "Sales Manager"} & set(frappe.get_roles()))
-		and frappe.session.user != "Administrator"
-	):
+	if not (MANAGER_ROLES & set(frappe.get_roles())) and frappe.session.user != "Administrator":
 		frappe.throw(_("Only managers can see the plan"), frappe.PermissionError)
 	settings = get_store()
 	if settings.platform != "Shopify" or not is_oauth(settings):

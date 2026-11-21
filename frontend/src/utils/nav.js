@@ -3,12 +3,12 @@
 // from everyone else, `feature: 'commission'` hides it when commission is off (session.canSee;
 // the router and the server check again). `retailerOnly` is for the customer login alone:
 // a role check would leak it (Administrator holds every role).
-export const MANAGERS = ['System Manager', 'Sales Manager']
-export const ADMINS = ['System Manager']
+export const MANAGERS = ['System Manager', 'Store Admin', 'Sales Manager']
+export const ADMINS = ['System Manager', 'Store Admin']
 
 // Staff pages: everyone who works the app. A customer login (Field Sales Retailer)
 // holds none of these roles and gets the customer items below instead.
-export const STAFF = ['System Manager', 'Sales Manager', 'Field Sales Rep']
+export const STAFF = ['System Manager', 'Store Admin', 'Sales Manager', 'Field Sales Rep']
 
 export const NAV_ITEMS = [
   { label: 'Dashboard', route: 'Dashboard', icon: 'lucide-layout-dashboard', roles: STAFF },

@@ -16,6 +16,10 @@ A retailer login (a user holding only the Field Sales Retailer role, linked
 by Retailer.user) sees its own retailer and that retailer's orders, read
 only, and nothing else.
 
+Every rule above applies inside the user's own store: a user belongs to one Store
+(``utils/store.py -> store_scope()``) and never reaches another store's records, whatever
+their role. Only vendor staff (a System Manager with no store) see every store.
+
 Wired up in hooks.py through ``permission_query_conditions`` (list views,
 reports, link search) and ``has_permission`` (opening / saving one record).
 """
@@ -24,8 +28,13 @@ from collections import defaultdict, deque
 
 import frappe
 
-ADMIN_ROLES = {"System Manager"}
-MANAGER_ROLES = {"Sales Manager", "System Manager"}
+from field_sales.utils.store import store_scope
+
+# Store Admin is the merchant's owner: what System Manager is for one store (the row rules above
+# limit both to their own store; only vendor staff, a System Manager with no store, see every store).
+STORE_ADMIN_ROLE = "Store Admin"
+ADMIN_ROLES = {"System Manager", STORE_ADMIN_ROLE}
+MANAGER_ROLES = {"Sales Manager", "System Manager", STORE_ADMIN_ROLE}
 
 # Permission types that only look at a record (any retailer may be seen).
 READ_ONLY_PTYPES = {"read", "select", "print", "email", "report", "export"}
@@ -41,7 +50,7 @@ REP_FIELD = {
 }
 
 # Roles that work the app (reps and managers). A retailer login holds none of these.
-STAFF_ROLES = {"System Manager", "Sales Manager", "Field Sales Rep"}
+STAFF_ROLES = {"System Manager", STORE_ADMIN_ROLE, "Sales Manager", "Field Sales Rep"}
 
 # The single role of an invited retailer's login (Retailer.user links it back).
 RETAILER_ROLE = "Field Sales Retailer"
@@ -99,7 +108,9 @@ def get_allowed_reps(user: str | None = None) -> list[str]:
 	if own_rep:
 		reports = defaultdict(list)
 		# One query for the whole hierarchy, read without these permission hooks (no recursion).
-		for rep in frappe.get_all("Sales Rep", fields=["name", "reports_to"], filters={"reports_to": ("is", "set")}):
+		for rep in frappe.get_all(
+			"Sales Rep", fields=["name", "reports_to"], filters={"reports_to": ("is", "set")}
+		):
 			reports[rep.reports_to].append(rep.name)
 
 		seen = {own_rep}
@@ -125,17 +136,63 @@ def clear_allowed_reps_cache() -> None:
 # ----------------------------------------------------------------------
 
 
+def _store_condition(doctype: str, user: str | None) -> str | None:
+	"""
+	The store part of a row rule: ``""`` for vendor staff (every store), ``None`` when the user
+	reaches no store (nothing at all), else ``tab<doctype>.store = <their store>``.
+	"""
+	scope = store_scope(user)
+	if scope is None:
+		return ""
+	if scope == "":
+		return None
+	return f"`tab{doctype}`.`store` = {frappe.db.escape(scope)}"
+
+
+def _and(*conditions: str) -> str:
+	return " and ".join(c for c in conditions if c)
+
+
 def _query_conditions(doctype: str, user: str | None) -> str:
 	user = user or frappe.session.user
+	in_store = _store_condition(doctype, user)
+	if in_store is None:
+		return "1=0"
 	if is_admin(user):
-		return ""
+		return in_store
 
 	reps = get_allowed_reps(user)
 	if not reps:
 		return "1=0"
 
 	values = ", ".join(frappe.db.escape(rep) for rep in reps)
-	return f"`tab{doctype}`.`{REP_FIELD[doctype]}` in ({values})"
+	return _and(in_store, f"`tab{doctype}`.`{REP_FIELD[doctype]}` in ({values})")
+
+
+def store_only_query(doctype: str, user: str | None = None) -> str:
+	"""Row rule of the doctypes shared by a store's whole team: the user's store, nothing more."""
+	in_store = _store_condition(doctype, user or frappe.session.user)
+	return "1=0" if in_store is None else in_store
+
+
+def platform_product_query(user: str | None = None) -> str:
+	return store_only_query("Platform Product", user)
+
+
+def product_stock_query(user: str | None = None) -> str:
+	return store_only_query("Product Stock", user)
+
+
+def sync_log_query(user: str | None = None) -> str:
+	return store_only_query("Sync Log", user)
+
+
+def commission_plan_query(user: str | None = None) -> str:
+	return store_only_query("Commission Plan", user)
+
+
+def privacy_request_query(user: str | None = None) -> str:
+	return store_only_query("Privacy Request", user)
 
 
 def visit_query(user: str | None = None) -> str:
@@ -151,7 +208,10 @@ def field_order_query(user: str | None = None) -> str:
 	if not is_admin(user) and is_retailer_user(user):
 		# A retailer login lists its own retailer's orders only.
 		own = get_own_retailer(user)
-		return f"`tabField Order`.`retailer` = {frappe.db.escape(own)}" if own else "1=0"
+		in_store = _store_condition("Field Order", user)
+		if not own or in_store is None:
+			return "1=0"
+		return _and(in_store, f"`tabField Order`.`retailer` = {frappe.db.escape(own)}")
 	return _query_conditions("Field Order", user)
 
 
@@ -165,12 +225,15 @@ def commission_statement_query(user: str | None = None) -> str:
 
 def retailer_query(user: str | None = None) -> str:
 	user = user or frappe.session.user
+	in_store = _store_condition("Retailer", user)
+	if in_store is None:
+		return "1=0"
 	if not is_admin(user) and is_retailer_user(user):
 		# A retailer login sees its own retailer; the read-anything rule below is for staff.
 		own = get_own_retailer(user)
-		return f"`tabRetailer`.`name` = {frappe.db.escape(own)}" if own else "1=0"
-	# Every retailer is listed; role permissions still decide who may read at all.
-	return ""
+		return _and(in_store, f"`tabRetailer`.`name` = {frappe.db.escape(own)}") if own else "1=0"
+	# Every retailer of the store is listed; role permissions still decide who may read at all.
+	return in_store
 
 
 def payment_transaction_query(user: str | None = None) -> str:
@@ -179,8 +242,11 @@ def payment_transaction_query(user: str | None = None) -> str:
 	and store checkout rows that only carry the store order id (``store_order_id``).
 	"""
 	user = user or frappe.session.user
+	in_store = _store_condition("Payment Transaction", user)
+	if in_store is None:
+		return "1=0"
 	if is_admin(user):
-		return ""
+		return in_store
 	reps = get_allowed_reps(user)
 	if not reps:
 		return "1=0"
@@ -190,10 +256,11 @@ def payment_transaction_query(user: str | None = None) -> str:
 		f"select `external_order_id` from `tabField Order` where `sales_rep` in ({values})"
 		" and ifnull(`external_order_id`, '') != ''"
 	)
-	return (
+	return _and(
+		in_store,
 		f"(`tabPayment Transaction`.`reference_order` in ({orders})"
 		" or (ifnull(`tabPayment Transaction`.`reference_order`, '') = ''"
-		f" and `tabPayment Transaction`.`store_order_id` in ({store_orders})))"
+		f" and `tabPayment Transaction`.`store_order_id` in ({store_orders})))",
 	)
 
 
@@ -211,6 +278,21 @@ def scope_criterion(doctype: str, table, user: str | None = None):
 	:return: ``None`` when every row may be seen, ``NO_ROWS`` when none may, else a condition.
 	"""
 	user = user or frappe.session.user
+	scope = store_scope(user)
+	if scope == "":
+		return NO_ROWS
+	in_store = None if scope is None else table.store == scope
+
+	rule = _rep_criterion(doctype, table, user)
+	if rule is NO_ROWS:
+		return NO_ROWS
+	if in_store is None:
+		return rule
+	return in_store if rule is None else in_store & rule
+
+
+def _rep_criterion(doctype: str, table, user: str):
+	"""The hierarchy part of ``scope_criterion`` (the store part is added by the caller)."""
 	if is_admin(user):
 		return None
 	if doctype in ("Field Order", "Retailer") and is_retailer_user(user):
@@ -219,12 +301,26 @@ def scope_criterion(doctype: str, table, user: str | None = None):
 			return NO_ROWS
 		return (table.retailer if doctype == "Field Order" else table.name) == own
 	if doctype == "Retailer":
-		# Every retailer is listed to staff (retailer_query).
+		# Every retailer of the store is listed to staff (retailer_query).
 		return None
 	reps = get_allowed_reps(user)
 	if not reps:
 		return NO_ROWS
 	return table[REP_FIELD[doctype]].isin(reps)
+
+
+def store_criterion_for(table, user: str | None = None):
+	"""
+	Only the store part of ``scope_criterion``, for doctypes with no hierarchy rule (Platform
+	Product, Visit search...): ``None`` for vendor staff, ``NO_ROWS`` for a user in no store,
+	else ``table.store == <their store>``.
+	"""
+	scope = store_scope(user or frappe.session.user)
+	if scope is None:
+		return None
+	if scope == "":
+		return NO_ROWS
+	return table.store == scope
 
 
 def hierarchy_filters(doctype: str, user: str | None = None) -> list:
@@ -233,9 +329,13 @@ def hierarchy_filters(doctype: str, user: str | None = None) -> list:
 	access is wider (Retailer): e.g. "my retailers that failed to sync".
 	"""
 	user = user or frappe.session.user
+	scope = store_scope(user)
+	if scope == "":
+		return [["store", "in", [""]]]
+	in_store = [] if scope is None else [["store", "=", scope]]
 	if is_admin(user):
-		return []
-	return [[REP_FIELD[doctype], "in", get_allowed_reps(user) or [""]]]
+		return in_store
+	return [*in_store, [REP_FIELD[doctype], "in", get_allowed_reps(user) or [""]]]
 
 
 # ----------------------------------------------------------------------
@@ -247,27 +347,49 @@ def hierarchy_filters(doctype: str, user: str | None = None) -> list:
 # ----------------------------------------------------------------------
 
 
+def _in_store(doc, user: str | None) -> bool:
+	"""
+	The record is in the user's store (vendor staff: any). A new record with no store yet passes:
+	``stamp_store`` fills it on insert, and refuses another store than the user's own.
+	"""
+	scope = store_scope(user)
+	if scope is None:
+		return True
+	if scope == "":
+		return False
+	store = doc.get("store")
+	if not store and doc.is_new():
+		# A new record belongs to its rep's store (stamp_store does the same on insert).
+		rep = doc.get("sales_rep")
+		store = frappe.db.get_value("Sales Rep", rep, "store") if rep else scope
+	return store == scope
+
+
 def visit_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
-	return _rep_in_allowed(doc.sales_rep, user)
+	return _in_store(doc, user) and _rep_in_allowed(doc.sales_rep, user)
 
 
 def field_order_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	user = user or frappe.session.user
+	if not _in_store(doc, user):
+		return False
 	if not is_admin(user) and is_retailer_user(user):
 		return ptype in READ_ONLY_PTYPES and doc.retailer == get_own_retailer(user)
 	return _rep_in_allowed(doc.sales_rep, user)
 
 
 def commission_entry_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
-	return _rep_in_allowed(doc.sales_rep, user)
+	return _in_store(doc, user) and _rep_in_allowed(doc.sales_rep, user)
 
 
 def commission_statement_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
-	return _rep_in_allowed(doc.sales_rep, user)
+	return _in_store(doc, user) and _rep_in_allowed(doc.sales_rep, user)
 
 
 def retailer_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	user = user or frappe.session.user
+	if not _in_store(doc, user):
+		return False
 	if not is_admin(user) and is_retailer_user(user):
 		# A retailer login reads its own retailer and never edits it from My Orders.
 		return ptype in READ_ONLY_PTYPES and doc.name == get_own_retailer(user)
@@ -281,6 +403,8 @@ def retailer_has_permission(doc, ptype: str | None = None, user: str | None = No
 
 
 def sales_rep_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	if not _in_store(doc, user):
+		return False
 	# A new Sales Rep has no name yet when create is checked: a manager may
 	# add reps under themselves or anyone below them.
 	if ptype == "create" and doc.is_new():
@@ -291,6 +415,8 @@ def sales_rep_has_permission(doc, ptype: str | None = None, user: str | None = N
 def payment_transaction_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	"""A payment row belongs to its order's rep (``reference_order``, else the store order id)."""
 	user = user or frappe.session.user
+	if not _in_store(doc, user):
+		return False
 	if is_admin(user):
 		return True
 	order = doc.reference_order
@@ -299,6 +425,11 @@ def payment_transaction_has_permission(doc, ptype: str | None = None, user: str 
 	if not order:
 		return False
 	return _rep_in_allowed(frappe.db.get_value("Field Order", order, "sales_rep"), user)
+
+
+def store_only_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	"""Platform Product, Product Stock, Sync Log, Commission Plan, Privacy Request: the user's store."""
+	return _in_store(doc, user)
 
 
 def _rep_in_allowed(rep: str | None, user: str | None) -> bool:
@@ -333,8 +464,8 @@ def check_owner_change(doc, method: str | None = None) -> None:
 	stored = before.get(field) if before else None
 	if stored and stored != doc.get(field) and stored not in get_allowed_reps():
 		frappe.throw(
-			frappe._("{0} {1} belongs to another team. Only its own team can assign it to someone else.").format(
-				frappe._(doc.doctype), doc.name
-			),
+			frappe._(
+				"{0} {1} belongs to another team. Only its own team can assign it to someone else."
+			).format(frappe._(doc.doctype), doc.name),
 			frappe.PermissionError,
 		)

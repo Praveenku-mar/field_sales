@@ -21,11 +21,10 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.db import safe_commit
 from field_sales.utils.guards import is_system_manager
 from field_sales.utils.store import get_store, get_store_value
-
-MANAGER_ROLES = {"System Manager", "Sales Manager"}
 
 # Store fields the merchant may change (the Settings forms send the whole doc).
 EDITABLE_FIELDS = (

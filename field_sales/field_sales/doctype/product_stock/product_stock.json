@@ -70,7 +70,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-21 10:00:00.000000",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Product Stock",
@@ -96,6 +96,11 @@
   {
    "read": 1,
    "role": "Field Sales Rep"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Store Admin"
   }
  ],
  "sort_field": "modified",

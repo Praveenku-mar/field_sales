@@ -5,8 +5,8 @@ import { APP_BASE } from '@/utils/base'
 
 // Sync Log, Reports and Store Connection are manager pages. The Sales Rep list is open to
 // reps too: the server limits it to themselves and their team.
-const MANAGERS = ['System Manager', 'Sales Manager']
-const ADMINS = ['System Manager']
+const MANAGERS = ['System Manager', 'Store Admin', 'Sales Manager']
+const ADMINS = ['System Manager', 'Store Admin']
 
 // The customer login: My Orders and its detail page are the only pages it may open.
 // Not a `roles` check: holding the Field Sales Retailer role is not the same as being

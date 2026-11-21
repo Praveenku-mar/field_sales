@@ -31,6 +31,8 @@ STORE_DOCTYPE = "Store"
 _LOCAL_KEY = "field_sales_store"
 # The site's only Store, cached for the request/job (cleared when a Store is added or removed).
 _ONLY_KEY = "field_sales_only_store"
+# {user: store} for the request (user_store()).
+_USER_STORES_KEY = "field_sales_user_stores"
 CODE_PATTERN = re.compile(r"^[A-Z0-9]{2,4}$")
 
 
@@ -69,14 +71,115 @@ def clear_store_cache() -> None:
 	setattr(frappe.local, _ONLY_KEY, None)
 
 
+def user_store(user: str | None = None) -> str | None:
+	"""
+	The Store a user belongs to: their ``User Permission`` on Store (``assign_user_to_store()``),
+	or ``None`` for vendor staff and for users not assigned yet. Cached for the request.
+
+	The permission also makes Frappe filter every list, report, form and REST call of a doctype
+	with a ``store`` link to that store.
+	"""
+	user = user or getattr(frappe.session, "user", None)
+	if not user or user in ("Administrator", "Guest"):
+		return None
+	cache = getattr(frappe.local, _USER_STORES_KEY, None)
+	if cache is None:
+		cache = {}
+		setattr(frappe.local, _USER_STORES_KEY, cache)
+	if user not in cache:
+		cache[user] = frappe.db.get_value(
+			"User Permission",
+			{"user": user, "allow": STORE_DOCTYPE},
+			"for_value",
+			order_by="is_default desc, creation asc",
+		)
+	return cache[user]
+
+
+def clear_user_store_cache() -> None:
+	setattr(frappe.local, _USER_STORES_KEY, None)
+
+
+def assign_user_to_store(user: str, store: str) -> None:
+	"""
+	Put a user in a store (one store per user): a default User Permission on Store that applies
+	to every doctype. Safe to repeat; refuses a user that already belongs to another store.
+	"""
+	existing = frappe.get_all(
+		"User Permission", filters={"user": user, "allow": STORE_DOCTYPE}, pluck="for_value"
+	)
+	if existing:
+		if store not in existing or len(existing) > 1:
+			frappe.throw(
+				_("User {0} already belongs to store {1}").format(user, existing[0]),
+				frappe.ValidationError,
+			)
+		return
+	frappe.get_doc(
+		{
+			"doctype": "User Permission",
+			"user": user,
+			"allow": STORE_DOCTYPE,
+			"for_value": store,
+			"apply_to_all_doctypes": 1,
+			"is_default": 1,
+		}
+	).insert(ignore_permissions=True)
+	clear_user_store_cache()
+
+
+def is_vendor(user: str | None = None) -> bool:
+	"""Vendor staff: Administrator, or a System Manager who belongs to no store. They see every store."""
+	user = user or frappe.session.user
+	if user == "Administrator":
+		return True
+	if user_store(user):
+		return False
+	return "System Manager" in frappe.get_roles(user)
+
+
+def user_is_reachable(user: str) -> bool:
+	"""
+	A user the session user may see or adopt: anyone for vendor staff, else a user of their own
+	store or of no store yet (never one that belongs to another store).
+	"""
+	scope = store_scope()
+	own = user_store(user)
+	return scope is None or not own or own == scope
+
+
+def store_scope(user: str | None = None) -> str | None:
+	"""
+	Which store's records a user may reach:
+
+	- ``None``: every store (vendor staff);
+	- a store code: that store only;
+	- ``""``: none. On the shared site a user who belongs to no store sees nothing; on a
+	  single-store site such a user belongs to its one Store.
+	"""
+	user = user or frappe.session.user
+	if is_vendor(user):
+		return None
+	store = user_store(user)
+	if store:
+		return store
+	if is_multi_store():
+		return ""
+	try:
+		return get_store_name() or ""
+	except NoStoreContext:
+		return ""
+
+
 def get_store_name(store: str | None = None, required: bool = False) -> str | None:
 	"""
-	The store to work for: ``store``, else the current store, else the site's only Store.
+	The store to work for: ``store``, else the current store, else the session user's own store
+	(``user_store()``), else the site's only Store.
 
 	:param required: Raise when there is no Store at all (else return ``None``).
 	:raises NoStoreContext: Several stores exist and none was given or set.
 	"""
-	name = store or current_store()
+	name = store or current_store() or user_store()
 	if name:
 		return name
 	only = getattr(frappe.local, _ONLY_KEY, None)
@@ -178,9 +281,20 @@ def make_store_code(source: str | None) -> str:
 
 
 def stamp_store(doc, method: str | None = None) -> None:
-	"""``before_insert`` for store-linked doctypes: fill ``store`` from the context when empty."""
+	"""
+	``before_insert`` for store-linked doctypes: fill ``store`` from the context when empty, and
+	refuse a record for another store than the user's own (vendor staff may create for any).
+	"""
 	if not doc.get("store"):
-		doc.store = get_store_name()
+		# A record of a rep belongs to the rep's store, else to the current store.
+		rep = doc.get("sales_rep") if doc.meta.has_field("sales_rep") else None
+		doc.store = (frappe.db.get_value("Sales Rep", rep, "store") if rep else None) or get_store_name()
+	scope = store_scope()
+	if scope is not None and doc.store != scope:
+		frappe.throw(
+			_("You cannot create {0} records for another store").format(_(doc.doctype)),
+			frappe.PermissionError,
+		)
 
 
 def store_doctypes() -> list[str]:
@@ -206,3 +320,13 @@ def invoice_series(store: str | None, default: str) -> str:
 	if not is_multi_store() or not store:
 		return default
 	return f"{store}/.YY./.#####"
+
+
+def store_filters(store: str | None = None) -> dict:
+	"""``filters`` for ``frappe.get_all`` / ``get_list`` limiting a query to one store (default: current)."""
+	return {"store": get_store_name(store, required=True)}
+
+
+def store_criterion(table, store: str | None = None):
+	"""The same as a ``frappe.qb`` condition on ``table`` (a ``frappe.qb.DocType`` with a store link)."""
+	return table.store == get_store_name(store, required=True)

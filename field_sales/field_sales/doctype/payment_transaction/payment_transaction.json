@@ -9,7 +9,7 @@
  "module": "Field Sales",
  "name": "Payment Transaction",
  "owner": "Administrator",
- "modified": "2026-11-21 10:00:00.000000",
+ "modified": "2026-11-21 12:00:00.000000",
  "modified_by": "Administrator",
  "field_order": [
   "transaction_type",
@@ -192,6 +192,12 @@
   },
   {
    "role": "Sales Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1
+  },
+  {
+   "role": "Store Admin",
    "read": 1,
    "report": 1,
    "export": 1

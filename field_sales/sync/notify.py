@@ -6,11 +6,12 @@
 import frappe
 from frappe import _
 
+from field_sales.permissions import ADMIN_ROLES, MANAGER_ROLES
 from field_sales.push.notify import notify_users
+from field_sales.utils.store import get_store_name, is_multi_store, user_store
 
 # Roles that can open the Sync Failures page and inspect sync logs (Admin only).
-MONITOR_ROLES = ("System Manager",)
-ADMIN_ROLES = ("System Manager",)
+MONITOR_ROLES = tuple(ADMIN_ROLES)
 
 
 def notify_sync_result(event: str, doctype: str, name: str, sync_status: str | None) -> None:
@@ -24,21 +25,30 @@ def notify_sync_result(event: str, doctype: str, name: str, sync_status: str | N
 	"""
 	message = {"doctype": doctype, "name": name, "sync_status": sync_status}
 	frappe.publish_realtime(event, message, doctype=doctype, docname=name, after_commit=True)
-	for user in _monitor_users():
+	for user in _monitor_users(frappe.db.get_value(doctype, name, "store")):
 		frappe.publish_realtime(event, message, user=user, after_commit=True)
 
 
-def _monitor_users() -> list[str]:
-	"""Enabled users who can open the Sync Failures page."""
-	return users_with_roles(MONITOR_ROLES)
+def _monitor_users(store: str | None = None) -> list[str]:
+	"""Enabled users of the store who can open the Sync Failures page."""
+	return users_with_roles(MONITOR_ROLES, store)
 
 
-def users_with_roles(roles: tuple[str, ...]) -> list[str]:
-	"""Enabled users with any of ``roles``; cached for the rest of the request / job."""
+def users_with_roles(roles: tuple[str, ...], store: str | None = None, vendor: bool = False) -> list[str]:
+	"""
+	Enabled users with any of ``roles`` **in one store**; cached for the rest of the request / job.
+
+	:param store: The store whose users to list (default: the current store). A user belongs to
+		the store of their User Permission; on a single-store site a user with none belongs to
+		its one store, on the shared site to none.
+	:param vendor: Instead, the vendor staff holding the roles (users of no store).
+	"""
+	if not vendor:
+		store = get_store_name(store)
 	cache = getattr(frappe.local, "field_sales_role_users", None)
 	if cache is None:
 		cache = frappe.local.field_sales_role_users = {}
-	key = tuple(sorted(roles))
+	key = (tuple(sorted(roles)), store, vendor)
 	if key not in cache:
 		has_role = frappe.qb.DocType("Has Role")
 		user = frappe.qb.DocType("User")
@@ -49,11 +59,19 @@ def users_with_roles(roles: tuple[str, ...]) -> list[str]:
 			.select(has_role.parent)
 			.distinct()
 			.where(has_role.parenttype == "User")
-			.where(has_role.role.isin(key))
+			.where(has_role.role.isin(tuple(sorted(roles))))
 			.where(user.enabled == 1)
 			.where(user.name != "Guest")
 		).run(pluck=True)
+		cache[key] = [u for u in cache[key] if _in_scope(u, store, vendor)]
 	return cache[key]
+
+
+def _in_scope(user: str, store: str | None, vendor: bool) -> bool:
+	own = user_store(user)
+	if vendor:
+		return not own
+	return own == store or (not own and not is_multi_store())
 
 
 def clear_role_users_cache() -> None:
@@ -79,15 +97,15 @@ def get_manager_user_for_rep(sales_rep: str) -> str | None:
 			if not first_manager:
 				first_manager = user
 			roles = set(frappe.get_roles(user))
-			if "Sales Manager" in roles or "System Manager" in roles:
+			if MANAGER_ROLES & roles:
 				return user
 		current = frappe.db.get_value("Sales Rep", current, "reports_to")
 	return first_manager
 
 
-def get_system_admin_recipients() -> list[str]:
-	"""Return user emails for Administrator and enabled users with the System Manager role."""
-	admin_users = set(users_with_roles(ADMIN_ROLES))
+def get_system_admin_recipients(store: str | None = None) -> list[str]:
+	"""Return user emails for Administrator and the store's enabled admins (System Manager / Store Admin)."""
+	admin_users = set(users_with_roles(ADMIN_ROLES, store))
 	if frappe.db.get_value("User", "Administrator", "enabled"):
 		admin_users.add("Administrator")
 	recipients = []
@@ -141,7 +159,7 @@ def notify_customer_sync_failure(doc) -> None:
 	"""
 	Send a notification to the System Administrator when a customer sync fails.
 	"""
-	recipients = get_system_admin_recipients()
+	recipients = get_system_admin_recipients(doc.get("store"))
 	if not recipients:
 		return
 

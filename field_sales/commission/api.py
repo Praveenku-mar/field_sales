@@ -156,11 +156,18 @@ def get_commission_entries(filters: dict | str | None = None, page: int = 1, pag
 		start=(page - 1) * page_length,
 		page_length=page_length,
 	)
-	return {"entries": entries, "page": page, "page_length": page_length, "total": total[0].total if total else 0}
+	return {
+		"entries": entries,
+		"page": page,
+		"page_length": page_length,
+		"total": total[0].total if total else 0,
+	}
 
 
 @frappe.whitelist()
-def get_commission_statements(filters: dict | str | None = None, page: int = 1, page_length: int = 20) -> dict:
+def get_commission_statements(
+	filters: dict | str | None = None, page: int = 1, page_length: int = 20
+) -> dict:
 	"""
 	One page of Commission Statements the user may see, newest period first.
 
@@ -178,7 +185,9 @@ def get_commission_statements(filters: dict | str | None = None, page: int = 1, 
 	page = max(1, int(page))
 	page_length = min(MAX_PAGE_LENGTH, max(1, int(page_length)))
 
-	total = frappe.get_list("Commission Statement", filters=filters or {}, fields=[{"COUNT": "*", "as": "total"}])
+	total = frappe.get_list(
+		"Commission Statement", filters=filters or {}, fields=[{"COUNT": "*", "as": "total"}]
+	)
 	statements = frappe.get_list(
 		"Commission Statement",
 		filters=filters or {},
@@ -233,6 +242,7 @@ def approve_statement(name: str) -> dict:
 	"""
 	_require_manager()
 	doc = frappe.get_doc("Commission Statement", name, for_update=True)
+	doc.check_permission("write")
 	check_not_own_commission(doc.sales_rep)
 	if doc.docstatus != 0:
 		frappe.throw(_("Only a Draft Commission Statement can be approved."))
@@ -304,7 +314,7 @@ def save_commission_plan(doc: dict | str) -> dict:
 	"""
 	require_commission_enabled()
 	if not is_admin():
-		frappe.throw(_("Only a System Manager can create or change Commission Plans."), frappe.PermissionError)
+		frappe.throw(_("Only a Store Admin can create or change Commission Plans."), frappe.PermissionError)
 	if isinstance(doc, str):
 		doc = json.loads(doc or "{}")
 
@@ -339,7 +349,9 @@ def save_commission_plan(doc: dict | str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
-def assign_commission_plan(sales_rep: str, commission_plan: str | None = None, commission_active: int = 0) -> dict:
+def assign_commission_plan(
+	sales_rep: str, commission_plan: str | None = None, commission_active: int = 0
+) -> dict:
 	"""
 	Set a rep's Commission Plan and whether they earn commission.
 
@@ -364,7 +376,11 @@ def assign_commission_plan(sales_rep: str, commission_plan: str | None = None, c
 	rep.commission_plan = commission_plan or None
 	rep.commission_active = commission_active
 	rep.save()
-	return {"sales_rep": rep.name, "commission_plan": rep.commission_plan, "commission_active": rep.commission_active}
+	return {
+		"sales_rep": rep.name,
+		"commission_plan": rep.commission_plan,
+		"commission_active": rep.commission_active,
+	}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -385,6 +401,7 @@ def create_adjustment(
 	"""
 	require_commission_enabled()
 	_require_manager()
+	frappe.has_permission("Sales Rep", "read", sales_rep, throw=True)
 	check_not_own_commission(sales_rep)
 	if beneficiary_type not in ("Rep", "Manager Override"):
 		frappe.throw(_("Beneficiary Type must be Rep or Manager Override."))
@@ -415,7 +432,12 @@ def create_adjustment(
 		}
 	)
 	entry.insert()
-	return {"name": entry.name, "sales_rep": entry.sales_rep, "amount": entry.amount, "posting_date": str(posting_date)}
+	return {
+		"name": entry.name,
+		"sales_rep": entry.sales_rep,
+		"amount": entry.amount,
+		"posting_date": str(posting_date),
+	}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -440,13 +462,19 @@ def generate_statements(month: str, sales_rep: str | None = None) -> dict:
 		if not frappe.db.exists("Sales Rep", sales_rep):
 			frappe.throw(_("Sales Rep {0} does not exist.").format(sales_rep))
 		if allowed is not None and sales_rep not in allowed:
-			frappe.throw(_("You cannot generate statements for {0}.").format(sales_rep), frappe.PermissionError)
+			frappe.throw(
+				_("You cannot generate statements for {0}.").format(sales_rep), frappe.PermissionError
+			)
 		reps = [sales_rep]
 	else:
 		reps = [
 			r
 			for r in frappe.get_list(
-				"Sales Rep", filters={"commission_active": 1}, pluck="name", order_by="name", limit_page_length=0
+				"Sales Rep",
+				filters={"commission_active": 1},
+				pluck="name",
+				order_by="name",
+				limit_page_length=0,
 			)
 			if allowed is None or r in allowed
 		]
@@ -571,12 +599,20 @@ def _top_products(rep: str, start, end) -> list[dict]:
 		filters["posting_date"] = window
 
 	per_product: dict[str, float] = {}
-	for row in frappe.get_all("Commission Entry", filters=filters, fields=["product", "amount", "reversed_amount"]):
-		per_product[row.product] = per_product.get(row.product, 0) + flt(row.amount) - flt(row.reversed_amount)
+	for row in frappe.get_all(
+		"Commission Entry", filters=filters, fields=["product", "amount", "reversed_amount"]
+	):
+		per_product[row.product] = (
+			per_product.get(row.product, 0) + flt(row.amount) - flt(row.reversed_amount)
+		)
 
 	top = sorted(per_product.items(), key=lambda kv: kv[1], reverse=True)[:5]
 	return [
-		{"product": p, "title": frappe.db.get_value("Platform Product", p, "product_title"), "commission": flt(c, 2)}
+		{
+			"product": p,
+			"title": frappe.db.get_value("Platform Product", p, "product_title"),
+			"commission": flt(c, 2),
+		}
 		for p, c in top
 	]
 

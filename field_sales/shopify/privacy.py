@@ -268,7 +268,9 @@ def _export_orders(orders: list[str]) -> list[dict]:
 
 def _email_system_managers(doc) -> None:
 	"""Tell System Managers a data export is ready to send to the store owner (link only, no data)."""
-	recipients = [u for u in users_with_roles(("System Manager",)) if u not in ("Administrator", "Guest")]
+	recipients = [
+		u for u in users_with_roles(("System Manager",), vendor=True) if u not in ("Administrator", "Guest")
+	]
 	if not recipients:
 		return
 	link = get_url_to_form("Privacy Request", doc.name)

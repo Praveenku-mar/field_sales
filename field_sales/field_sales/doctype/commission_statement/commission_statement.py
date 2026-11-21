@@ -5,9 +5,9 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.guards import keep_server_fields
 
-MANAGER_ROLES = {"Sales Manager", "System Manager"}
 # Set only by commission/statements.py (``_fill`` with ``flags.from_build``) and db_set: the
 # amounts must be the entries' amounts, and status / payment only move through approve and Mark Paid.
 BUILT_FIELDS = (
@@ -80,7 +80,10 @@ class CommissionStatement(Document):
 	def before_submit(self):
 		user = frappe.session.user
 		if user != "Administrator" and not MANAGER_ROLES & set(frappe.get_roles(user)):
-			frappe.throw(_("Only a Sales Manager or System Manager can approve a Commission Statement."), frappe.PermissionError)
+			frappe.throw(
+				_("Only a Sales Manager or System Manager can approve a Commission Statement."),
+				frappe.PermissionError,
+			)
 		# Also for a submit from the Desk form or REST, not only approve_statement().
 		from field_sales.commission.statements import check_not_own_commission, check_statement_current
 
@@ -95,5 +98,9 @@ class CommissionStatement(Document):
 		self.db_set("status", "Cancelled")
 		# Plain SQL-level update: the entries of an approved statement are otherwise locked.
 		frappe.db.set_value(
-			"Commission Entry", {"commission_statement": self.name}, "commission_statement", None, update_modified=False
+			"Commission Entry",
+			{"commission_statement": self.name},
+			"commission_statement",
+			None,
+			update_modified=False,
 		)

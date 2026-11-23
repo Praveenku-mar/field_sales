@@ -61,47 +61,82 @@ def enqueue_sync(store: str | None = None, **kwargs):
 	)
 
 
+# The most product syncs one 30-minute tick queues (site_config ``field_sales_product_syncs_per_tick``):
+# on the shared site many stores fall due together (installs, a long outage) and each sync is a
+# long job. The rest wait for the next tick, most overdue first.
+DEFAULT_SYNCS_PER_TICK = 5
+
+
 def scheduled_sync():
 	"""
 	Cron entry point (every 30 minutes), for every enabled Store.
 
-	Queues a store's sync when it has a default location and at least its
-	``product_sync_frequency`` has passed since its last product sync activity (manual or
-	scheduled, successful or not). One store's failure is logged and the others still run; the
-	job then fails as before.
+	A store is due when it has a default location and at least its ``product_sync_frequency``
+	has passed since its last product sync activity (manual or scheduled, successful or not).
+	Due stores are queued most overdue (never synced) first, at most ``syncs_per_tick()`` a tick.
+	One store's failure is logged and the others still run; the job then fails as before.
 	"""
 	failed = []
+	due = []
 	for store in frappe.get_all("Store", filters={"enabled": 1}, pluck="name", order_by="creation asc"):
 		try:
 			with use_store(store):
-				_schedule_store_sync(store)
+				last_run = _due_since(store)
+			if last_run is not False:
+				due.append((last_run, store))
 		except Exception:
-			# Keep a record of the failure (the job rolls back), then go on with the next store.
-			frappe.db.rollback()
-			frappe.log_error(title=f"Field Sales scheduled job failed: scheduled_sync ({store})")
-			safe_commit()
+			_log_store_failure(store)
+			failed.append(store)
+
+	# Never synced (None) first, then the oldest last run.
+	due.sort(key=lambda d: (d[0] is not None, d[0] or ""))
+	queued = 0
+	for _last_run, store in due:
+		if queued >= syncs_per_tick():
+			break
+		try:
+			with use_store(store):
+				if enqueue_sync(store):
+					queued += 1
+		except Exception:
+			_log_store_failure(store)
 			failed.append(store)
 	if failed:
 		frappe.throw(_("Scheduled product sync failed for {0}").format(", ".join(failed)))
 
 
-def _schedule_store_sync(store: str) -> None:
+def syncs_per_tick() -> int:
+	"""How many product syncs one scheduler tick may queue (``DEFAULT_SYNCS_PER_TICK``)."""
+	return max(1, int(frappe.conf.get("field_sales_product_syncs_per_tick") or DEFAULT_SYNCS_PER_TICK))
+
+
+def _log_store_failure(store: str) -> None:
+	# Keep a record of the failure (the job rolls back), then go on with the next store.
+	frappe.db.rollback()
+	frappe.log_error(title=f"Field Sales scheduled job failed: scheduled_sync ({store})")
+	safe_commit()
+
+
+def _due_since(store: str):
+	"""
+	``False`` when ``store``'s product sync is not due; else its last product sync time (``None``:
+	never synced), used to queue the most overdue store first.
+	"""
 	settings = get_store(store)
 	if not settings.default_location_id:
-		return
+		return False
 
 	interval = SYNC_INTERVALS.get(settings.product_sync_frequency)
 	if not interval:
-		return
+		return False
 
 	last_run = frappe.db.get_value(
 		"Sync Log", {"operation": "Product Sync", "store": store}, "creation", order_by="creation desc"
 	)
 	due_after = add_to_date(now_datetime(), minutes=-(interval - SCHEDULE_SLACK_MINUTES))
 	if last_run and get_datetime(last_run) > due_after:
-		return
-
-	enqueue_sync(store)
+		return False
+	return last_run
 
 
 def sync_products(store: str | None = None) -> dict:

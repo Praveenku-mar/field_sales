@@ -289,4 +289,30 @@ def _ensure_orders(rep, retailers, products, rng) -> int:
 	return ORDER_COUNT
 
 
-commands = [field_sales_demo]
+@click.command("field-sales-check-shared")
+@pass_context
+def field_sales_check_shared(context):
+	"""
+	Readiness of the shared multi-store site (docs/multi-merchant/rollout.md): the site flag, the
+	Shopify app's keys and public address, scheduler, outgoing email and each store's state.
+	Changes nothing. Exits with an error when a check fails.
+	"""
+	import frappe
+
+	from field_sales.utils.rollout import has_failures, shared_site_checks
+
+	site = get_site(context)
+	frappe.init(site=site)
+	frappe.connect()
+	try:
+		checks = shared_site_checks()
+	finally:
+		frappe.destroy()
+	marks = {"ok": "OK  ", "warn": "WARN", "fail": "FAIL"}
+	for level, label, detail in checks:
+		click.echo(f"{marks[level]}  {label}: {detail}")
+	if has_failures(checks):
+		raise click.ClickException("Not ready: fix the FAIL lines first")
+
+
+commands = [field_sales_demo, field_sales_check_shared]

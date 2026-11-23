@@ -162,7 +162,7 @@ class TestTokenExchange(EmbeddedTestCase):
 		)
 		self.assertEqual(get_decrypted_password("Store", get_store_name(), "access_token"), "shpat_new")
 		self.assertEqual(get_decrypted_password("Store", get_store_name(), "refresh_token"), "shprt_new")
-		queued = [c.args[0] for c in self.enqueue.call_args_list]
+		queued = [c.kwargs.get("store_method") for c in self.enqueue.call_args_list]
 		self.assertIn("field_sales.shopify.webhooks.register_webhooks", queued)
 
 	def test_connected_shop_does_not_exchange_again(self):

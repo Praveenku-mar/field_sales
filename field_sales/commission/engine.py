@@ -35,7 +35,7 @@ from field_sales.field_sales.doctype.commission_entry.commission_entry import (
 	make_dedupe_key,
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
-from field_sales.utils.store import get_store_value
+from field_sales.utils.store import enqueue_in_store, get_store_value, record_store
 
 ENTRY_FIELDS = [
 	"name",
@@ -69,8 +69,9 @@ def enqueue_create_entries(field_order: str):
 	"""
 	if not commission_enabled():
 		return
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.commission.engine.create_entries",
+		store=record_store("Field Order", field_order),
 		field_order=field_order,
 		job_id=f"field_sales:create_entries:{field_order}",
 		deduplicate=True,

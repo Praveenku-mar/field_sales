@@ -453,7 +453,8 @@ class TestWebhooks(IntegrationTestCase):
 			self.assertTrue(first["ok"])
 			enqueue.assert_called_once()
 			kwargs = enqueue.call_args.kwargs
-			self.assertEqual(enqueue.call_args.args[0], "field_sales.sync.webhooks.process_event")
+			self.assertEqual(kwargs["store_method"], "field_sales.sync.webhooks.process_event")
+			self.assertEqual(kwargs["store_name"], get_store_name())
 			self.assertEqual(kwargs["platform"], "Shopify")
 			self.assertEqual(kwargs["webhook"]["topic"], STOCK_TOPIC)
 			self.assertEqual(kwargs["webhook"]["event_id"], event_id)

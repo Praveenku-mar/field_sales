@@ -24,7 +24,15 @@ from field_sales.sync.confirmation import enqueue_order_confirmation
 from field_sales.sync.customers import push_retailer
 from field_sales.sync.notify import notify_order_sync_failure, notify_sync_result
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import get_store, get_store_value, is_multi_store
+from field_sales.utils.store import (
+	enqueue_in_store,
+	for_each_store,
+	get_store,
+	get_store_value,
+	is_multi_store,
+	record_store,
+	store_filters,
+)
 
 # The scheduler stops retrying an order after this many attempts; Retry Sync still works.
 MAX_AUTO_ATTEMPTS = 5
@@ -44,8 +52,9 @@ def enqueue_push_order(field_order: str):
 	can never run two pushes of the same order at once (which could create
 	two drafts on the store).
 	"""
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.orders.push_order",
+		store=record_store("Field Order", field_order),
 		field_order=field_order,
 		job_id=f"field_sales:push_order:{field_order}",
 		deduplicate=True,
@@ -202,8 +211,9 @@ def push_order(field_order: str):
 
 def enqueue_mark_store_paid(field_order: str):
 	"""Queue ``mark_store_order_paid`` once the current transaction commits."""
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.orders.mark_store_order_paid",
+		store=record_store("Field Order", field_order),
 		queue="short",
 		field_order=field_order,
 		job_id=f"field_sales:mark_store_paid:{field_order}",
@@ -273,79 +283,75 @@ def store_payments_off() -> bool:
 
 def retry_store_payments():
 	"""
-	Hourly: queue ``mark_store_order_paid`` again for store orders (confirmed, or completed
-	drafts) paid in Agamsale in the last 7 days that the store does not show as paid yet (50 a run).
+	Hourly, for each enabled Store: queue ``mark_store_order_paid`` again for store orders
+	(confirmed, or completed drafts) paid in Agamsale in the last 7 days that the store does not
+	show as paid yet (50 a run).
 	"""
-	try:
-		if not get_store_value("enabled"):
-			return  # e.g. uninstalled; each job would only find the connection disabled
-		if store_payments_off():
-			return
+	for_each_store(_retry_store_payments, title="retry_store_payments")
 
-		names = frappe.get_all(
-			"Field Order",
-			filters={
-				"docstatus": 1,
-				"payment_status": "Paid",
-				"external_order_id": ("is", "set"),
-				"store_marked_paid_on": ("is", "not set"),
-				"paid_on": (">=", add_to_date(now_datetime(), days=-7)),
-			},
-			order_by="paid_on asc",
-			limit=50,
-			pluck="name",
-		)
-		for name in names:
-			enqueue_mark_store_paid(name)
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: retry_store_payments")
-		safe_commit()
-		raise
+
+def _retry_store_payments():
+	if store_payments_off():
+		return
+
+	names = frappe.get_all(
+		"Field Order",
+		filters={
+			**store_filters(),
+			"docstatus": 1,
+			"payment_status": "Paid",
+			"external_order_id": ("is", "set"),
+			"store_marked_paid_on": ("is", "not set"),
+			"paid_on": (">=", add_to_date(now_datetime(), days=-7)),
+		},
+		order_by="paid_on asc",
+		limit=50,
+		pluck="name",
+	)
+	for name in names:
+		enqueue_mark_store_paid(name)
 
 
 def retry_failed_orders():
 	"""
-	Scheduler (every 15 min): queue another push for each order that failed
-	fewer than ``MAX_AUTO_ATTEMPTS`` times, and for each order stuck Pending
-	because its job was lost.
+	Scheduler (every 15 min), for each enabled Store: queue another push for each order that
+	failed fewer than ``MAX_AUTO_ATTEMPTS`` times, and for each order stuck Pending because its
+	job was lost.
 	"""
-	try:
-		if not get_store_value("enabled"):
-			return
+	for_each_store(_retry_failed_orders, title="retry_failed_orders")
 
-		failed = frappe.get_all(
-			"Field Order",
-			filters={"docstatus": 1, "sync_status": "Failed", "sync_attempts": ("<", MAX_AUTO_ATTEMPTS)},
-			pluck="name",
-		)
 
-		stale_before = add_to_date(now_datetime(), minutes=-STALE_PENDING_MINUTES)
-		stuck = frappe.get_all(
-			"Field Order",
-			filters={"docstatus": 1, "sync_status": "Pending", "modified": ("<", stale_before)},
-			or_filters=[
-				["last_sync_attempt", "is", "not set"],
-				["last_sync_attempt", "<", stale_before],
-			],
-			pluck="name",
-		)
+def _retry_failed_orders():
+	failed = frappe.get_all(
+		"Field Order",
+		filters={
+			**store_filters(),
+			"docstatus": 1,
+			"sync_status": "Failed",
+			"sync_attempts": ("<", MAX_AUTO_ATTEMPTS),
+		},
+		pluck="name",
+	)
 
-		for name in failed + stuck:
-			enqueue_push_order(name)
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: retry_failed_orders")
-		safe_commit()
-		raise
+	stale_before = add_to_date(now_datetime(), minutes=-STALE_PENDING_MINUTES)
+	stuck = frappe.get_all(
+		"Field Order",
+		filters={**store_filters(), "docstatus": 1, "sync_status": "Pending", "modified": ("<", stale_before)},
+		or_filters=[
+			["last_sync_attempt", "is", "not set"],
+			["last_sync_attempt", "<", stale_before],
+		],
+		pluck="name",
+	)
+
+	for name in failed + stuck:
+		enqueue_push_order(name)
 
 
 def link_completed_drafts():
 	"""
-	Scheduler (every 30 min): fill ``external_order_id`` on Synced Field Orders
-	whose draft has since been completed into an order on the store.
+	Scheduler (every 30 min), for each enabled Store: fill ``external_order_id`` on Synced Field
+	Orders whose draft has since been completed into an order on the store.
 
 	``push_order`` skips Synced orders, so without this the order id of a
 	draft completed on the store later would never be recorded.
@@ -353,49 +359,44 @@ def link_completed_drafts():
 	Only drafts pushed in the last ``DRAFT_LINK_DAYS`` days are checked (newest first, at most
 	``DRAFT_LINK_BATCH``): a draft completed later than that is not linked automatically.
 	"""
-	try:
-		if not get_store_value("enabled"):
-			return
+	for_each_store(_link_completed_drafts, title="link_completed_drafts")
 
-		drafts = frappe.get_all(
-			"Field Order",
-			filters={
-				"docstatus": 1,
-				"sync_status": "Synced",
-				"external_draft_id": ("is", "set"),
-				"external_order_id": ("is", "not set"),
-				"last_sync_attempt": (">=", add_to_date(now_datetime(), days=-DRAFT_LINK_DAYS)),
-			},
-			# Everything the connector writes onto the store order, read once for the whole batch.
-			fields=LINK_FIELDS,
-			order_by="last_sync_attempt desc",
-			limit=DRAFT_LINK_BATCH,
-		)
-		if not drafts:
-			return
 
-		conn = get_connector()
-		completed = conn.get_completed_drafts([d.external_draft_id for d in drafts])
+def _link_completed_drafts():
+	drafts = frappe.get_all(
+		"Field Order",
+		filters={
+			**store_filters(),
+			"docstatus": 1,
+			"sync_status": "Synced",
+			"external_draft_id": ("is", "set"),
+			"external_order_id": ("is", "not set"),
+			"last_sync_attempt": (">=", add_to_date(now_datetime(), days=-DRAFT_LINK_DAYS)),
+		},
+		# Everything the connector writes onto the store order, read once for the whole batch.
+		fields=LINK_FIELDS,
+		order_by="last_sync_attempt desc",
+		limit=DRAFT_LINK_BATCH,
+	)
+	if not drafts:
+		return
 
-		for d in drafts:
-			order_id = completed.get(d.external_draft_id)
-			if not order_id:
-				continue
-			# One draft's failure must not stop the rest: the next run would list the same draft
-			# first again (newest attempt first) and block every draft after it.
-			try:
-				if _link_completed_draft(conn, d, order_id):
-					safe_commit()
-					notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
-			except Exception:
-				frappe.db.rollback()
-				frappe.log_error(title=f"Linking completed draft failed: {d.name}")
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: link_completed_drafts")
-		safe_commit()
-		raise
+	conn = get_connector()
+	completed = conn.get_completed_drafts([d.external_draft_id for d in drafts])
+
+	for d in drafts:
+		order_id = completed.get(d.external_draft_id)
+		if not order_id:
+			continue
+		# One draft's failure must not stop the rest: the next run would list the same draft
+		# first again (newest attempt first) and block every draft after it.
+		try:
+			if _link_completed_draft(conn, d, order_id):
+				safe_commit()
+				notify_sync_result("field_order_synced", "Field Order", d.name, "Synced")
+		except Exception:
+			frappe.db.rollback()
+			frappe.log_error(title=f"Linking completed draft failed: {d.name}")
 
 
 # What _link_completed_draft needs of a Field Order (and what the connector writes onto the order).

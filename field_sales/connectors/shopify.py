@@ -57,6 +57,12 @@ DEFAULT_TOKEN_TTL = 24 * 60 * 60  # used if Shopify omits expires_in
 # Only one worker may refresh an OAuth token at a time (Shopify retires the other one's token).
 TOKEN_LOCK_KEY = "field_sales:shopify_token_refresh"
 TOKEN_LOCK_SECONDS = 30
+
+
+def token_lock_key(shop: str) -> str:
+	"""Cache key of ``shop``'s token lock: refresh (connector) and token exchange (embedded) share it."""
+	return frappe.cache.make_key(f"{TOKEN_LOCK_KEY}:{shop}")
+
 THROTTLE_MIN_AVAILABLE = 100  # query cost points
 THROTTLE_SLEEP_SECONDS = 2
 PAGE_SIZE = 50
@@ -1148,7 +1154,7 @@ class ShopifyConnector(BaseConnector):
 		:param stale_token: The token this instance already holds (and wants replaced).
 		"""
 		lock = frappe.cache.lock(
-			frappe.cache.make_key(f"{TOKEN_LOCK_KEY}:{self.shop_domain}"),
+			token_lock_key(self.shop_domain),
 			timeout=TOKEN_LOCK_SECONDS,
 			blocking_timeout=TOKEN_LOCK_SECONDS,
 		)

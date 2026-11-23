@@ -18,7 +18,7 @@ import frappe
 from frappe import _
 
 from field_sales.connectors import get_connector
-from field_sales.utils.store import get_store_value, is_multi_store, set_store_value
+from field_sales.utils.store import for_each_store, get_store_value, is_multi_store, set_store_value
 
 
 def sync_shop_settings(shop: dict | None = None) -> dict:
@@ -149,9 +149,14 @@ def get_mismatch(currency: str | None = None, timezone: str | None = None) -> li
 	return mismatch
 
 
+def daily_sync():
+	"""Daily scheduler entry: ``scheduled_sync`` for each enabled Store."""
+	for_each_store(scheduled_sync, title="shop_settings_sync")
+
+
 def scheduled_sync(notify_user: str | None = None):
 	"""
-	Daily job, and queued after the Store is saved: re-check the store's settings.
+	Re-check the current store's settings: daily (``daily_sync``), and queued after the Store is saved.
 
 	:param notify_user: User who saved the Store; told in a popup if something changed.
 	"""

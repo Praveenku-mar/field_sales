@@ -7,7 +7,14 @@ from frappe.model.document import Document
 from frappe.utils.password import remove_encrypted_password
 
 from field_sales.connectors import CONNECTORS
-from field_sales.utils.store import CODE_PATTERN, clear_store_cache, is_multi_store, is_vendor, user_store
+from field_sales.utils.store import (
+	CODE_PATTERN,
+	clear_store_cache,
+	enqueue_in_store,
+	is_multi_store,
+	is_vendor,
+	user_store,
+)
 
 # Set by the Shopify install flow: store_url is then filled by it, not typed by the user.
 OAUTH_MODE = "OAuth"
@@ -132,8 +139,9 @@ class Store(Document):
 		)
 		if not changed:
 			return
-		frappe.enqueue(
+		enqueue_in_store(
 			"field_sales.sync.shop_settings.scheduled_sync",
+			store=self.name,
 			queue="short",
 			enqueue_after_commit=True,
 			job_id=f"field_sales:shop_settings_sync:{self.name}",

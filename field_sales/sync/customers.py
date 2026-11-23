@@ -21,6 +21,7 @@ from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.sync.notify import notify_customer_sync_failure, notify_sync_result
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import enqueue_in_store, get_store_name, record_store, store_filters
 
 # Retailer fields sent to the store; a change to any of them triggers a push.
 SYNCED_FIELDS = (
@@ -45,8 +46,9 @@ def enqueue_push(retailer_name: str):
 	Deduplicated per retailer: if a push for it is already queued, no second
 	one is added.
 	"""
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.customers.push_retailer",
+		store=record_store("Retailer", retailer_name),
 		retailer_name=retailer_name,
 		job_id=f"field_sales:push_retailer:{retailer_name}",
 		deduplicate=True,
@@ -157,7 +159,7 @@ def _elapsed_ms(start: float) -> int:
 # Import: store customers -> Retailer
 # ----------------------------------------------------------------------
 
-IMPORT_JOB_ID = "field_sales:customer_import"
+IMPORT_JOB_ID = "field_sales:customer_import"  # + ":{store}": one import per store at a time
 # Retailer fields an import fills, from the normalized customer.
 IMPORT_FIELDS = ("retailer_name", "owner_name", "phone", "email", "address_line1", "address_line2", "city", "state", "pincode", "country")
 # Emails a connector's push may invent for retailers without one (e.g. Odoo, WooCommerce).
@@ -168,15 +170,17 @@ MAX_LISTED_FAILURES = 20
 
 def enqueue_import():
 	"""
-	Queue ``import_customers`` on the long queue.
+	Queue ``import_customers`` for the current store on the long queue.
 
-	:return: The queued job, or ``None`` if an import is already queued or running.
+	:return: The queued job, or ``None`` if this store's import is already queued or running.
 	"""
-	return frappe.enqueue(
+	store = get_store_name(required=True)
+	return enqueue_in_store(
 		"field_sales.sync.customers.import_customers",
+		store=store,
 		queue="long",
 		timeout=1500,
-		job_id=IMPORT_JOB_ID,
+		job_id=f"{IMPORT_JOB_ID}:{store}",
 		deduplicate=True,
 	)
 
@@ -260,7 +264,7 @@ def import_customers() -> dict:
 def _import_customer(platform: str, customer: dict) -> str:
 	"""Create, link or fill one Retailer from a normalized customer; returns the summary key."""
 	external_id = customer["external_customer_id"]
-	name = frappe.db.get_value("Retailer", {"external_customer_id": external_id}, "name")
+	name = frappe.db.get_value("Retailer", {**store_filters(), "external_customer_id": external_id}, "name")
 	if not name and _is_placeholder(customer.get("email")):
 		# Pushed from a retailer that has since been deleted here; nothing to import.
 		return "skipped"
@@ -269,7 +273,9 @@ def _import_customer(platform: str, customer: dict) -> str:
 	outcome = "updated"
 	if not name and values.get("email"):
 		name = frappe.db.get_value(
-			"Retailer", {"email": values["email"], "external_customer_id": ("in", ("", None))}, "name"
+			"Retailer",
+			{**store_filters(), "email": values["email"], "external_customer_id": ("in", ("", None))},
+			"name",
 		)
 		outcome = "linked"
 

@@ -145,7 +145,8 @@ class TestShopSettings(IntegrationTestCase):
 		doc = get_store()
 		with patch.object(frappe, "enqueue") as enqueue:
 			doc.save()
-		self.assertEqual(enqueue.call_args.args[0], "field_sales.sync.shop_settings.scheduled_sync")
+		self.assertEqual(enqueue.call_args.kwargs["store_method"], "field_sales.sync.shop_settings.scheduled_sync")
+		self.assertEqual(enqueue.call_args.kwargs["store_name"], doc.name)
 		self.assertEqual(enqueue.call_args.kwargs["notify_user"], "Administrator")
 		self.assertTrue(enqueue.call_args.kwargs["enqueue_after_commit"])
 

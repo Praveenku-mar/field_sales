@@ -14,7 +14,7 @@ from frappe.utils import fmt_money, format_datetime, now_datetime, today
 from field_sales.payments.razorpay import link_for_confirmation
 from field_sales.utils.db import safe_commit
 from field_sales.utils.money import site_currency
-from field_sales.utils.store import get_store_value, invoice_series
+from field_sales.utils.store import enqueue_in_store, get_store_value, invoice_series, record_store
 
 SENDING_STATUS = "Sending…"
 INVOICE_SERIES = "INV-.YYYY.-.#####"
@@ -38,8 +38,9 @@ def enqueue_order_confirmation(field_order: str):
 
 	Deduplicated per order, so the push and the draft linker cannot queue it twice at once.
 	"""
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.confirmation.send_order_confirmation",
+		store=record_store("Field Order", field_order),
 		field_order=field_order,
 		job_id=f"field_sales:order_confirmation:{field_order}",
 		deduplicate=True,
@@ -106,7 +107,7 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 def resend_order_confirmation(name: str) -> dict:
 	# Sends an email to the retailer: for the order's rep and their managers, not read-only users.
 	frappe.has_permission("Field Order", "write", name, throw=True)
-	doc = frappe.db.get_value("Field Order", name, ["docstatus", "external_order_id"], as_dict=True)
+	doc = frappe.db.get_value("Field Order", name, ["docstatus", "external_order_id", "store"], as_dict=True)
 	if doc.docstatus != 1 or not doc.external_order_id:
 		frappe.throw(_("The confirmation can only be sent once the store has confirmed the order"))
 
@@ -115,8 +116,9 @@ def resend_order_confirmation(name: str) -> dict:
 
 	# A job id of its own: the automatic job's id may still be on the queue (or finished) and
 	# deduplicate would drop this one. Two quick clicks share this id, so only one job runs.
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.confirmation.send_order_confirmation",
+		store=doc.store,
 		field_order=name,
 		resend=True,
 		job_id=f"field_sales:order_confirmation_resend:{name}",

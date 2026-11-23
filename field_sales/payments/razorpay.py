@@ -548,6 +548,10 @@ def webhook():
 	200 for duplicates, other events and links no order has; 500 on an unexpected error so
 	Razorpay retries. Every delivery past the signature check gets a Razorpay Webhook Event row.
 	"""
+	if is_multi_store():
+		# No payment links on the shared site (razorpay_enabled), and no store to log against.
+		return _respond(404, "not served on this site")
+
 	# Read before anything touches the form data; the signature covers these exact bytes.
 	raw_body = frappe.request.get_data()
 	headers = frappe.request.headers

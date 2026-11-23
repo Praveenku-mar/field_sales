@@ -27,8 +27,8 @@ import requests
 from frappe import _
 from frappe.utils import get_datetime, now_datetime
 
-from field_sales.connectors.shopify import REQUEST_TIMEOUT, TOKEN_LOCK_KEY, TOKEN_LOCK_SECONDS
-from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
+from field_sales.connectors.shopify import REQUEST_TIMEOUT, TOKEN_LOCK_SECONDS, token_lock_key
+from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_or_error
 from field_sales.permissions import MANAGER_ROLES, STORE_ADMIN_ROLE
 from field_sales.shopify import config
 from field_sales.shopify.oauth import InstallError, check_shop_allowed, save_installation
@@ -41,6 +41,7 @@ from field_sales.utils.store import (
 	get_store_value,
 	is_multi_store,
 	set_store_value,
+	store_for_shop,
 )
 
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
@@ -61,9 +62,12 @@ class ConnectError(Exception):
 
 
 def is_connected(shop: str) -> bool:
-	"""The Store is this shop's, in OAuth mode, with tokens that still work without the merchant."""
-	settings = get_store()
-	if (settings.store_url or "").lower() != shop or settings.shopify_auth_mode != config.OAUTH_MODE:
+	"""The shop has its Store, in OAuth mode, with tokens that still work without the merchant."""
+	store = store_for_shop(shop)
+	if not store:
+		return False
+	settings = get_store(store)
+	if settings.shopify_auth_mode != config.OAUTH_MODE:
 		return False
 	if not settings.enabled:
 		return False
@@ -85,7 +89,7 @@ def ensure_offline_token(shop: str, id_token: str) -> None:
 	:raises ConnectError: The shop may not be connected here, or Shopify failed otherwise.
 	"""
 	lock = frappe.cache.lock(
-		frappe.cache.make_key(TOKEN_LOCK_KEY), timeout=TOKEN_LOCK_SECONDS, blocking_timeout=TOKEN_LOCK_SECONDS
+		token_lock_key(shop), timeout=TOKEN_LOCK_SECONDS, blocking_timeout=TOKEN_LOCK_SECONDS
 	)
 	if not lock.acquire():
 		raise ConnectError(_("Timed out waiting for another Shopify token request"))
@@ -151,7 +155,9 @@ def _exchange(shop: str, id_token: str) -> dict:
 
 
 def _log_install(status: str, shop: str, message: str, **fields) -> None:
-	log_sync_durable(
+	# A failed first exchange on the shared site has no Store yet: then an Error Log.
+	log_sync_or_error(
+		store=store_for_shop(shop),
 		platform="Shopify",
 		operation="Install",
 		status=status,
@@ -249,9 +255,8 @@ def page_context() -> dict | None:
 	if not config.is_valid_shop(shop) or not config.client_id():
 		return None
 
-	settings = get_store()
-	store = (settings.store_url or "").lower()
-	if store == shop and settings.shopify_auth_mode == config.OAUTH_MODE:
+	store = store_for_shop(shop)
+	if store and get_store_value("shopify_auth_mode", store=store) == config.OAUTH_MODE:
 		if id_token and not is_connected(shop):
 			_try_exchange(shop, id_token)
 	else:
@@ -268,7 +273,9 @@ def page_context() -> dict | None:
 		# Back from Shopify's plan page (welcome link): the plan may have changed.
 		from field_sales.shopify import billing
 
-		billing.clear_cache()
+		paid_store = store_for_shop(shop)
+		if paid_store:
+			billing.clear_cache(paid_store)
 
 	frappe.local.shopify_frame_shop = shop
 	return {

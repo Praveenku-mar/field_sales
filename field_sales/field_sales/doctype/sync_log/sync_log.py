@@ -7,6 +7,7 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import add_days, cint, nowdate
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import NoStoreContext, get_store_name
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -209,6 +210,26 @@ def log_sync_durable(**fields) -> str:
 		after_rollback.add(reinsert)
 
 	return name
+
+
+def log_sync_or_error(**fields) -> None:
+	"""
+	``log_sync_durable`` when the request has a store, else an Error Log with the same fields.
+
+	For deliveries and installs from a shop that is not one of the shared site's Stores: a Sync
+	Log must belong to a store, and there is none to give it.
+	"""
+	try:
+		store = get_store_name(fields.get("store"))
+	except NoStoreContext:
+		store = None
+	if store:
+		log_sync_durable(**{**fields, "store": store})
+		return
+	frappe.log_error(
+		title=f"Field Sales {fields.get('operation')}: {fields.get('error_code') or fields.get('status')}",
+		message=frappe.as_json(fields),
+	)
 
 
 def clear_old_logs() -> None:

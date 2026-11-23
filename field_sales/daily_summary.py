@@ -9,31 +9,28 @@ from frappe.utils import escape_html, fmt_money, formatdate, get_url, nowdate
 
 from field_sales.field_sales.report.rep_performance.rep_performance import get_rep_stats, get_reps_in_scope
 from field_sales.permissions import clear_allowed_reps_cache
-from field_sales.utils.db import safe_commit
+from field_sales.utils.store import for_each_store, store_criterion
 
 
 def send_daily_summary():
 	"""
-	Email every manager (a user whose Sales Rep has others reporting to it)
+	For every Store, email every manager (a user whose Sales Rep has others reporting to it)
 	a summary of today for everyone under them, at all levels.
 
-	Managers whose team had no activity and no failures get no email.
+	Managers whose team had no activity and no failures get no email. Disabled Stores are
+	included: their reps may still have worked today (e.g. while a token refresh is failing).
 	"""
-	try:
-		today = nowdate()
-		for manager in _get_managers():
-			try:
-				_send_to_manager(manager, today)
-			except Exception:
-				# One bad manager record must not stop the others' summaries.
-				frappe.log_error(title=f"Field Sales daily summary failed for {manager.user}")
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: send_daily_summary")
-		safe_commit()
-		raise
+	for_each_store(_send_store_summaries, title="send_daily_summary", enabled_only=False)
 
+
+def _send_store_summaries():
+	today = nowdate()
+	for manager in _get_managers():
+		try:
+			_send_to_manager(manager, today)
+		except Exception:
+			# One bad manager record must not stop the others' summaries.
+			frappe.log_error(title=f"Field Sales daily summary failed for {manager.user}")
 
 
 def _get_managers() -> list:
@@ -50,6 +47,7 @@ def _get_managers() -> list:
 		.distinct()
 		.where(rep.active == 1)
 		.where(user.enabled == 1)
+		.where(store_criterion(rep))
 	).run(as_dict=True)
 
 

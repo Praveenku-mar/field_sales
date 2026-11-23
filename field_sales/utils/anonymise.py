@@ -24,8 +24,7 @@ from frappe.sessions import clear_sessions
 from frappe.utils import add_days, cint, now_datetime
 
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
-from field_sales.utils.db import safe_commit
-from field_sales.utils.store import get_store_value
+from field_sales.utils.store import for_each_store, get_store_value, store_filters
 
 REDACTED = "Redacted"
 REDACTED_PHONE = "0000000000"  # Retailer.phone is mandatory and validated as a phone number
@@ -239,38 +238,36 @@ def _chunks(values: list, size: int):
 
 def anonymise_inactive_retailers() -> None:
 	"""
-	Daily: anonymise Inactive retailers (and their orders' and visits' personal fields) not
-	changed for ``retailer_inactive_anonymise_days``. 0 (the default) turns it off.
+	Daily, for every Store (also disabled ones: personal data must still go): anonymise Inactive
+	retailers (and their orders' and visits' personal fields) not changed for the store's
+	``retailer_inactive_anonymise_days``. 0 (the default) turns it off.
 	"""
-	try:
-		days = cint(get_store_value("retailer_inactive_anonymise_days"))
-		if days <= 0:
-			return
-		cutoff = add_days(now_datetime(), -days)
-		retailers = frappe.get_all(
-			"Retailer",
-			filters={
-				"status": "Inactive",
-				"modified": ("<", cutoff),
-				"retailer_name": ("not like", f"{REDACTED} %"),
-			},
-			pluck="name",
-			limit=500,
-		)
-		if not retailers:
-			return
-		orders = frappe.get_all("Field Order", filters={"retailer": ("in", retailers)}, pluck="name")
-		result = anonymise(retailers, orders)
-		log_sync(
-			platform=get_store_value("platform") or "Shopify",
-			operation="Privacy Request",
-			status="Success",
-			response_payload=frappe.as_json({"job": "anonymise_inactive_retailers", "days": days, **result}),
-		)
-		safe_commit()
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: anonymise_inactive_retailers")
-		safe_commit()
-		raise
+	for_each_store(_anonymise_store_retailers, title="anonymise_inactive_retailers", enabled_only=False)
+
+
+def _anonymise_store_retailers() -> None:
+	days = cint(get_store_value("retailer_inactive_anonymise_days"))
+	if days <= 0:
+		return
+	cutoff = add_days(now_datetime(), -days)
+	retailers = frappe.get_all(
+		"Retailer",
+		filters={
+			**store_filters(),
+			"status": "Inactive",
+			"modified": ("<", cutoff),
+			"retailer_name": ("not like", f"{REDACTED} %"),
+		},
+		pluck="name",
+		limit=500,
+	)
+	if not retailers:
+		return
+	orders = frappe.get_all("Field Order", filters={"retailer": ("in", retailers)}, pluck="name")
+	result = anonymise(retailers, orders)
+	log_sync(
+		platform=get_store_value("platform") or "Shopify",
+		operation="Privacy Request",
+		status="Success",
+		response_payload=frappe.as_json({"job": "anonymise_inactive_retailers", "days": days, **result}),
+	)

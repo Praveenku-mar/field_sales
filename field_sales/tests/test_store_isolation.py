@@ -553,3 +553,162 @@ class TestStoreScopedJobs(StoreIsolationCase):
 		self.assertEqual(frappe.db.get_default("currency"), currency)
 		self.assertEqual(frappe.db.get_single_value("System Settings", "time_zone"), time_zone)
 		self.assertEqual(frappe.db.get_value("Store", "ISA", "shop_timezone"), other_tz)
+
+
+# Filled by _record_current_store, a job run through run_in_store.
+JOB_STORES: list = []
+
+
+def _record_current_store():
+	from field_sales.utils.store import current_store
+
+	JOB_STORES.append(current_store())
+
+
+class TestStoreContext(StoreIsolationCase):
+	"""Phase 4: requests and jobs without a store user still work for the right store."""
+
+	SHOP_A = "isa-isolation.myshopify.com"
+	SHOP_B = "isb-isolation.myshopify.com"
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.savepoint("store_context")
+		JOB_STORES.clear()
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="store_context")
+		super().tearDown()
+
+	# -- jobs ------------------------------------------------------------------
+
+	def test_a_queued_job_runs_in_the_store_it_was_queued_for(self):
+		from field_sales.utils.store import enqueue_in_store, run_in_store
+
+		self.as_user("Guest")
+		with patch("frappe.enqueue") as enqueue:
+			enqueue_in_store(f"{__name__}._record_current_store", store="ISB", queue="short")
+		kwargs = enqueue.call_args.kwargs
+		self.assertEqual(enqueue.call_args.args, ("field_sales.utils.store.run_in_store",))
+		self.assertEqual(kwargs["store_name"], "ISB")
+		self.assertEqual(kwargs["queue"], "short")
+
+		run_in_store(kwargs["store_method"], kwargs["store_name"])
+		self.assertEqual(JOB_STORES, ["ISB"])
+
+	def test_administrator_must_name_the_store_when_there_are_several(self):
+		from field_sales.utils.store import NoStoreContext, enqueue_in_store
+
+		with patch("frappe.enqueue") as enqueue, self.assertRaises(NoStoreContext):
+			enqueue_in_store(f"{__name__}._record_current_store")
+		enqueue.assert_not_called()
+
+	def test_a_record_job_goes_to_the_records_store(self):
+		from field_sales.sync.orders import enqueue_push_order
+
+		with patch("frappe.enqueue") as enqueue:
+			enqueue_push_order(self.b.order)
+		self.assertEqual(enqueue.call_args.kwargs["store_name"], "ISB")
+
+	def test_each_store_runs_even_when_another_fails(self):
+		from field_sales.utils.store import current_store, for_each_store
+
+		def job():
+			JOB_STORES.append(current_store())
+			frappe.db.set_value("Store", current_store(), "last_test_status", "touched by job")
+			if current_store() == "ISA":
+				raise ValueError("store A is broken")
+
+		with patch.object(frappe, "log_error") as log_error:
+			for_each_store(job, title="test_job", enabled_only=False)
+		self.assertIn("ISA", JOB_STORES)
+		self.assertIn("ISB", JOB_STORES)
+		# Store A's write is undone, store B's is kept.
+		self.assertNotEqual(frappe.db.get_value("Store", "ISA", "last_test_status"), "touched by job")
+		self.assertEqual(frappe.db.get_value("Store", "ISB", "last_test_status"), "touched by job")
+		self.assertEqual(log_error.call_count, 1)
+		self.assertEqual(log_error.call_args.kwargs["title"], "Field Sales scheduled job failed: test_job (ISA)")
+
+	def test_order_retries_stay_inside_each_store(self):
+		from field_sales.sync import orders
+		from field_sales.utils.store import current_store
+
+		for team in (self.a, self.b):
+			frappe.db.set_value("Store", team.store, "enabled", 1)
+			frappe.db.set_value(
+				"Field Order", team.order, {"docstatus": 1, "sync_status": "Failed", "sync_attempts": 0}
+			)
+		queued = []
+		with patch.object(
+			orders, "enqueue_push_order", side_effect=lambda n: queued.append((n, current_store()))
+		):
+			orders.retry_failed_orders()
+		self.assertIn((self.a.order, "ISA"), queued)
+		self.assertIn((self.b.order, "ISB"), queued)
+		self.assertNotIn((self.b.order, "ISA"), queued)
+
+	# -- webhooks, sign-in, install ----------------------------------------------
+
+	def test_a_shop_maps_to_its_own_store(self):
+		from field_sales.utils.store import shop_store
+
+		self.assertEqual(shop_store(self.SHOP_B), "ISB")
+		self.assertEqual(shop_store(self.SHOP_B.upper()), "ISB")
+		# Several stores and none is this shop's: no store, not an error.
+		self.assertIsNone(shop_store("unknown-isolation.myshopify.com"))
+		with patch.dict(frappe.conf, MULTI):
+			self.assertIsNone(shop_store("unknown-isolation.myshopify.com"))
+
+	def test_session_token_checks_use_the_shops_store(self):
+		from field_sales.shopify import session_token
+
+		self.assertEqual(session_token._connection(self.SHOP_B).name, "ISB")
+		with patch.dict(frappe.conf, MULTI):
+			self.assertIsNone(session_token._connection("unknown-isolation.myshopify.com"))
+
+	def test_uninstall_disables_only_that_shops_store(self):
+		from field_sales.shopify.webhooks import handle_uninstalled
+		from field_sales.utils.store import use_store
+
+		for store in ("ISA", "ISB"):
+			frappe.db.set_value("Store", store, "enabled", 1)
+		with use_store("ISB"):
+			handle_uninstalled(self.SHOP_B)
+		self.assertEqual(frappe.db.get_value("Store", "ISB", "enabled"), 0)
+		self.assertEqual(frappe.db.get_value("Store", "ISA", "enabled"), 1)
+
+	def test_a_new_shop_installs_into_a_store_of_its_own(self):
+		from field_sales.shopify import oauth
+		from field_sales.utils.store import current_store, store_for_shop
+
+		shop = "isnew-isolation.myshopify.com"
+		self.addCleanup(oauth.set_current_store, None)
+		with (
+			patch.dict(frappe.conf, MULTI),
+			patch.object(oauth, "save_oauth_tokens"),
+			patch.object(oauth, "enqueue_in_store") as enqueue,
+		):
+			oauth.check_shop_allowed(shop)
+			oauth.save_installation(shop, {"scope": ""})
+		store = store_for_shop(shop)
+		self.assertTrue(store)
+		self.assertNotIn(store, ("ISA", "ISB"))
+		self.assertEqual(current_store(), store)
+		self.assertEqual({c.kwargs["store"] for c in enqueue.call_args_list}, {store})
+		self.assertEqual(frappe.db.get_value("Store", "ISA", "store_url"), self.SHOP_A)
+
+	def test_a_shop_cannot_install_over_another_shops_store_on_a_single_store_site(self):
+		from field_sales.shopify import oauth
+		from field_sales.utils.store import use_store
+
+		# One store: an install for another shop is refused ("one site, one shop").
+		with use_store("ISA"), patch.object(oauth, "shop_store", return_value="ISA"):
+			self.assertRaises(oauth.InstallError, oauth.check_shop_allowed, self.SHOP_B)
+
+	def test_razorpay_webhook_is_not_served_on_the_shared_site(self):
+		from field_sales.payments import razorpay
+
+		with patch.dict(frappe.conf, MULTI):
+			result = razorpay.webhook()
+		self.assertEqual(result, {"status": "not served on this site"})
+		self.assertEqual(frappe.local.response.http_status_code, 404)

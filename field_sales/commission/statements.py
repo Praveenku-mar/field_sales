@@ -23,38 +23,37 @@ from field_sales.commission.engine import load_plans, penalty_multiplier, slab_r
 from field_sales.permissions import MANAGER_ROLES, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import for_each_store, store_filters
 
 
 def generate_monthly_statements():
 	"""
-	Scheduler (1st of the month, 02:00): a Draft statement for last month for each
-	commission-active rep who has unstatemented Earned entries or Adjustments.
+	Scheduler (1st of the month, 02:00), for every Store: a Draft statement for last month for
+	each commission-active rep who has unstatemented Earned entries or Adjustments.
 
 	Entries that became Earned after an earlier statement was made are picked up here too (anything
 	earned up to the period end), so none is stranded. A rep who already has a statement for the
-	month is skipped.
+	month is skipped. Disabled Stores are included: what their reps earned is still owed.
 	"""
-	try:
-		if not commission_enabled():
-			return
-		period_end = add_days(get_first_day(getdate(nowdate())), -1)
-		period_start = get_first_day(period_end)
+	for_each_store(_generate_store_statements, title="generate_monthly_statements", enabled_only=False)
 
-		for rep in frappe.get_all("Sales Rep", filters={"commission_active": 1}, pluck="name"):
-			try:
-				if _statement_exists(rep, period_start) or not _open_entries(rep, period_end):
-					continue
-				build_statement(rep, period_start, period_end)
-				safe_commit()
-			except Exception:
-				frappe.db.rollback()
-				frappe.log_error(title=f"Commission statement failed for {rep}")
-	except Exception:
-		# Keep a record of the failure (the job rolls back), then fail the job as before.
-		frappe.db.rollback()
-		frappe.log_error(title="Field Sales scheduled job failed: generate_monthly_statements")
-		safe_commit()
-		raise
+
+def _generate_store_statements():
+	if not commission_enabled():
+		return
+	period_end = add_days(get_first_day(getdate(nowdate())), -1)
+	period_start = get_first_day(period_end)
+
+	reps = frappe.get_all("Sales Rep", filters={**store_filters(), "commission_active": 1}, pluck="name")
+	for rep in reps:
+		try:
+			if _statement_exists(rep, period_start) or not _open_entries(rep, period_end):
+				continue
+			build_statement(rep, period_start, period_end)
+			safe_commit()
+		except Exception:
+			frappe.db.rollback()
+			frappe.log_error(title=f"Commission statement failed for {rep}")
 
 
 def build_statement(sales_rep: str, period_start, period_end):

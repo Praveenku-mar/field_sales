@@ -36,10 +36,18 @@ from field_sales.connectors.shopify import (
 	normalize_shop_domain,
 	save_oauth_tokens,
 )
-from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
+from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable, log_sync_or_error
 from field_sales.shopify import config
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import get_store, make_store_code, set_store_value
+from field_sales.utils.store import (
+	STORE_DOCTYPE,
+	enqueue_in_store,
+	get_store,
+	make_store_code,
+	set_current_store,
+	set_store_value,
+	shop_store,
+)
 
 STATE_TTL_SECONDS = 10 * 60
 STATE_KEY = "field_sales:shopify_oauth_state:{}"
@@ -148,9 +156,13 @@ def check_shop_allowed(shop: str) -> None:
 	any shop can replay their own signed install link here. Refusing only while the connection
 	is enabled would let another shop take over a disabled or uninstalled site and receive its
 	retailers and orders. A different shop is allowed only after a System Manager clears the
-	connection (``reset_connection``). A first install (no ``store_url``) is allowed.
+	connection (``reset_connection``). A first install (no ``store_url``) is allowed, and so is a
+	new shop on the shared multi-store site, which gets its own Store (``shop_store``).
 	"""
-	settings = get_store()
+	store = shop_store(shop)
+	if not store:
+		return
+	settings = get_store(store)
 	if settings.platform != "Shopify" or not settings.store_url:
 		return
 	if normalize_shop_domain(settings.store_url) != shop:
@@ -241,15 +253,18 @@ def _exchange_code(shop: str, code: str) -> dict:
 
 def save_installation(shop: str, body: dict) -> list[str]:
 	"""
-	Point the Store at ``shop`` (creating it on a site with none) in OAuth mode with the new tokens, then queue
-	webhook registration. Saved as Administrator (the request is a guest's).
+	Point the shop's Store at ``shop`` in OAuth mode with the new tokens, then queue webhook
+	registration and store setup for it. The Store is created on a site with none, and for a new
+	shop on the shared multi-store site. Saved as Administrator (the request is a guest's); the
+	Store becomes the request's current store.
 
 	:return: Requested scopes the merchant did not grant.
 	"""
 	previous_user = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
-		settings = get_store()
+		store = shop_store(shop)
+		settings = get_store(store) if store else frappe.new_doc(STORE_DOCTYPE)
 		settings.update(
 			{
 				"platform": "Shopify",
@@ -271,16 +286,19 @@ def save_installation(shop: str, body: dict) -> list[str]:
 	finally:
 		frappe.set_user(previous_user)
 
-	frappe.enqueue(
+	set_current_store(settings.name)
+	enqueue_in_store(
 		"field_sales.shopify.webhooks.register_webhooks",
+		store=settings.name,
 		queue="short",
 		enqueue_after_commit=True,
 		job_id=f"field_sales:register_webhooks:{settings.name}",
 		deduplicate=True,
 	)
 	# A fresh install has no default location: pick one so products start syncing.
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.shopify.merchant_settings.setup_new_store",
+		store=settings.name,
 		queue="short",
 		enqueue_after_commit=True,
 		job_id=f"field_sales:setup_new_store:{settings.name}",
@@ -295,7 +313,7 @@ def _fail(message: str, shop: str | None) -> Response:
 	throttle = frappe.cache.make_key(f"field_sales:shopify_install_failed:{message}")
 	if not frappe.cache.set(throttle, 1, nx=True, ex=FAIL_LOG_INTERVAL_SECONDS):
 		return Response(message, status=400, mimetype="text/plain")
-	log_sync_durable(
+	log_sync_or_error(
 		platform="Shopify",
 		operation="Install",
 		status="Failed",

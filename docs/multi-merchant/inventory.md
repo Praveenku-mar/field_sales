@@ -152,8 +152,8 @@ Mechanisms: **doc permission** = `check_permission` / `has_permission` (the stor
 | `field_sales.api.test_connection` |  | role gate; acts on the user's own store |
 | `field_sales.api.get_locations` |  | role gate; acts on the user's own store |
 | `field_sales.api.get_sell_locations` |  | doc permission |
-| `field_sales.api.enqueue_product_sync` |  | role gate; syncs the user's own store (job id per store: Phase 4) |
-| `field_sales.api.enqueue_customer_import` |  | role gate; imports into the user's own store (job context: Phase 4) |
+| `field_sales.api.enqueue_product_sync` |  | role gate; syncs the user's own store (job id per store) |
+| `field_sales.api.enqueue_customer_import` |  | role gate; imports into the user's own store (`enqueue_in_store`, job id per store) |
 | `field_sales.api.create_order` |  | doc permission |
 | `field_sales.api.set_order_location` |  | saves the order: permission hooks (store + rep) |
 | `field_sales.api.get_user_for_sales_rep` |  | doc permission, store user check |
@@ -202,7 +202,7 @@ Mechanisms: **doc permission** = `check_permission` / `has_permission` (the stor
 | `field_sales.api.mobile.register_device` |  | the session user's own device row |
 | `field_sales.api.mobile.unregister_device` |  | the session user's own device row |
 | `field_sales.api.mobile.set_device_push_enabled` |  | the session user's own device row |
-| `field_sales.api.webhooks.receive` | yes | guest webhook: which store is Phase 4 (shop header) |
+| `field_sales.api.webhooks.receive` | yes | guest webhook: the shop header's Store (`shop_store`), HMAC checked with its keys |
 | `field_sales.chatter.get_chatter` |  | `_readable()`: `check_permission(read)` on the record |
 | `field_sales.chatter.post_note` |  | `_readable()`: `check_permission(read)` on the record |
 | `field_sales.commission.api.get_my_commission_summary` |  | the session user's own rep |
@@ -251,7 +251,7 @@ Mechanisms: **doc permission** = `check_permission` / `has_permission` (the stor
 | `field_sales.shopify.oauth.install` | yes | guest; install of a shop: Phase 6 (a Store per shop) |
 | `field_sales.shopify.oauth.callback` | yes | guest; install of a shop: Phase 6 (a Store per shop) |
 | `field_sales.shopify.oauth.reset_connection` |  | vendor role gate; acts on the current store |
-| `field_sales.shopify.webhooks.receive` | yes | guest webhook: which store is Phase 4 (shop header) |
+| `field_sales.shopify.webhooks.receive` | yes | guest webhook: the shop header's Store (`shop_store`), HMAC checked with its keys |
 | `field_sales.sync.confirmation.resend_order_confirmation` |  | doc permission |
 | `field_sales.visit_import.download_visit_template` |  | reps and customers through `get_list` (store + hierarchy hooks) |
 | `field_sales.visit_import.preview_visit_import` |  | reps/customers through `get_list`; each visit re-checked on create |

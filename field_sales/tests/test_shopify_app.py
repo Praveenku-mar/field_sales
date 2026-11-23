@@ -207,7 +207,7 @@ class TestOAuthInstall(ShopifyAppTestCase):
 		self.assertTrue(settings.installed_on and settings.token_expiry and settings.refresh_token_expiry)
 		self.assertFalse(settings.uninstalled_on)
 		self.assertGreater(get_datetime(settings.refresh_token_expiry), add_to_date(now_datetime(), days=89))
-		queued = [c.args[0] for c in enqueue.call_args_list]
+		queued = [c.kwargs.get("store_method") for c in enqueue.call_args_list]
 		self.assertIn("field_sales.shopify.webhooks.register_webhooks", queued)
 		self.assertIn("field_sales.shopify.merchant_settings.setup_new_store", queued)
 		self.assertEqual(frappe.session.user, "Administrator")  # restored
@@ -451,7 +451,7 @@ class TestAppWebhooks(ShopifyAppTestCase):
 	def test_valid_signature_is_accepted_and_queued(self):
 		status, result = self.post("app/uninstalled", {"id": 1, "domain": SHOP})
 		self.assertEqual((status, result["message"]), (200, "ok"))
-		self.assertEqual(self.enqueue.call_args.args[0], "field_sales.shopify.webhooks.handle_uninstalled")
+		self.assertEqual(self.enqueue.call_args.kwargs["store_method"], "field_sales.shopify.webhooks.handle_uninstalled")
 		self.assertEqual(self.enqueue.call_args.kwargs["queue"], "short")
 
 	def test_invalid_signature_is_401(self):

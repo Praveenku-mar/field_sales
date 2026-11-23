@@ -18,7 +18,7 @@ import frappe
 import jwt
 
 from field_sales.shopify import config
-from field_sales.utils.store import get_store
+from field_sales.utils.store import get_store, set_current_store, shop_store
 
 LEEWAY_SECONDS = 10
 RETRY_HEADER = "X-Shopify-Retry-Invalid-Session-Request"
@@ -38,7 +38,9 @@ def decode(token: str, require_connected: bool = True) -> dict:
 	``https://{shop}``. A site whose Store already points at a shop in Client
 	Credentials mode never accepts one.
 
-	A token for another shop is refused while the Store is enabled for a shop.
+	A token for another shop is refused while the Store is enabled for a shop. On the shared
+	multi-store site each shop has its own Store (``shop_store``); a shop with none yet is
+	accepted only with ``require_connected=False``.
 
 	:param require_connected: Also require the shop to be the Store's, in OAuth mode.
 		``False`` is for the first request after install, before the token exchange saved it.
@@ -69,8 +71,8 @@ def decode(token: str, require_connected: bool = True) -> dict:
 	):
 		raise InvalidSessionToken("Session token issuer and destination do not match")
 
-	settings = _connection()
-	store = (settings.store_url or "").lower()
+	settings = _connection(shop)
+	store = (settings.store_url or "").lower() if settings else ""
 	if store and settings.shopify_auth_mode == CLIENT_CREDENTIALS_MODE:
 		raise InvalidSessionToken("This site connects with client credentials, not the Shopify app")
 	# One site, one shop: while a shop is connected, no other shop's token is accepted.
@@ -107,6 +109,8 @@ def authenticate():
 		claims = decode(token, require_connected=False)
 		if not embedded.is_connected(claims["shop"]):
 			embedded.ensure_offline_token(claims["shop"], token)
+		# The rest of the request works for this shop's Store (it exists after the exchange).
+		set_current_store(shop_store(claims["shop"]))
 		user = embedded.get_embedded_user()
 	except InvalidSessionToken:
 		frappe.local.response_headers[RETRY_HEADER] = "1"
@@ -138,5 +142,7 @@ def _looks_like_session_token(token: str) -> bool:
 	return isinstance(claims, dict) and str(claims.get("dest") or "").endswith(".myshopify.com")
 
 
-def _connection():
-	return get_store()
+def _connection(shop: str):
+	"""The Store ``shop`` belongs to (``shop_store``), or ``None`` for a new shop on the shared site."""
+	store = shop_store(shop)
+	return get_store(store) if store else None

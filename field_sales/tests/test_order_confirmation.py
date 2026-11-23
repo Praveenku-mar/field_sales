@@ -270,7 +270,9 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertEqual(self.values("confirmation_status").confirmation_status, "Sending…")
 		self.assertEqual(len(self.queued()), 1)
 		args, kwargs = enqueue.call_args
-		self.assertEqual(args, ("field_sales.sync.confirmation.send_order_confirmation",))
+		self.assertEqual(args, ("field_sales.utils.store.run_in_store",))
+		self.assertEqual(kwargs["store_method"], "field_sales.sync.confirmation.send_order_confirmation")
+		self.assertEqual(kwargs["store_name"], self.order.store)
 		self.assertEqual(kwargs["field_order"], self.order.name)
 		self.assertTrue(kwargs["resend"])
 		self.assertTrue(kwargs["deduplicate"])

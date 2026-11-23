@@ -251,7 +251,7 @@ scheduler_events = {
 	"daily": [
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 		# Keep the site's currency and time zone the same as the store's.
-		"field_sales.sync.shop_settings.scheduled_sync",
+		"field_sales.sync.shop_settings.daily_sync",
 		# Store retailer_inactive_anonymise_days (0 = off).
 		"field_sales.utils.anonymise.anonymise_inactive_retailers",
 	],

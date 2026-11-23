@@ -66,6 +66,67 @@ def use_store(store: str | None):
 		set_current_store(previous)
 
 
+def enqueue_in_store(method: str, store: str | None = None, **kwargs):
+	"""
+	``frappe.enqueue`` a job that runs inside ``store`` (default: the store of this request/job).
+
+	Jobs queued by a webhook (Guest) or by Administrator have no user store to fall back on, so the
+	store travels with the job. ``kwargs`` are ``frappe.enqueue`` options (``queue``, ``job_id``,
+	``deduplicate``, ``enqueue_after_commit``, …) plus the job's own arguments.
+
+	Not a ``before_job`` hook popping a ``store`` argument: Frappe retries a deadlocked job with
+	the same (already popped) kwargs, so the store would be gone on the retry.
+	"""
+	return frappe.enqueue(
+		"field_sales.utils.store.run_in_store",
+		store_method=method,
+		store_name=get_store_name(store),
+		**kwargs,
+	)
+
+
+def record_store(doctype: str, name: str) -> str | None:
+	"""The ``store`` of one record (for queueing a job about it in its own store)."""
+	return frappe.db.get_value(doctype, name, "store")
+
+
+def run_in_store(store_method: str, store_name: str | None = None, **kwargs):
+	"""Job entry for ``enqueue_in_store``: run ``store_method`` with ``store_name`` as the current store."""
+	with use_store(store_name):
+		return frappe.call(store_method, **kwargs)
+
+
+def for_each_store(fn, title: str | None = None, enabled_only: bool = True) -> None:
+	"""
+	Scheduled-job helper: call ``fn()`` once per Store (oldest first) with that store current.
+
+	Each store runs inside its own savepoint: a failure undoes only that store's work, is logged
+	(Error Log "Field Sales scheduled job failed: {title} ({store})") and the next store still runs.
+	The job's own commit at the end keeps the rest; ``fn`` may also commit as it goes.
+
+	:param title: The job's name for the Error Log (default: ``fn.__name__``).
+	:param enabled_only: Skip disabled Stores (uninstalled, or a failed token refresh).
+	"""
+	filters = {"enabled": 1} if enabled_only else {}
+	for store in frappe.get_all(STORE_DOCTYPE, filters=filters, pluck="name", order_by="creation asc"):
+		save_point = f"field_sales_store_{frappe.generate_hash(length=10)}"
+		frappe.db.savepoint(save_point)
+		try:
+			with use_store(store):
+				fn()
+		except Exception:
+			_undo_store_work(save_point)
+			frappe.log_error(title=f"Field Sales scheduled job failed: {title or fn.__name__} ({store})")
+
+
+def _undo_store_work(save_point: str) -> None:
+	"""Roll back to ``save_point``; if ``fn`` committed since (the savepoint is gone), roll back what is left."""
+	try:
+		frappe.db.rollback(save_point=save_point)
+	except Exception:
+		frappe.db.rollback()
+
+
 def clear_store_cache() -> None:
 	"""Forget the cached "only Store" (called when a Store is inserted, renamed or deleted)."""
 	setattr(frappe.local, _ONLY_KEY, None)
@@ -259,6 +320,25 @@ def store_for_shop(shop_domain: str | None) -> str | None:
 	if not shop:
 		return None
 	return frappe.db.get_value(STORE_DOCTYPE, {"store_url": shop}, "name")
+
+
+def shop_store(shop_domain: str | None) -> str | None:
+	"""
+	The Store a request about ``shop_domain`` belongs to (webhook, session token, install).
+
+	- The Store whose shop it is.
+	- Else, on a single-store site, the site's Store: "one site, one shop" is then the caller's
+	  check, as it was before there were several Stores.
+	- Else ``None``: a shop that is not (yet) one of the shared site's Stores, or several Stores
+	  and none is this shop's.
+	"""
+	store = store_for_shop(shop_domain)
+	if store or is_multi_store():
+		return store
+	try:
+		return get_store_name()
+	except NoStoreContext:
+		return None
 
 
 def make_store_code(source: str | None) -> str:

@@ -13,7 +13,7 @@ from frappe.utils import fmt_money, format_datetime, now_datetime
 
 from field_sales.payments.razorpay import link_for_confirmation
 from field_sales.utils.db import safe_commit
-from field_sales.utils.money import site_currency
+from field_sales.utils.money import record_currency
 from field_sales.utils.store import (
 	enqueue_in_store,
 	get_store_value,
@@ -195,7 +195,7 @@ def _send(doc, retailer, pay_link: dict | None = None):
 	"""Queue the email to the customer with the invoice PDF attached (and a Pay Now button when there is a link)."""
 	settings = get_store_value(["company_name", "shop_name"], as_dict=True)
 	rep_name = frappe.db.get_value("Sales Rep", doc.sales_rep, "full_name") or doc.sales_rep
-	currency = site_currency()
+	currency = record_currency(doc)
 	order_no = doc.store_order_name or doc.name
 
 	# Built before anything is queued, so a timeout leaves nothing behind.

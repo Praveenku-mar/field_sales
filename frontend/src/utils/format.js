@@ -1,7 +1,7 @@
-// Display helpers. Currency comes from the site defaults (System Settings), like the desk.
+// Display helpers. Currency: the store's (boot `currency`), else the site default (System Settings).
 
 export function siteCurrency() {
-  return window.sysdefaults?.currency || 'INR'
+  return window.currency || window.sysdefaults?.currency || 'INR'
 }
 
 export function formatCurrency(value, currency = siteCurrency(), digits = 2) {

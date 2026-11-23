@@ -9,6 +9,7 @@ from frappe.utils import escape_html, fmt_money, formatdate, get_url
 
 from field_sales.field_sales.report.rep_performance.rep_performance import get_rep_stats, get_reps_in_scope
 from field_sales.permissions import clear_allowed_reps_cache
+from field_sales.utils.money import store_currency
 from field_sales.utils.store import current_store, for_each_store, store_criterion, store_now
 
 # Local hour the summary goes out, and how long a store-day's "sent" mark is kept.
@@ -108,7 +109,7 @@ def _get_open_failures(reps: list[str]) -> dict:
 
 
 def _render(manager, today: str, rows: list[dict]) -> str:
-	currency = frappe.db.get_default("currency")
+	currency = store_currency()
 	totals = {
 		key: sum(r[key] for r in rows)
 		for key in ("planned_visits", "completed_visits", "orders", "order_value", "open_failures")

@@ -70,7 +70,8 @@
   "col_break_invoice",
   "confirmation_sent_on",
   "confirmation_status",
-  "store"
+  "store",
+  "currency"
  ],
  "fields": [
   {
@@ -185,7 +186,8 @@
    "fieldname": "net_total",
    "fieldtype": "Currency",
    "label": "Net Total",
-   "read_only": 1
+   "read_only": 1,
+   "options": "currency"
   },
   {
    "fieldname": "tax_percent",
@@ -197,7 +199,8 @@
    "fieldname": "tax_amount",
    "fieldtype": "Currency",
    "label": "Tax Amount",
-   "read_only": 1
+   "read_only": 1,
+   "options": "currency"
   },
   {
    "fieldname": "discount_percent",
@@ -208,7 +211,8 @@
    "fieldname": "discount_amount",
    "fieldtype": "Currency",
    "label": "Discount Amount",
-   "read_only": 1
+   "read_only": 1,
+   "options": "currency"
   },
   {
    "fieldname": "grand_total",
@@ -216,7 +220,8 @@
    "label": "Grand Total",
    "read_only": 1,
    "bold": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "options": "currency"
   },
   {
    "fieldname": "notes_tab",
@@ -367,7 +372,8 @@
    "label": "Amount Paid",
    "read_only": 1,
    "allow_on_submit": 1,
-   "no_copy": 1
+   "no_copy": 1,
+   "options": "currency"
   },
   {
    "fieldname": "amount_refunded",
@@ -376,7 +382,8 @@
    "read_only": 1,
    "allow_on_submit": 1,
    "no_copy": 1,
-   "depends_on": "amount_refunded"
+   "depends_on": "amount_refunded",
+   "options": "currency"
   },
   {
    "fieldname": "paid_on",
@@ -526,13 +533,22 @@
    "set_only_once": 1,
    "in_standard_filter": 1,
    "search_index": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "The store's currency when the record was made; every amount on it is in this currency."
   }
  ],
  "in_create": 0,
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-23 14:00:00.000000",
+ "modified": "2026-11-23 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

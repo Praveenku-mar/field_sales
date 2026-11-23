@@ -46,6 +46,7 @@ from field_sales.connectors.base import (
 )
 from field_sales.shopify import config as app_config
 from field_sales.utils.db import safe_commit
+from field_sales.utils.money import store_currency
 from field_sales.utils.phone import to_e164
 from field_sales.utils.store import get_store_name, is_multi_store
 
@@ -1049,20 +1050,26 @@ class ShopifyConnector(BaseConnector):
 		"""
 		The shop's currency; order prices are sent in it without conversion.
 
-		Raises ``ConnectorError(code="CURRENCY_MISMATCH")`` when the site's default currency is
-		different, so an order is never sent with prices in the wrong currency.
+		Raises ``ConnectorError(code="CURRENCY_MISMATCH")`` when the order's prices are in another
+		currency (the order's own ``currency``, else the store's: ``store_currency``), so an order is
+		never sent with prices in the wrong currency, e.g. after the merchant changed the shop's.
 		"""
 		if self._currency is None:
 			data = self._graphql(SHOP_INFO_QUERY, operation="Create Order", ref=field_order)
 			self._currency = (data.get("shop") or {}).get("currencyCode")
-		site_currency = frappe.db.get_default("currency")
-		if self._currency and site_currency and self._currency != site_currency:
+		# ``field_order`` may be a document, a plain object or only a name (log reference).
+		expected = getattr(field_order, "currency", None) or store_currency(self.settings.name)
+		if self._currency and expected and self._currency != expected:
+			if is_multi_store():
+				hint = _("The shop's currency changed after this order was made; ask support to move the store.")
+			else:
+				hint = _(
+					"Turn on Match Store Currency and Timezone on the Store (or set the site currency to {0}), then retry."
+				).format(self._currency)
 			raise ConnectorError(
-				_(
-					"The store's currency is {0} but this site uses {1}. Order prices would be sent in the "
-					"wrong currency. Turn on Match Store Currency and Timezone on the Store (or set "
-					"the site currency to {0}), then retry."
-				).format(self._currency, site_currency),
+				_("The store's currency is {0} but this order's prices are in {1}. {2}").format(
+					self._currency, expected, hint
+				),
 				code="CURRENCY_MISMATCH",
 			)
 		return self._currency

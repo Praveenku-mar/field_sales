@@ -35,7 +35,7 @@ from frappe.utils import (
 from pypika.terms import PseudoColumn
 
 from field_sales.permissions import get_allowed_reps, is_admin
-from field_sales.utils.store import store_scope, store_today
+from field_sales.utils.store import report_store, store_today
 
 DATE_GROUPS = ("Day", "Week", "Month")
 NOT_SET = "(Not Set)"
@@ -134,8 +134,9 @@ def get_reps_in_scope(filters, user: str | None = None) -> dict:
 	filters = frappe._dict(filters or {})
 	user = user or frappe.session.user
 
-	# Only the user's store (an admin's too: Store Admin is an admin inside one store).
-	scope = store_scope(user)
+	# Only the user's store (an admin's too: Store Admin is an admin inside one store); vendor
+	# staff pick one with the Store filter (required on the shared site: report_store).
+	scope = report_store(filters, user)
 	if scope == "":
 		return {}
 	allowed = None if is_admin(user) else set(get_allowed_reps(user))

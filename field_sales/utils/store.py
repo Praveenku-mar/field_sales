@@ -552,6 +552,25 @@ def stamp_store(doc, method: str | None = None) -> None:
 		)
 
 
+def report_store(filters, user: str | None = None) -> str | None:
+	"""
+	The store a report covers: the user's own (``""``: none at all), or for vendor staff the
+	report's Store filter (``None``: every store, allowed only on single-store sites).
+
+	On the shared site a report must stay in one store: each store's amounts are in its own
+	currency, and totals across them would add different currencies together.
+	"""
+	scope = store_scope(user)
+	if scope is not None:
+		return scope
+	chosen = (filters or {}).get("store")
+	if chosen:
+		return chosen
+	if is_multi_store():
+		frappe.throw(_("Pick a Store: each store's amounts are in its own currency"))
+	return None
+
+
 def store_doctypes() -> list[str]:
 	"""The business doctypes that carry a ``store`` link (hook ``field_sales_store_doctypes``)."""
 	return list(frappe.get_hooks("field_sales_store_doctypes", app_name="field_sales"))

@@ -56,6 +56,18 @@ def _boot_store() -> str | None:
 		return None
 
 
+def _boot_multi_store() -> bool:
+	from field_sales.utils.store import is_multi_store
+
+	return is_multi_store()
+
+
+def _boot_currency() -> str:
+	from field_sales.utils.money import store_currency
+
+	return store_currency()
+
+
 def _boot_time_zone() -> str:
 	from field_sales.utils.store import store_timezone
 
@@ -81,6 +93,10 @@ def get_boot(embedded: dict | None = None) -> dict:
 			# same zone on single-store sites. Read directly: the defaults copy can lag behind.
 			"server_time_zone": frappe.utils.get_system_timezone(),
 			"time_zone": _boot_time_zone(),
+			# The store's currency (utils/money.py -> store_currency): new amounts and totals are in
+			# it. A record's own amounts carry their own currency where the page has it.
+			"currency": _boot_currency(),
+			"multi_store": _boot_multi_store(),
 			# The Store this user works in (Settings forms edit it); None before one is connected.
 			"store": _boot_store(),
 			# Realtime socket (composables/useRealtime.js): its own port under bench start.

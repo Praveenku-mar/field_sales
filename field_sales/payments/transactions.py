@@ -12,7 +12,7 @@ from __future__ import annotations
 import frappe
 from frappe.utils import cint, flt, now_datetime
 
-from field_sales.utils.money import site_currency
+from field_sales.utils.money import store_currency
 
 # A row in one of these states keeps it: a late "created" or "failed" must not undo money in.
 FINAL_STATES = {"Captured", "Paid", "Processed"}
@@ -54,7 +54,7 @@ def record(key: str, **values) -> str:
 		return name
 
 	doc = frappe.new_doc("Payment Transaction")
-	doc.update({"currency": site_currency(), "occurred_on": now_datetime(), **values, "transaction_key": key})
+	doc.update({"currency": _currency(values), "occurred_on": now_datetime(), **values, "transaction_key": key})
 	try:
 		doc.insert(ignore_permissions=True)
 	except frappe.UniqueValidationError:
@@ -63,6 +63,13 @@ def record(key: str, **values) -> str:
 			raise
 		return record(key, **values)
 	return doc.name
+
+
+def _currency(values: dict) -> str:
+	"""A new row's currency: its order's when it has one, else the store's (a payment is in the order's)."""
+	order = values.get("reference_order")
+	currency = order and frappe.db.get_value("Field Order", order, "currency")
+	return currency or store_currency()
 
 
 def history(field_order: str | None = None, store_order_id: str | None = None) -> list[dict]:

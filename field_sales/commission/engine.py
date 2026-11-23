@@ -35,6 +35,7 @@ from field_sales.field_sales.doctype.commission_entry.commission_entry import (
 	make_dedupe_key,
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
+from field_sales.utils.money import record_currency
 from field_sales.utils.store import enqueue_in_store, get_store_value, record_store, store_today
 
 ENTRY_FIELDS = [
@@ -143,7 +144,7 @@ class _Context:
 		self.field_order = field_order
 		self.order = order
 		self.external_id = str(order.get("external_order_id") or field_order.external_order_id)
-		self.currency = order.get("currency") or frappe.db.get_default("currency")
+		self.currency = order.get("currency") or record_currency(field_order)
 		self.today = str(store_today())
 		self.precision = cint(frappe.get_precision("Commission Entry", "amount"))
 		self._plans: dict[str, object] = {}

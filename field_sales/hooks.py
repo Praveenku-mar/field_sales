@@ -228,6 +228,8 @@ _OWNER_CHECKED = ("Visit", "Field Order", "Retailer", "Commission Entry", "Commi
 # Their date field is the merchant's local date: filled from the store's clock when left empty
 # (utils/store.py -> fill_store_dates; STORE_DATE_FIELDS there).
 _STORE_DATED = ("Field Order", "Visit", "Commission Entry")
+# Their amounts are in the store's currency, recorded on insert (utils/money.py -> fill_currency).
+_PRICED = ("Field Order", "Platform Product")
 
 doc_events = {
 	# Push bell notifications made by push.notify.notify_users to the mobile app.
@@ -238,6 +240,7 @@ doc_events = {
 			"before_insert": [
 				"field_sales.utils.store.stamp_store",
 				*(["field_sales.utils.store.fill_store_dates"] if doctype in _STORE_DATED else []),
+				*(["field_sales.utils.money.fill_currency"] if doctype in _PRICED else []),
 			],
 			**(
 				{"validate": "field_sales.permissions.check_owner_change"}

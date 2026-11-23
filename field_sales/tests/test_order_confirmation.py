@@ -184,9 +184,9 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIn("https://rzp.io/i/plink_test", message)
 		self.assertIn("Pay Now", message)
 
-	def test_amounts_use_the_site_currency(self):
-		with patch.object(confirmation, "site_currency", return_value="USD"):
-			send_order_confirmation(self.order.name)
+	def test_amounts_use_the_orders_currency(self):
+		frappe.db.set_value("Field Order", self.order.name, "currency", "USD")
+		send_order_confirmation(self.order.name)
 		self.assertIn("$", self.queued()[0].message)
 
 	def test_status_says_when_the_payment_link_failed(self):

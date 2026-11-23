@@ -991,3 +991,73 @@ class TestStoreLocale(StoreIsolationCase):
 			statements.generate_monthly_statements()
 		self.assertIn("ISA", seen)
 		self.assertNotIn("ISB", seen)
+
+	# -- Step 3: every amount carries its store's currency ------------------------------
+
+	def give_currencies(self):
+		for code in ("USD", "EUR"):
+			if not frappe.db.exists("Currency", code):
+				frappe.get_doc({"doctype": "Currency", "currency_name": code, "enabled": 1}).insert()
+		frappe.db.set_value("Store", "ISA", "shop_currency", "INR")
+		frappe.db.set_value("Store", "ISB", "shop_currency", "USD")
+
+	def test_new_records_take_their_stores_currency(self):
+		from field_sales.utils.money import fill_currency, record_currency, store_currency
+
+		self.give_currencies()
+		self.assertEqual(store_currency("ISB"), "USD")
+		doc = frappe.get_doc({"doctype": "Platform Product", "store": "ISB"})
+		fill_currency(doc)
+		self.assertEqual(doc.currency, "USD")
+		# An existing record keeps the currency it was made in.
+		self.assertEqual(record_currency(frappe._dict(currency="INR", store="ISB")), "INR")
+
+	def test_a_stores_currency_is_fixed_once_it_has_orders(self):
+		from field_sales.sync.shop_settings import sync_shop_settings
+		from field_sales.utils.store import use_store
+
+		self.give_currencies()
+		with use_store("ISB"):
+			result = sync_shop_settings({"currency": "EUR", "timezone": "America/New_York", "country": "US"})
+		self.assertEqual(frappe.db.get_value("Store", "ISB", "shop_currency"), "USD")
+		self.assertEqual(len(result["mismatch"]), 1)
+		self.assertIn("EUR", result["mismatch"][0])
+
+	def test_an_order_is_not_pushed_in_another_currency(self):
+		from field_sales.connectors import ConnectorError, get_connector
+
+		self.give_currencies()
+		conn = get_connector(require_enabled=False, store="ISB")
+		conn._currency = "EUR"  # the shop's, already read
+		with self.assertRaises(ConnectorError) as raised:
+			conn._get_currency(frappe._dict(currency="USD"))
+		self.assertEqual(raised.exception.code, "CURRENCY_MISMATCH")
+		conn._currency = "USD"
+		self.assertEqual(conn._get_currency(frappe._dict(currency="USD")), "USD")
+
+	def test_a_vendor_report_covers_one_store(self):
+		from field_sales.utils.store import report_store
+
+		self.assertRaises(frappe.ValidationError, report_store, frappe._dict())
+		self.assertEqual(report_store(frappe._dict(store="ISB")), "ISB")
+		# A store's user always gets their own store, whatever they pick.
+		self.assertEqual(report_store(frappe._dict(store="ISB"), user=self.a.manager), "ISA")
+
+	def test_existing_records_get_their_stores_currency(self):
+		from field_sales.patches.v2_0 import fill_record_currency
+
+		self.give_currencies()
+		frappe.db.set_value("Field Order", self.b.order, "currency", None)
+		with patch.object(frappe.db, "commit"), patch.object(frappe, "reload_doc"):
+			fill_record_currency.execute()
+		self.assertEqual(frappe.db.get_value("Field Order", self.b.order, "currency"), "USD")
+
+	def test_a_single_store_site_keeps_the_site_currency(self):
+		from field_sales.utils.money import site_currency, store_currency
+
+		self.give_currencies()
+		self.multi.stop()
+		try:
+			self.assertEqual(store_currency("ISB"), site_currency())
+		finally:
+			self.multi.start()

@@ -35,7 +35,7 @@ from field_sales.payments.razorpay import (
 	request,
 )
 from field_sales.permissions import MANAGER_ROLES
-from field_sales.utils.money import site_currency
+from field_sales.utils.money import record_currency
 
 REFUND_EVENTS = ("refund.processed", "refund.failed")
 WEBHOOK_EVENTS = (*REFUND_EVENTS, "payment.failed")
@@ -235,8 +235,8 @@ def apply_refund_to_order(field_order: str) -> None:
 	doc.add_comment(
 		"Info",
 		_("Refunded {0} of {1}. Payment status: {2}.").format(
-			fmt_money(refunded, currency=site_currency()),
-			fmt_money(doc.amount_paid, currency=site_currency()),
+			fmt_money(refunded, currency=record_currency(doc)),
+			fmt_money(doc.amount_paid, currency=record_currency(doc)),
 			_(doc.payment_status),
 		),
 	)

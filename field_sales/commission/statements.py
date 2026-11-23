@@ -23,6 +23,7 @@ from field_sales.commission.engine import load_plans, penalty_multiplier, slab_r
 from field_sales.permissions import MANAGER_ROLES, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
 from field_sales.utils.db import safe_commit
+from field_sales.utils.money import store_currency
 from field_sales.utils.store import for_each_store, store_filters, store_today
 
 
@@ -224,7 +225,7 @@ def _fill(doc) -> None:
 		else:
 			gross += flt(e.amount)
 
-	doc.currency = entries[0].currency if entries else frappe.db.get_default("currency")
+	doc.currency = entries[0].currency if entries else store_currency()
 	doc.total_sales = flt(sum(flt(e.base_amount) for e in rep_orders), precision)
 	doc.slab_rate_applied = slab_rate_applied
 	doc.gross_commission = flt(gross, precision)

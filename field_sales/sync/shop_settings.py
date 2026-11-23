@@ -52,6 +52,9 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 	if country:
 		values["shop_country"] = country
 	zone_changed = bool(timezone) and timezone != get_store_value("shop_timezone")
+	locked = _locked_currency(currency)
+	if locked:
+		values.pop("shop_currency")
 	if values:
 		set_store_value(values)
 	if zone_changed and is_multi_store():
@@ -67,7 +70,21 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		if changes:
 			frappe.clear_cache()
 
-	return {"changes": changes, "mismatch": get_mismatch(currency, timezone)}
+	return {"changes": changes, "mismatch": get_mismatch(currency, timezone, locked)}
+
+
+def _locked_currency(currency: str) -> str | None:
+	"""
+	On the shared site a store's currency is fixed once it has orders (their amounts are in it):
+	the saved one when the shop now reports another, else ``None``. The order push then refuses
+	(``CURRENCY_MISMATCH``) until vendor staff resolve it.
+	"""
+	if not currency or not is_multi_store():
+		return None
+	saved = get_store_value("shop_currency")
+	if saved and saved != currency and frappe.db.exists("Field Order", {"store": get_store_name()}):
+		return saved
+	return None
 
 
 def _apply_currency(code: str) -> bool:
@@ -133,13 +150,26 @@ def _clear_system_settings_cache():
 	clear_system_settings_cache()
 
 
-def get_mismatch(currency: str | None = None, timezone: str | None = None) -> list[str]:
+def get_mismatch(
+	currency: str | None = None, timezone: str | None = None, locked_currency: str | None = None
+) -> list[str]:
 	"""
 	Differences between the store's settings and the site's, as readable lines.
+
+	On the shared site the site never follows a store, so only a shop currency that changed after
+	the store had orders is a mismatch (``locked_currency``: the currency its orders are in).
 
 	:param currency: The store's currency; defaults to the one saved on the Store.
 	:param timezone: The store's time zone; defaults to the one saved on the Store.
 	"""
+	if is_multi_store():
+		if not locked_currency:
+			return []
+		return [
+			_("The shop now uses {0} but this store's orders are in {1}: new orders are stopped until support moves the store.").format(
+				currency, locked_currency
+			)
+		]
 	if currency is None or timezone is None:
 		saved = get_store_value(["shop_currency", "shop_timezone"], as_dict=True) or {}
 		currency = saved.get("shop_currency") if currency is None else currency

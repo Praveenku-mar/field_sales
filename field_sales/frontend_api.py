@@ -23,6 +23,7 @@ from field_sales.permissions import (
 	is_retailer_user,
 )
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
+from field_sales.utils.money import store_currency
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
 from field_sales.utils.store import get_store_value, store_timezone, store_today
@@ -282,7 +283,7 @@ def get_dashboard() -> dict:
 		counts[visit.status] = counts.get(visit.status, 0) + 1
 
 	return {
-		"currency": frappe.db.get_default("currency"),
+		"currency": store_currency(),
 		"today": {
 			"visits_planned": len(visits_today),
 			"visits_completed": counts["Completed"],

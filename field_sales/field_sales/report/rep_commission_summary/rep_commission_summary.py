@@ -28,7 +28,7 @@ from frappe import _
 from frappe.utils import flt, getdate
 
 from field_sales.permissions import get_allowed_reps, is_admin
-from field_sales.utils.store import store_scope
+from field_sales.utils.store import report_store
 
 
 def execute(filters=None):
@@ -190,8 +190,9 @@ def _reps_in_scope(filters) -> list[str]:
 			return []
 
 	# Every rep returned is in the user's store (an admin's too: Store Admin is an admin inside
-	# one store), so the Sales Rep and Manager filters cannot reach another store's reps.
-	scope = store_scope()
+	# one store), so the Sales Rep and Manager filters cannot reach another store's reps. Vendor
+	# staff pick one store with the Store filter (required on the shared site: report_store).
+	scope = report_store(filters)
 	if scope == "":
 		return []
 	rep_filters = {} if scope is None else {"store": scope}

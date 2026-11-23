@@ -23,7 +23,7 @@ from field_sales.sync.stock import (
 )
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.limits import ORDERS_PER_MONTH, check_limit
-from field_sales.utils.money import site_currency
+from field_sales.utils.money import record_currency
 from field_sales.utils.store import order_series
 
 # May set a line's rate other than the product's price.
@@ -119,7 +119,7 @@ class FieldOrder(Document):
 			frappe.throw(
 				_(
 					"This order has a payment of {0}. Reconcile or refund the payment before cancelling the order."
-				).format(frappe.utils.fmt_money(self.amount_paid, currency=site_currency())),
+				).format(frappe.utils.fmt_money(self.amount_paid, currency=record_currency(self))),
 				title=_("Order is paid"),
 			)
 		self._settle_store_order_before_cancel()

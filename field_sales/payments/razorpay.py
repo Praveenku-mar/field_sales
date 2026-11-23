@@ -39,7 +39,7 @@ from field_sales.push.notify import notify_users
 from field_sales.shopify.config import OAUTH_MODE
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.db import safe_commit
-from field_sales.utils.money import site_currency
+from field_sales.utils.money import record_currency, store_currency
 from field_sales.utils.store import get_store, is_multi_store
 from field_sales.utils.urls import public_url
 
@@ -236,7 +236,7 @@ def _link_payload(doc, reference_id: str, settings, notify: bool = True) -> dict
 
 	payload = {
 		"amount": int(round(flt(doc.grand_total) * 100)),  # paise  # noqa: RUF046
-		"currency": site_currency(),
+		"currency": record_currency(doc),
 		"accept_partial": False,
 		"description": f"Field Order {doc.name}",
 		"reference_id": reference_id,
@@ -405,7 +405,7 @@ def link_for_confirmation(doc) -> dict | None:
 			"Comment",
 			_(
 				"The order confirmation email went out without a payment link: Razorpay refused a link for {0} ({1}). Create one from the Payment card and share it."
-			).format(fmt_money(doc.grand_total, currency=site_currency()), escape_html(reason)),
+			).format(fmt_money(doc.grand_total, currency=record_currency(doc)), escape_html(reason)),
 		)
 		return None
 
@@ -616,8 +616,8 @@ def webhook():
 		return _respond(200, "ignored")
 	record["reference_order"] = field_order
 
-	# Links are created in the site currency (_link_payload); money in any other is not this order's.
-	currency = site_currency()
+	# Links are created in the order's currency (_link_payload); money in any other is not this order's.
+	currency = frappe.db.get_value("Field Order", field_order, "currency") or store_currency()
 	other = {c for c in (link.get("currency"), (payment or {}).get("currency")) if c and c != currency}
 	if other:
 		_record_event(
@@ -796,8 +796,8 @@ def _apply_link_state(doc, link_entity: dict, payment_entity: dict | None = None
 		doc.add_comment(
 			"Info",
 			_("Razorpay payment received: {0} of {1} ({2}). Payment status: {3}.").format(
-				fmt_money(doc.amount_paid, currency=site_currency()),
-				fmt_money(doc.grand_total, currency=site_currency()),
+				fmt_money(doc.amount_paid, currency=record_currency(doc)),
+				fmt_money(doc.grand_total, currency=record_currency(doc)),
 				escape_html(doc.razorpay_payment_id or link_entity.get("id") or ""),
 				_(doc.payment_status),
 			),
@@ -897,7 +897,7 @@ def notify_payment_received(doc) -> None:
 		return
 	subject = _("Payment received: {0} — {1} from {2}").format(
 		f"<b>{escape_html(doc.name)}</b>",
-		fmt_money(doc.amount_paid, currency=site_currency()),
+		fmt_money(doc.amount_paid, currency=record_currency(doc)),
 		escape_html(doc.retailer_name or doc.retailer or ""),
 	)
 	notify_users(users, "payment_received", "Field Order", doc.name, subject)

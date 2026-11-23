@@ -34,7 +34,8 @@
   "col_break_platform",
   "last_synced",
   "sync_hash",
-  "store"
+  "store",
+  "currency"
  ],
  "fields": [
   {
@@ -115,12 +116,14 @@
    "fieldname": "price",
    "fieldtype": "Currency",
    "label": "Price",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "options": "currency"
   },
   {
    "fieldname": "compare_at_price",
    "fieldtype": "Currency",
-   "label": "Compare At Price"
+   "label": "Compare At Price",
+   "options": "currency"
   },
   {
    "fieldname": "col_break_price",
@@ -213,13 +216,22 @@
    "set_only_once": 1,
    "in_standard_filter": 1,
    "search_index": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "The store's currency when the record was made; every amount on it is in this currency."
   }
  ],
  "index_web_pages_for_search": 0,
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-21 12:00:00.000000",
+ "modified": "2026-11-23 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Platform Product",

@@ -20,6 +20,7 @@ field_sales.patches.v1_0.client_temp_key
 field_sales.patches.v1_0.field_order_submitted_on
 field_sales.patches.v2_0.create_first_store
 field_sales.patches.v2_0.assign_users_to_store
+field_sales.patches.v2_0.fill_record_currency
 
 [post_fixture_sync]
 # Patches added in this section will be executed after fixtures and customizations

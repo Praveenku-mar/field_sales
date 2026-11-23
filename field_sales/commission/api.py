@@ -27,6 +27,7 @@ from field_sales.commission.statements import (
 )
 from field_sales.permissions import get_allowed_reps, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
+from field_sales.utils.money import store_currency
 from field_sales.utils.store import store_today
 
 PERIODS = ("this_month", "last_month", "this_year", "all")
@@ -55,7 +56,7 @@ def get_my_commission_summary(period: str = "this_month") -> dict:
 	totals = _totals([rep], start, end).get(rep, _empty_totals())
 	return {
 		"has_rep": True,
-		"currency": frappe.db.get_default("currency"),
+		"currency": store_currency(),
 		"earned": totals["earned"],
 		"pending": totals["pending"],
 		"reversed": totals["reversed"],
@@ -413,7 +414,7 @@ def create_adjustment(
 		frappe.throw(_("Reason is required."))
 
 	posting_date = getdate(posting_date) if posting_date else store_today()
-	currency = frappe.db.get_default("currency")
+	currency = store_currency()
 	if not currency:
 		frappe.throw(_("Set a default Currency before adding an adjustment."))
 

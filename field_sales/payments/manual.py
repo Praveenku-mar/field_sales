@@ -7,7 +7,7 @@ from frappe.utils import escape_html, flt, now_datetime
 from field_sales.payments import transactions
 from field_sales.payments.razorpay import cancel_payment_link, fetch_payment_link, get_settings, notify_payment_received
 from field_sales.sync.orders import enqueue_mark_store_paid
-from field_sales.utils.money import site_currency
+from field_sales.utils.money import record_currency
 
 
 @frappe.whitelist(methods=["POST"])
@@ -56,7 +56,7 @@ def mark_order_paid(field_order: str, payment_method: str, payment_reference: st
 	doc.add_comment(
 		"Info",
 		_("Manual payment received: {0} by {1}.").format(
-			frappe.utils.fmt_money(doc.grand_total, currency=site_currency()),
+			frappe.utils.fmt_money(doc.grand_total, currency=record_currency(doc)),
 			_(payment_method),
 		)
 		+ (_(" Reference: {0}.").format(escape_html(reference)) if reference else ""),

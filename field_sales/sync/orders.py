@@ -25,6 +25,7 @@ from field_sales.sync.customers import push_retailer
 from field_sales.sync.notify import notify_order_sync_failure, notify_sync_result
 from field_sales.utils.db import safe_commit
 from field_sales.utils.store import (
+	current_store,
 	enqueue_in_store,
 	for_each_store,
 	get_store,
@@ -44,7 +45,7 @@ DRAFT_LINK_DAYS = 90
 DRAFT_LINK_BATCH = 500
 
 
-def enqueue_push_order(field_order: str):
+def enqueue_push_order(field_order: str, store: str | None = None):
 	"""
 	Queue ``push_order`` once the current transaction commits.
 
@@ -54,7 +55,7 @@ def enqueue_push_order(field_order: str):
 	"""
 	enqueue_in_store(
 		"field_sales.sync.orders.push_order",
-		store=record_store("Field Order", field_order),
+		store=store or record_store("Field Order", field_order),
 		field_order=field_order,
 		job_id=f"field_sales:push_order:{field_order}",
 		deduplicate=True,
@@ -209,11 +210,15 @@ def push_order(field_order: str):
 	_notify(doc)
 
 
-def enqueue_mark_store_paid(field_order: str):
-	"""Queue ``mark_store_order_paid`` once the current transaction commits."""
+def enqueue_mark_store_paid(field_order: str, store: str | None = None):
+	"""
+	Queue ``mark_store_order_paid`` once the current transaction commits.
+
+	:param store: The order's store, when the caller knows it (saves a query per order).
+	"""
 	enqueue_in_store(
 		"field_sales.sync.orders.mark_store_order_paid",
-		store=record_store("Field Order", field_order),
+		store=store or record_store("Field Order", field_order),
 		queue="short",
 		field_order=field_order,
 		job_id=f"field_sales:mark_store_paid:{field_order}",
@@ -308,8 +313,9 @@ def _retry_store_payments():
 		limit=50,
 		pluck="name",
 	)
+	store = current_store()
 	for name in names:
-		enqueue_mark_store_paid(name)
+		enqueue_mark_store_paid(name, store)
 
 
 def retry_failed_orders():
@@ -344,8 +350,9 @@ def _retry_failed_orders():
 		pluck="name",
 	)
 
+	store = current_store()
 	for name in failed + stuck:
-		enqueue_push_order(name)
+		enqueue_push_order(name, store)
 
 
 def link_completed_drafts():

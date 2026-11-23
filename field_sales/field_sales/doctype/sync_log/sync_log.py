@@ -218,6 +218,9 @@ def log_sync_or_error(**fields) -> None:
 
 	For deliveries and installs from a shop that is not one of the shared site's Stores: a Sync
 	Log must belong to a store, and there is none to give it.
+
+	Pass ids, codes and messages only, never ``request_payload`` / ``response_payload``: an Error
+	Log is read by every System Manager, not only by the store's own users.
 	"""
 	try:
 		store = get_store_name(fields.get("store"))

@@ -18,9 +18,15 @@ def send_daily_summary():
 	a summary of today for everyone under them, at all levels.
 
 	Managers whose team had no activity and no failures get no email. Disabled Stores are
-	included: their reps may still have worked today (e.g. while a token refresh is failing).
+	included (their reps may still have worked today, e.g. while a token refresh is failing),
+	but not uninstalled ones: that merchant has left and gets no more email.
 	"""
-	for_each_store(_send_store_summaries, title="send_daily_summary", enabled_only=False)
+	for_each_store(
+		_send_store_summaries,
+		title="send_daily_summary",
+		enabled_only=False,
+		filters={"uninstalled_on": ("is", "not set")},
+	)
 
 
 def _send_store_summaries():

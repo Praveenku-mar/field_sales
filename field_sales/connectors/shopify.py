@@ -22,7 +22,7 @@ import json
 import re
 import time
 import unicodedata
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import timedelta
 
 import frappe
@@ -60,8 +60,31 @@ TOKEN_LOCK_SECONDS = 30
 
 
 def token_lock_key(shop: str) -> str:
-	"""Cache key of ``shop``'s token lock: refresh (connector) and token exchange (embedded) share it."""
+	"""Cache key of ``shop``'s token lock: refresh, token exchange and OAuth install share it."""
 	return frappe.cache.make_key(f"{TOKEN_LOCK_KEY}:{shop}")
+
+
+class TokenLockTimeout(Exception):
+	"""Another request held the shop's token lock for longer than ``TOKEN_LOCK_SECONDS``."""
+
+
+@contextmanager
+def shop_token_lock(shop: str):
+	"""
+	Hold ``shop``'s token lock: only one token refresh, token exchange or install of a shop at a
+	time (two would retire each other's tokens, or both create the shop's Store).
+
+	:raises TokenLockTimeout: The lock was not free within ``TOKEN_LOCK_SECONDS``.
+	"""
+	lock = frappe.cache.lock(token_lock_key(shop), timeout=TOKEN_LOCK_SECONDS, blocking_timeout=TOKEN_LOCK_SECONDS)
+	if not lock.acquire():
+		raise TokenLockTimeout(shop)
+	try:
+		yield
+	finally:
+		# Timed out and taken over by another request: nothing left to release.
+		with suppress(Exception):
+			lock.release()
 
 THROTTLE_MIN_AVAILABLE = 100  # query cost points
 THROTTLE_SLEEP_SECONDS = 2

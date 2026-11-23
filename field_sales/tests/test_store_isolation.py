@@ -619,8 +619,13 @@ class TestStoreContext(StoreIsolationCase):
 			if current_store() == "ISA":
 				raise ValueError("store A is broken")
 
-		with patch.object(frappe, "log_error") as log_error:
+		with (
+			patch.object(frappe, "log_error") as log_error,
+			patch("field_sales.utils.store.safe_commit") as commit,
+			self.assertRaisesRegex(frappe.ValidationError, "test_job failed for ISA"),
+		):
 			for_each_store(job, title="test_job", enabled_only=False)
+		commit.assert_called_once()  # the other stores' work is kept before the job fails
 		self.assertIn("ISA", JOB_STORES)
 		self.assertIn("ISB", JOB_STORES)
 		# Store A's write is undone, store B's is kept.
@@ -640,7 +645,7 @@ class TestStoreContext(StoreIsolationCase):
 			)
 		queued = []
 		with patch.object(
-			orders, "enqueue_push_order", side_effect=lambda n: queued.append((n, current_store()))
+			orders, "enqueue_push_order", side_effect=lambda n, store=None: queued.append((n, current_store()))
 		):
 			orders.retry_failed_orders()
 		self.assertIn((self.a.order, "ISA"), queued)
@@ -712,3 +717,112 @@ class TestStoreContext(StoreIsolationCase):
 			result = razorpay.webhook()
 		self.assertEqual(result, {"status": "not served on this site"})
 		self.assertEqual(frappe.local.response.http_status_code, 404)
+
+	def test_uninstalled_stores_get_no_daily_summary(self):
+		from field_sales import daily_summary
+		from field_sales.utils.store import current_store
+
+		frappe.db.set_value("Store", "ISB", "uninstalled_on", frappe.utils.now_datetime())
+		seen = []
+		with patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []):
+			daily_summary.send_daily_summary()
+		self.assertIn("ISA", seen)
+		self.assertNotIn("ISB", seen)
+
+	# -- requests routed by shop -----------------------------------------------------
+
+	def fake_request(self, body: bytes, headers: dict):
+		from werkzeug.test import EnvironBuilder
+		from werkzeug.wrappers import Request
+
+		builder = EnvironBuilder(method="POST", data=body, headers=headers, content_type="application/json")
+		frappe.local.request = Request(builder.get_environ())
+		frappe.local.response = frappe._dict()
+		self.addCleanup(setattr, frappe.local, "request", None)
+
+	def give_secrets(self):
+		"""Store A and B each sign with their own client credentials secret."""
+		from frappe.utils.password import set_encrypted_password
+
+		for store in ("ISA", "ISB"):
+			frappe.db.set_value("Store", store, {"enabled": 1, "shopify_client_id": f"{store}-id"})
+			set_encrypted_password("Store", store, f"{store}-secret", "shopify_client_secret")
+
+	@staticmethod
+	def sign(body: bytes, secret: str) -> str:
+		import base64
+		import hashlib
+		import hmac
+
+		return base64.b64encode(hmac.new(secret.encode(), body, hashlib.sha256).digest()).decode()
+
+	def test_a_store_webhook_is_verified_and_queued_for_the_shops_store(self):
+		from field_sales.api import webhooks
+		from field_sales.utils.store import set_current_store
+
+		self.give_secrets()
+		self.addCleanup(set_current_store, None)
+		body = b'{"inventory_item_id": 1, "location_id": 2, "available": 3}'
+		headers = {
+			"X-Shopify-Shop-Domain": self.SHOP_B,
+			"X-Shopify-Topic": "inventory_levels/update",
+			"X-Shopify-Webhook-Id": frappe.generate_hash(length=12),
+		}
+
+		self.fake_request(body, {**headers, "X-Shopify-Hmac-Sha256": self.sign(body, "ISB-secret")})
+		with patch("frappe.enqueue") as enqueue:
+			webhooks.receive()
+		self.assertEqual(frappe.local.response.http_status_code, 200)
+		self.assertEqual(enqueue.call_args.kwargs["store_name"], "ISB")
+
+		# Store A's secret cannot speak for store B's shop.
+		headers["X-Shopify-Webhook-Id"] = frappe.generate_hash(length=12)
+		self.fake_request(body, {**headers, "X-Shopify-Hmac-Sha256": self.sign(body, "ISA-secret")})
+		with patch("frappe.enqueue") as enqueue, patch.object(webhooks, "_log_invalid_signature"):
+			webhooks.receive()
+		self.assertEqual(frappe.local.response.http_status_code, 401)
+		enqueue.assert_not_called()
+
+	def test_a_privacy_webhook_is_recorded_in_the_shops_store(self):
+		from field_sales.shopify import webhooks
+		from field_sales.utils.store import set_current_store
+
+		self.give_secrets()
+		self.addCleanup(set_current_store, None)
+		body = frappe.as_json({"customer": {"id": 42}}).encode()
+		self.fake_request(
+			body,
+			{
+				"X-Shopify-Shop-Domain": self.SHOP_B,
+				"X-Shopify-Topic": "customers/redact",
+				"X-Shopify-Webhook-Id": frappe.generate_hash(length=12),
+				"X-Shopify-Hmac-Sha256": self.sign(body, "ISB-secret"),
+			},
+		)
+		with patch("frappe.enqueue") as enqueue:
+			webhooks.receive()
+		self.assertEqual(frappe.local.response.http_status_code, 200)
+		request = enqueue.call_args.kwargs["privacy_request"]
+		self.assertEqual(frappe.db.get_value("Privacy Request", request, "store"), "ISB")
+		self.assertEqual(enqueue.call_args.kwargs["store_name"], "ISB")
+
+	def test_a_session_token_signs_in_to_the_shops_store(self):
+		from field_sales.shopify import embedded, session_token
+		from field_sales.utils.store import current_store, set_current_store
+
+		self.addCleanup(set_current_store, None)
+		seen = []
+		self.as_user("Guest")
+		with (
+			patch.object(session_token, "bearer_token", return_value="token"),
+			patch.object(session_token, "_looks_like_session_token", return_value=True),
+			patch.object(session_token, "decode", return_value={"shop": self.SHOP_B, "sub": "1"}),
+			patch.object(embedded, "is_connected", return_value=True),
+			patch.object(
+				embedded, "get_embedded_user", side_effect=lambda: seen.append(current_store()) or self.b.admin
+			),
+		):
+			session_token.authenticate()
+		self.assertEqual(seen, ["ISB"])
+		self.assertEqual(frappe.session.user, self.b.admin)
+		self.assertEqual(current_store(), "ISB")

@@ -27,6 +27,8 @@ from typing import Any
 import frappe
 from frappe import _
 
+from field_sales.utils.db import safe_commit
+
 STORE_DOCTYPE = "Store"
 _LOCAL_KEY = "field_sales_store"
 # The site's only Store, cached for the request/job (cleared when a Store is added or removed).
@@ -72,7 +74,8 @@ def enqueue_in_store(method: str, store: str | None = None, **kwargs):
 
 	Jobs queued by a webhook (Guest) or by Administrator have no user store to fall back on, so the
 	store travels with the job. ``kwargs`` are ``frappe.enqueue`` options (``queue``, ``job_id``,
-	``deduplicate``, ``enqueue_after_commit``, …) plus the job's own arguments.
+	``deduplicate``, ``enqueue_after_commit``, …) plus the job's own arguments. ``store`` is this
+	helper's own: it is not passed to the job (the job reads ``current_store()``).
 
 	Not a ``before_job`` hook popping a ``store`` argument: Frappe retries a deadlocked job with
 	the same (already popped) kwargs, so the store would be gone on the retry.
@@ -91,23 +94,34 @@ def record_store(doctype: str, name: str) -> str | None:
 
 
 def run_in_store(store_method: str, store_name: str | None = None, **kwargs):
-	"""Job entry for ``enqueue_in_store``: run ``store_method`` with ``store_name`` as the current store."""
+	"""
+	Job entry for ``enqueue_in_store``: run ``store_method`` with ``store_name`` as the current store.
+
+	Called directly (not ``frappe.call``), so an argument the job does not take raises, as with
+	a plain ``frappe.enqueue``, instead of being dropped.
+	"""
 	with use_store(store_name):
-		return frappe.call(store_method, **kwargs)
+		return frappe.get_attr(store_method)(**kwargs)
 
 
-def for_each_store(fn, title: str | None = None, enabled_only: bool = True) -> None:
+def for_each_store(
+	fn, title: str | None = None, enabled_only: bool = True, filters: dict | None = None
+) -> None:
 	"""
 	Scheduled-job helper: call ``fn()`` once per Store (oldest first) with that store current.
 
 	Each store runs inside its own savepoint: a failure undoes only that store's work, is logged
 	(Error Log "Field Sales scheduled job failed: {title} ({store})") and the next store still runs.
-	The job's own commit at the end keeps the rest; ``fn`` may also commit as it goes.
+	The job's own commit at the end keeps the rest; ``fn`` may also commit as it goes. If any store
+	failed, the others' work is committed and the job then fails, so the Scheduled Job Log shows it.
 
 	:param title: The job's name for the Error Log (default: ``fn.__name__``).
 	:param enabled_only: Skip disabled Stores (uninstalled, or a failed token refresh).
+	:param filters: More ``Store`` filters (e.g. skip uninstalled stores).
 	"""
-	filters = {"enabled": 1} if enabled_only else {}
+	title = title or fn.__name__
+	filters = {**({"enabled": 1} if enabled_only else {}), **(filters or {})}
+	failed = []
 	for store in frappe.get_all(STORE_DOCTYPE, filters=filters, pluck="name", order_by="creation asc"):
 		save_point = f"field_sales_store_{frappe.generate_hash(length=10)}"
 		frappe.db.savepoint(save_point)
@@ -116,7 +130,22 @@ def for_each_store(fn, title: str | None = None, enabled_only: bool = True) -> N
 				fn()
 		except Exception:
 			_undo_store_work(save_point)
-			frappe.log_error(title=f"Field Sales scheduled job failed: {title or fn.__name__} ({store})")
+			frappe.log_error(title=f"Field Sales scheduled job failed: {title} ({store})")
+			failed.append(store)
+			continue
+		_release_savepoint(save_point)
+	if failed:
+		# Keep the other stores' work and the Error Logs: failing the job rolls back what is not committed.
+		safe_commit()
+		frappe.throw(_("Scheduled job {0} failed for {1}").format(title, ", ".join(failed)))
+
+
+def _release_savepoint(save_point: str) -> None:
+	"""Release a finished store's savepoint (gone already if ``fn`` committed)."""
+	try:
+		frappe.db.release_savepoint(save_point)
+	except Exception:
+		pass  # fn committed: the transaction, and with it the savepoint, has ended
 
 
 def _undo_store_work(save_point: str) -> None:

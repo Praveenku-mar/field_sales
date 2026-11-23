@@ -27,7 +27,7 @@ import requests
 from frappe import _
 from frappe.utils import get_datetime, now_datetime
 
-from field_sales.connectors.shopify import REQUEST_TIMEOUT, TOKEN_LOCK_SECONDS, token_lock_key
+from field_sales.connectors.shopify import REQUEST_TIMEOUT, TokenLockTimeout, shop_token_lock
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_or_error
 from field_sales.permissions import MANAGER_ROLES, STORE_ADMIN_ROLE
 from field_sales.shopify import config
@@ -88,36 +88,30 @@ def ensure_offline_token(shop: str, id_token: str) -> None:
 	:raises InvalidSessionToken: Shopify refused the ID token (expired): the client retries.
 	:raises ConnectError: The shop may not be connected here, or Shopify failed otherwise.
 	"""
-	lock = frappe.cache.lock(
-		token_lock_key(shop), timeout=TOKEN_LOCK_SECONDS, blocking_timeout=TOKEN_LOCK_SECONDS
-	)
-	if not lock.acquire():
-		raise ConnectError(_("Timed out waiting for another Shopify token request"))
 	try:
-		# A fresh snapshot: another request may have just saved the tokens.
-		safe_commit()
-		if is_connected(shop):
-			return
-		try:
-			check_shop_allowed(shop)
-		except InstallError as e:
-			_log_install("Failed", shop, str(e))
-			raise ConnectError(str(e)) from e
+		with shop_token_lock(shop):
+			# A fresh snapshot: another request may have just saved the tokens.
+			safe_commit()
+			if is_connected(shop):
+				return
+			try:
+				check_shop_allowed(shop)
+			except InstallError as e:
+				_log_install("Failed", shop, str(e))
+				raise ConnectError(str(e)) from e
 
-		start = time.monotonic()
-		body = _exchange(shop, id_token)
-		missing = save_installation(shop, body)
-		_log_install(
-			"Success",
-			shop,
-			f"Token exchange. Missing scopes: {', '.join(missing)}" if missing else "Token exchange",
-			duration_ms=int((time.monotonic() - start) * 1000),
-		)
-		safe_commit()
-	finally:
-		# Timed out and taken over.
-		with suppress(Exception):
-			lock.release()
+			start = time.monotonic()
+			body = _exchange(shop, id_token)
+			missing = save_installation(shop, body)
+			_log_install(
+				"Success",
+				shop,
+				f"Token exchange. Missing scopes: {', '.join(missing)}" if missing else "Token exchange",
+				duration_ms=int((time.monotonic() - start) * 1000),
+			)
+			safe_commit()
+	except TokenLockTimeout as e:
+		raise ConnectError(_("Timed out waiting for another Shopify token request")) from e
 
 
 def _exchange(shop: str, id_token: str) -> dict:

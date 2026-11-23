@@ -32,9 +32,11 @@ from werkzeug.wrappers import Response
 
 from field_sales.connectors.shopify import (
 	REQUEST_TIMEOUT,
+	TokenLockTimeout,
 	clear_oauth_tokens,
 	normalize_shop_domain,
 	save_oauth_tokens,
+	shop_token_lock,
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable, log_sync_or_error
 from field_sales.shopify import config
@@ -108,9 +110,14 @@ def callback(
 			raise InstallError("Unknown or expired install request; start the install again.")
 		if not code:
 			raise InstallError("Missing authorization code.")
-		check_shop_allowed(shop)
-		body = _exchange_code(shop, code)
-		missing = save_installation(shop, body)
+		# One install / token exchange of a shop at a time: two would both create its Store.
+		with shop_token_lock(shop):
+			check_shop_allowed(shop)
+			body = _exchange_code(shop, code)
+			missing = save_installation(shop, body)
+			safe_commit()  # the next holder of the lock must see this shop's Store
+	except TokenLockTimeout:
+		return _fail("Another install of this shop is in progress; open the app again.", shop)
 	except InstallError as e:
 		return _fail(str(e), shop)
 

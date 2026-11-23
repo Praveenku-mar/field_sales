@@ -1233,3 +1233,80 @@ class TestStoreLifecycle(StoreIsolationCase):
 		with use_store("ISB"), patch("field_sales.shopify.embedded.safe_commit"):
 			self.assertEqual(get_embedded_user(), user)
 		self.assertEqual(frappe.db.get_value("User", user, "enabled"), 1)
+
+
+class TestVendorStoreSwitch(StoreIsolationCase):
+	"""Phase 7: vendor staff work in one store at a time in the web app (design Q2)."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.savepoint("vendor_switch")
+		self.multi = patch.dict(frappe.conf, MULTI)
+		self.multi.start()
+		self.addCleanup(self.multi.stop)
+		self.as_user(self.vendor)
+		self.addCleanup(self.leave_store)
+
+	def leave_store(self):
+		from field_sales.utils.store import set_vendor_store
+
+		self.as_user(self.vendor)
+		set_vendor_store(None)
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="vendor_switch")
+		super().tearDown()
+
+	def test_vendor_staff_start_without_a_store(self):
+		from field_sales.frontend_api import get_session
+
+		session = get_session()
+		self.assertTrue(session["is_vendor"])
+		self.assertEqual(session["store"], {})
+		self.assertIsNone(session["currency"])
+
+	def test_a_switch_limits_the_session_to_that_store_and_is_recorded(self):
+		from field_sales.frontend_api import get_session, switch_store
+		from field_sales.utils.store import get_store_name, store_scope
+
+		switch_store("ISB")
+		reset_request_caches()
+		self.assertEqual(store_scope(), "ISB")
+		self.assertEqual(get_store_name(), "ISB")
+		self.assertEqual(self.stores_seen("Field Order"), {"ISB"})
+		self.assertEqual(get_session()["store"]["code"], "ISB")
+		self.assertTrue(
+			frappe.db.exists(
+				"Comment",
+				{"reference_doctype": "Store", "reference_name": "ISB", "content": ("like", f"%{self.vendor}%")},
+			)
+		)
+		# Another user is not affected, and leaving brings back every store.
+		self.assertEqual(store_scope(self.a.manager), "ISA")
+		switch_store()
+		reset_request_caches()
+		self.assertIsNone(store_scope())
+
+	def test_only_vendor_staff_on_the_shared_site_can_switch(self):
+		from field_sales.frontend_api import get_vendor_stores, switch_store
+
+		self.assertIn("ISB", [s.name for s in get_vendor_stores()])
+		self.as_user(self.a.admin)
+		self.assertRaises(frappe.PermissionError, switch_store, "ISB")
+		self.assertRaises(frappe.PermissionError, get_vendor_stores)
+		self.as_user(self.vendor)
+		self.multi.stop()
+		try:
+			self.assertRaises(frappe.PermissionError, switch_store, "ISB")
+		finally:
+			self.multi.start()
+
+	def test_the_session_tells_the_app_its_currency_and_tax_mode(self):
+		from field_sales.frontend_api import get_session
+
+		frappe.db.set_value("Store", "ISA", {"shop_currency": "INR", "tax_mode": "None"})
+		self.as_user(self.a.manager)
+		session = get_session()
+		self.assertEqual(session["currency"], "INR")
+		self.assertEqual(session["store"]["tax_mode"], "None")
+		self.assertFalse(session["is_vendor"])

@@ -28,6 +28,7 @@ import { computed, ref } from 'vue'
 import { Avatar, Dialog, Dropdown } from 'frappe-ui'
 import { useInstallPrompt } from '@/composables/useInstallPrompt'
 import { useSessionStore } from '@/stores/session'
+import { callMethod } from '@/utils/api'
 
 defineProps({
   collapsed: { type: Boolean, default: false },
@@ -38,6 +39,11 @@ const session = useSessionStore()
 const { canInstall, showIosHint, install } = useInstallPrompt()
 const iosHintOpen = ref(false)
 
+async function switchStore() {
+  await callMethod('field_sales.frontend_api.switch_store')
+  window.location.reload()
+}
+
 const options = computed(() => [
   {
     group: session.user,
@@ -45,6 +51,8 @@ const options = computed(() => [
       canInstall.value && { label: 'Install app', icon: 'lucide-download', onClick: install },
       showIosHint.value && { label: 'Add to Home Screen', icon: 'lucide-download', onClick: () => (iosHintOpen.value = true) },
       // A customer login is a website user: the desk would turn it away.
+      // Vendor staff on the shared site: back to the store picker (VendorStorePicker).
+      session.isVendor && { label: `Switch store (${session.store.title || session.store.code})`, icon: 'lucide-store', onClick: switchStore },
       !session.isRetailer && { label: 'Switch to Desk', icon: 'lucide-app-window', onClick: () => (window.location.href = '/app') },
       { label: 'Log out', icon: 'lucide-log-out', onClick: () => session.logout() },
     ].filter(Boolean),

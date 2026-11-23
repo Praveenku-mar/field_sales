@@ -50,6 +50,9 @@ export const useSessionStore = defineStore('session', () => {
   const retailer = computed(() => data.value.retailer || null)
   // Settings → Commission; off for companies that pay no commission (missing = on).
   const commissionEnabled = computed(() => data.value.commission_enabled !== false)
+  // Vendor staff on the shared site: they work in one store at a time (VendorStorePicker).
+  const isVendor = computed(() => !!data.value.is_vendor)
+  const needsStore = computed(() => isVendor.value && !store.value.code)
 
   function hasRole(...wanted) {
     return wanted.some((role) => roles.value.includes(role))
@@ -125,6 +128,8 @@ export const useSessionStore = defineStore('session', () => {
     ready,
     error,
     user,
+    isVendor,
+    needsStore,
     fullName,
     userImage,
     roles,

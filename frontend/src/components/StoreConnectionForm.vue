@@ -243,9 +243,11 @@ import { isEmbedded } from '@/shopify/embedded'
 import { createMerchantStoreDoc, merchantLocationsUrl } from '@/shopify/merchantSettings'
 import { daysAgo, formatDate, formatDateTime, formatTime, msUntil, nowSql } from '@/utils/format'
 
-const embedded = isEmbedded()
-// The Store this user works in (boot value `store`). Inside the Shopify admin the
-// merchant endpoints are used instead (only locations, defaults and similar can change there).
+// The merchant's view: inside the Shopify admin, and always on the shared site (App Store installs
+// only; the connection and credentials are the vendor's there, and the server refuses them).
+const embedded = isEmbedded() || !!window.multi_store
+// The Store this user works in (boot value `store`). In the merchant's view the merchant
+// endpoints are used instead (only locations, defaults and similar can change there).
 const doc = embedded
   ? createMerchantStoreDoc()
   : createDocumentResource({ doctype: 'Store', name: window.store })

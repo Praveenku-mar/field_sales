@@ -23,12 +23,14 @@
     <!-- Seller details printed on the tax invoice -->
     <section class="border-t border-[#f1f2f4] p-6 sm:p-8">
       <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Company Details</h3>
-      <p class="mt-1 text-sm text-polaris-secondary">Printed as the seller on the tax invoice.</p>
+      <p class="mt-1 text-sm text-polaris-secondary">Printed as the seller on the {{ gst ? 'tax invoice' : 'invoice' }}.</p>
       <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
         <TextInput v-model="d.company_name" label="Company Name" />
-        <TextInput v-model="d.company_gstin" label="GSTIN" />
+        <!-- GSTIN and State only matter for GST invoices (store tax mode GST). -->
+        <TextInput v-if="gst" v-model="d.company_gstin" label="GSTIN" />
         <Textarea v-model="d.company_address" label="Address" :rows="3" />
         <TextInput
+          v-if="gst"
           v-model="d.company_state"
           label="State"
           description="Same state as the shop: CGST + SGST. Otherwise: IGST."
@@ -46,8 +48,12 @@ import { Checkbox, LoadingIndicator, Textarea, TextInput, createDocumentResource
 import { isEmbedded } from '@/shopify/embedded'
 import { createMerchantStoreDoc } from '@/shopify/merchantSettings'
 import EmptyState from '@/components/EmptyState.vue'
+import { useSessionStore } from '@/stores/session'
 
 const emit = defineEmits(['saved'])
+
+const session = useSessionStore()
+const gst = computed(() => session.store.tax_mode !== 'None')
 
 // The Store this user works in (boot value `store`).
 // Inside the Shopify admin: the merchant endpoints (managers may not edit Store Connection directly).

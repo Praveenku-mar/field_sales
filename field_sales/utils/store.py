@@ -159,6 +159,43 @@ def _undo_store_work(save_point: str) -> None:
 		frappe.db.rollback()
 
 
+# ----------------------------------------------------------------------
+# Vendor staff: one store at a time in the web app (design Q2)
+# ----------------------------------------------------------------------
+
+VENDOR_STORE_SECONDS = 24 * 60 * 60
+
+
+def _vendor_store_key() -> str | None:
+	sid = getattr(frappe.session, "sid", None)
+	if not sid or frappe.session.user in (None, "", "Guest"):
+		return None
+	# get_value / set_value / delete_value add the site prefix themselves.
+	return f"field_sales:vendor_store:{sid}"
+
+
+def vendor_store() -> str | None:
+	"""
+	The store vendor staff chose for this session (shared site only), else ``None``: every store.
+	Kept per session id, so another browser or a job of the same user is not affected.
+	"""
+	if not is_multi_store() or not is_vendor():
+		return None
+	key = _vendor_store_key()
+	return frappe.cache.get_value(key) if key else None
+
+
+def set_vendor_store(store: str | None) -> None:
+	"""Choose (or, with ``None``, leave) a store for this vendor session; see ``vendor_store``."""
+	key = _vendor_store_key()
+	if not key:
+		return
+	if store:
+		frappe.cache.set_value(key, store, expires_in_sec=VENDOR_STORE_SECONDS)
+	else:
+		frappe.cache.delete_value(key)
+
+
 def clear_store_cache() -> None:
 	"""Forget the cached "only Store" (called when a Store is inserted, renamed or deleted)."""
 	setattr(frappe.local, _ONLY_KEY, None)
@@ -316,7 +353,8 @@ def store_scope(user: str | None = None) -> str | None:
 	"""
 	user = user or frappe.session.user
 	if is_vendor(user):
-		return None
+		# Vendor staff working in one store (the web app's store switcher): that store only.
+		return vendor_store() if user == frappe.session.user else None
 	store = user_store(user)
 	if store:
 		return store
@@ -336,7 +374,7 @@ def get_store_name(store: str | None = None, required: bool = False) -> str | No
 	:param required: Raise when there is no Store at all (else return ``None``).
 	:raises NoStoreContext: Several stores exist and none was given or set.
 	"""
-	name = store or current_store() or user_store()
+	name = store or current_store() or user_store() or vendor_store()
 	if name:
 		return name
 	only = getattr(frappe.local, _ONLY_KEY, None)

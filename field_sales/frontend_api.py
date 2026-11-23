@@ -26,7 +26,16 @@ from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
 from field_sales.utils.money import store_currency
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
-from field_sales.utils.store import get_store_value, store_timezone, store_today
+from field_sales.utils.store import (
+	NoStoreContext,
+	get_store_name,
+	get_store_value,
+	is_multi_store,
+	is_vendor,
+	set_vendor_store,
+	store_timezone,
+	store_today,
+)
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
 
 SEARCH_LIMIT = 6
@@ -133,11 +142,15 @@ def get_session() -> dict:
 	also gets ``is_retailer`` and its ``retailer``; an inactive or unlinked one
 	is refused here, so My Orders never loads for it.
 
-	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled", "time_zone", "server_time_zone"}``
+	Vendor staff on the shared site get ``is_vendor``; until they pick a store (``switch_store``)
+	``store`` is empty and the app shows its store picker.
+
+	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled", "time_zone", "server_time_zone", "currency", "is_vendor"}``
 	"""
 	_check_access()
 	user = frappe.session.user
 	roles = [r for r in frappe.get_roles(user) if r in APP_ROLES]
+	in_store = _session_store() is not None
 	if user == "Administrator" and "System Manager" not in roles:
 		roles.append("System Manager")
 
@@ -167,12 +180,15 @@ def get_session() -> dict:
 		"sales_rep": frappe.db.get_value(
 			"Sales Rep", {"user": user}, ["name", "full_name", "territory", "reports_to"], as_dict=True
 		),
-		"store": _store_info(),
-		"commission_enabled": commission_enabled(),
+		"store": _store_info() if in_store else {},
+		"commission_enabled": commission_enabled() if in_store else False,
 		# The mobile app needs both, as the web app does (www/fieldsales.py boot): stored times are
 		# in server_time_zone; "today" and shown times are in time_zone (the store's).
 		"time_zone": store_timezone(),
 		"server_time_zone": frappe.utils.get_system_timezone(),
+		# The store's currency for new amounts (the mobile app formats with it, as the web app does).
+		"currency": store_currency() if in_store else None,
+		"is_vendor": is_multi_store() and is_vendor(user),
 	}
 
 
@@ -686,6 +702,40 @@ def payment_history(doc) -> list[dict]:
 	return history(field_order=doc.name, store_order_id=doc.external_order_id)
 
 
+@frappe.whitelist(methods=["GET"])
+def get_vendor_stores() -> list[dict]:
+	"""Vendor staff on the shared site: every Store, for the app's store picker."""
+	_require_vendor()
+	return frappe.get_all(
+		"Store",
+		fields=["name", "shop_name", "store_url", "enabled", "uninstalled_on"],
+		order_by="shop_name asc, name asc",
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+def switch_store(store: str | None = None) -> dict:
+	"""
+	Vendor staff on the shared site: work in ``store`` for the rest of this session (lists, forms
+	and reports then show that store only), or with no ``store`` go back to the picker. Each
+	switch is recorded on the Store (design Q2).
+	"""
+	_require_vendor()
+	if store:
+		if not frappe.db.exists("Store", store):
+			frappe.throw(_("Store {0} not found").format(store), frappe.DoesNotExistError)
+		frappe.get_doc("Store", store).add_comment(
+			"Info", _("{0} opened this store in Agamsale (vendor support).").format(frappe.session.user)
+		)
+	set_vendor_store(store or None)
+	return {"store": store or None}
+
+
+def _require_vendor() -> None:
+	if not (is_multi_store() and is_vendor()):
+		frappe.throw(_("Only vendor staff on the shared site can switch stores"), frappe.PermissionError)
+
+
 def _check_access():
 	if frappe.session.user == "Guest" or not has_app_access():
 		frappe.throw(_("You do not have access to Agamsale"), frappe.PermissionError)
@@ -701,12 +751,30 @@ def _count(doctype: str, filters: dict | list) -> int:
 	return rows[0].count if rows else 0
 
 
+def _session_store() -> str | None:
+	"""The store this session works in, or ``None`` (vendor staff who have not picked one yet)."""
+	try:
+		return get_store_name()
+	except NoStoreContext:
+		return None
+
+
 def _store_info() -> dict:
 	"""Store name for the sidebar header: the shop's domain without scheme or path."""
-	values = get_store_value(["platform", "enabled", "store_url", "shopify_auth_mode"], as_dict=True) or {}
+	values = (
+		get_store_value(
+			["name", "platform", "enabled", "store_url", "shopify_auth_mode", "shop_name", "tax_mode"],
+			as_dict=True,
+		)
+		or {}
+	)
 	url = (values.get("store_url") or "").strip().lower()
 	host = url.split("://", 1)[-1].split("/", 1)[0]
 	return {
+		"code": values.get("name"),
+		"title": values.get("shop_name") or values.get("name"),
+		# "None": the store charges no GST (orders show no GST line; invoices no GSTIN).
+		"tax_mode": values.get("tax_mode") or "GST",
 		"name": host.removesuffix(".myshopify.com") or None,
 		"platform": values.get("platform"),
 		"enabled": bool(values.get("enabled")),

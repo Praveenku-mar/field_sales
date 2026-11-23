@@ -205,6 +205,9 @@ def get_embedded_user() -> str:
 					"roles": [{"role": role} for role in EMBEDDED_ROLES],
 				}
 			).insert(ignore_permissions=True)
+		elif not frappe.db.get_value("User", email, "enabled"):
+			# Disabled by shop/redact after an uninstall: the reinstalled merchant's way back in.
+			frappe.db.set_value("User", email, "enabled", 1)
 		assign_user_to_store(email, store)
 		if not frappe.db.exists("Sales Rep", {"user": email}):
 			rep = frappe.get_doc(

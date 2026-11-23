@@ -1105,3 +1105,131 @@ class TestStoreLocale(StoreIsolationCase):
 		doc.tax_percent = 18
 		doc._apply_tax_mode()
 		self.assertEqual(doc.tax_percent, 18)
+
+
+class TestStoreLifecycle(StoreIsolationCase):
+	"""Phase 6: install, uninstall, shop/redact and reinstall of one store on the shared site."""
+
+	SHOP_B = "isb-isolation.myshopify.com"
+
+	def setUp(self):
+		super().setUp()
+		from field_sales.utils.store import set_current_store
+
+		frappe.db.savepoint("store_lifecycle")
+		self.addCleanup(set_current_store, None)
+		self.multi = patch.dict(frappe.conf, MULTI)
+		self.multi.start()
+		self.addCleanup(self.multi.stop)
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="store_lifecycle")
+		super().tearDown()
+
+	def install(self, shop):
+		from field_sales.shopify import oauth
+		from field_sales.utils.store import store_for_shop
+
+		with patch.object(oauth, "save_oauth_tokens"), patch.object(oauth, "enqueue_in_store"):
+			oauth.save_installation(shop, {"scope": ""})
+		return store_for_shop(shop)
+
+	def refused(self, user) -> bool:
+		from field_sales.utils.store import refuse_uninstalled_store_user
+
+		reset_request_caches()
+		try:
+			refuse_uninstalled_store_user(frappe._dict(user=user))
+		except frappe.AuthenticationError:
+			return True
+		return False
+
+	# -- install ------------------------------------------------------------------------
+
+	def test_shops_installing_in_turn_get_a_store_each(self):
+		first = self.install("islc-one.myshopify.com")
+		second = self.install("islc-two.myshopify.com")
+		self.assertTrue(first and second)
+		self.assertNotEqual(first, second)
+
+	def test_each_store_learns_its_shop_settings_whatever_the_match_flag(self):
+		from field_sales.sync import shop_settings
+		from field_sales.utils.store import use_store
+
+		frappe.db.set_value("Store", "ISB", {"enabled": 1, "match_shop_settings": 0})
+		with use_store("ISB"), patch.object(shop_settings, "sync_shop_settings", return_value={"changes": []}) as sync:
+			shop_settings.scheduled_sync()
+		sync.assert_called_once()
+
+		# Saving the Store queues the sync too, while its currency is unknown.
+		frappe.db.set_value("Store", "ISB", "shop_currency", None)
+		doc = frappe.get_doc("Store", "ISB")
+		with patch("field_sales.field_sales.doctype.store.store.enqueue_in_store") as enqueue:
+			doc.save()
+		self.assertEqual(enqueue.call_args.args[0], "field_sales.sync.shop_settings.scheduled_sync")
+		self.assertEqual(enqueue.call_args.kwargs["store"], "ISB")
+
+	def test_a_new_store_takes_its_tax_mode_from_the_shops_country(self):
+		from field_sales.sync.shop_settings import sync_shop_settings
+		from field_sales.utils.store import use_store
+
+		shop = {"currency": "INR", "timezone": "Asia/Kolkata"}
+		us_store = self.install("islc-us.myshopify.com")
+		in_store = self.install("islc-in.myshopify.com")
+		with use_store(us_store):
+			sync_shop_settings({**shop, "country": "US"})
+		with use_store(in_store):
+			sync_shop_settings({**shop, "country": "IN"})
+		self.assertEqual(frappe.db.get_value("Store", us_store, "tax_mode"), "None")
+		self.assertEqual(frappe.db.get_value("Store", in_store, "tax_mode"), "GST")
+		# A store with orders keeps the tax mode it has.
+		frappe.db.set_value("Store", "ISB", "tax_mode", "GST")
+		with use_store("ISB"):
+			sync_shop_settings({**shop, "country": "US"})
+		self.assertEqual(frappe.db.get_value("Store", "ISB", "tax_mode"), "GST")
+
+	# -- uninstall, redact, reinstall ---------------------------------------------------
+
+	def test_users_of_an_uninstalled_store_cannot_sign_in(self):
+		from field_sales.shopify.webhooks import handle_uninstalled
+		from field_sales.utils.store import use_store
+
+		with use_store("ISB"):
+			handle_uninstalled(self.SHOP_B)
+		self.assertTrue(self.refused(self.b.manager))
+		self.assertFalse(self.refused(self.a.manager))
+		self.assertFalse(self.refused(self.vendor))
+		self.multi.stop()
+		try:
+			self.assertFalse(self.refused(self.b.manager))  # single-store sites: as before
+		finally:
+			self.multi.start()
+
+		# Reinstalling lets them back in.
+		self.install(self.SHOP_B)
+		self.assertFalse(self.refused(self.b.manager))
+
+	def test_shop_redact_disables_only_that_stores_users(self):
+		from field_sales.shopify.privacy import shop_redact
+
+		result = shop_redact(frappe._dict(name="PRIV-TEST", store="ISB"), {})
+		self.assertGreater(result["users_disabled"], 0)
+		self.assertEqual(frappe.db.get_value("User", self.b.manager, "enabled"), 0)
+		self.assertEqual(frappe.db.get_value("User", self.a.manager, "enabled"), 1)
+		self.assertEqual(frappe.db.get_value("User", self.vendor, "enabled"), 1)
+
+	def test_a_reinstall_after_redaction_signs_the_merchant_in_again(self):
+		from field_sales.shopify.embedded import embedded_email, get_embedded_user
+		from field_sales.shopify.privacy import shop_redact
+		from field_sales.utils.store import use_store
+
+		frappe.db.set_value("Store", "ISB", "embedded_user", None)
+		with use_store("ISB"), patch("field_sales.shopify.embedded.safe_commit"):
+			user = get_embedded_user()
+		self.assertEqual(user, embedded_email("ISB"))
+		shop_redact(frappe._dict(name="PRIV-TEST", store="ISB"), {})
+		self.assertEqual(frappe.db.get_value("User", user, "enabled"), 0)
+
+		with use_store("ISB"), patch("field_sales.shopify.embedded.safe_commit"):
+			self.assertEqual(get_embedded_user(), user)
+		self.assertEqual(frappe.db.get_value("User", user, "enabled"), 1)

@@ -61,6 +61,10 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		use_store_timezone_for_users(get_store_name())
 
 	changes = []
+	tax_mode = _tax_mode_for_country(country)
+	if tax_mode:
+		set_store_value("tax_mode", tax_mode)
+		changes.append(_("Tax mode set to {0}").format(_(tax_mode)))
 	# Never on the shared site: one store's sync would change every other store's currency and dates.
 	if get_store_value("match_shop_settings") and not is_multi_store():
 		if currency and _apply_currency(currency):
@@ -71,6 +75,20 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 			frappe.clear_cache()
 
 	return {"changes": changes, "mismatch": get_mismatch(currency, timezone, locked)}
+
+
+def _tax_mode_for_country(country: str) -> str | None:
+	"""
+	On the shared site, a new store's tax mode from its shop's country: GST in India, else none.
+	Only while the store has no order yet (later it is the merchant's own setting); ``None`` when
+	nothing changes.
+	"""
+	if not country or not is_multi_store():
+		return None
+	if frappe.db.exists("Field Order", {"store": get_store_name()}):
+		return None
+	wanted = "GST" if country == "IN" else "None"
+	return wanted if get_store_value("tax_mode") != wanted else None
 
 
 def _locked_currency(currency: str) -> str | None:
@@ -201,7 +219,9 @@ def scheduled_sync(notify_user: str | None = None):
 	:param notify_user: User who saved the Store; told in a popup if something changed.
 	"""
 	settings = get_store_value(["enabled", "match_shop_settings"], as_dict=True)
-	if not settings or not settings.enabled or not settings.match_shop_settings:
+	# Match Store Currency and Timezone means "copy them into the site": a single-store choice.
+	# The shared site never copies, but each store must still learn its own (Phase 5 uses them).
+	if not settings or not settings.enabled or not (settings.match_shop_settings or is_multi_store()):
 		return
 
 	try:

@@ -28,7 +28,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.anonymise import anonymise as _redact
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import set_store_value
+from field_sales.utils.store import is_multi_store, is_vendor, set_store_value
 
 RETAILER_EXPORT_FIELDS = [
 	"name", "retailer_name", "owner_name", "phone", "email", "gstin", "retailer_type", "status",
@@ -235,7 +235,27 @@ def shop_redact(doc, payload: dict) -> dict:
 	clear_oauth_tokens(store)
 	set_store_value({"enabled": 0, "shopify_scopes": None}, store=store)
 	result["tokens_cleared"] = True
+	# The shared site only: there a store's users exist for that shop alone.
+	result["users_disabled"] = _disable_store_users(store) if is_multi_store() else 0
 	return result
+
+
+def _disable_store_users(store: str) -> int:
+	"""
+	Disable the users of ``store`` (its User Permission), never vendor staff. A reinstall
+	re-enables only the store's embedded user (``embedded.get_embedded_user``).
+	"""
+	users = frappe.get_all(
+		"User Permission", filters={"allow": "Store", "for_value": store}, pluck="user", distinct=True
+	)
+	disabled = 0
+	for user in users:
+		if user in ("Administrator", "Guest") or is_vendor(user):
+			continue
+		if frappe.db.get_value("User", user, "enabled"):
+			frappe.db.set_value("User", user, "enabled", 0)
+			disabled += 1
+	return disabled
 
 
 # ----------------------------------------------------------------------

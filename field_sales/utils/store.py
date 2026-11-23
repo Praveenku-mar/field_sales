@@ -251,6 +251,27 @@ def is_vendor(user: str | None = None) -> bool:
 	return "System Manager" in frappe.get_roles(user)
 
 
+def refuse_uninstalled_store_user(login_manager=None) -> None:
+	"""
+	``auth_hooks`` (every request, after cookie, API key and Shopify token sign-in) and
+	``on_session_creation`` (password login): on the shared site, a user of a store that removed
+	the app from Shopify (``uninstalled_on``) is signed out.
+
+	``uninstalled_on``, not ``enabled``: a failed token refresh also disables a store, and its
+	merchant must still open the app to reinstall. Reinstalling clears it. Vendor staff, Guest
+	and single-store sites are never refused.
+	"""
+	user = getattr(login_manager, "user", None) or getattr(frappe.session, "user", None)
+	if not user or user in ("Administrator", "Guest") or not is_multi_store():
+		return
+	store = user_store(user)
+	if store and frappe.get_cached_value(STORE_DOCTYPE, store, "uninstalled_on"):
+		frappe.throw(
+			_("This store has removed the app from Shopify. Reinstall it from Shopify to sign in again."),
+			frappe.AuthenticationError,
+		)
+
+
 def can_be_embedded_user(user: str | None, store: str) -> bool:
 	"""
 	Whether Shopify admin requests of ``store`` may sign in as ``user``: never Administrator,

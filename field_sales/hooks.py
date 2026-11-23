@@ -371,7 +371,13 @@ after_request = ["field_sales.shopify.embedded.after_request"]
 
 # Shopify admin (embedded app): requests with an App Bridge session token sign in as
 # the Store's embedded user. A no-op for every other request.
-auth_hooks = ["field_sales.shopify.session_token.authenticate"]
+# Shopify session-token sign-in first; then, for every signed-in request, users of a store that
+# removed the app are refused (shared site; utils/store.py -> refuse_uninstalled_store_user).
+auth_hooks = [
+	"field_sales.shopify.session_token.authenticate",
+	"field_sales.utils.store.refuse_uninstalled_store_user",
+]
+on_session_creation = ["field_sales.utils.store.refuse_uninstalled_store_user"]
 
 # Automatically update python controller files with type annotations for this app.
 export_python_type_annotations = True

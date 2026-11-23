@@ -126,7 +126,8 @@ class Store(Document):
 
 		Never runs inline, so wrong credentials can't block or fail the save.
 		"""
-		if not (self.enabled and self.platform == "Shopify" and self.match_shop_settings):
+		# On the shared site each store always learns its own (the flag only means "copy into the site").
+		if not (self.enabled and self.platform == "Shopify" and (self.match_shop_settings or is_multi_store())):
 			return
 		changed = (
 			any(

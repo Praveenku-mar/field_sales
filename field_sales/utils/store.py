@@ -228,6 +228,29 @@ def is_vendor(user: str | None = None) -> bool:
 	return "System Manager" in frappe.get_roles(user)
 
 
+def can_be_embedded_user(user: str | None, store: str) -> bool:
+	"""
+	Whether Shopify admin requests of ``store`` may sign in as ``user``: never Administrator,
+	Guest or vendor staff (they would see every store), nor a user of another store.
+	"""
+	if not user or user in ("Administrator", "Guest") or is_vendor(user):
+		return False
+	own = user_store(user)
+	return not own or own == store
+
+
+def can_change_connection(user: str | None = None) -> bool:
+	"""
+	Whether ``user`` may change a Store's connection, app credentials and embedded user: vendor
+	staff, and on a single-store site also its own System Managers (they own the whole site).
+	Store Admin never does.
+	"""
+	user = user or frappe.session.user
+	if is_vendor(user):
+		return True
+	return not is_multi_store() and "System Manager" in frappe.get_roles(user)
+
+
 def user_is_reachable(user: str) -> bool:
 	"""
 	A user the session user may see or adopt: anyone for vendor staff, else a user of their own

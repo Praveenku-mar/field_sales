@@ -36,6 +36,7 @@ from field_sales.shopify.session_token import InvalidSessionToken, decode
 from field_sales.utils.db import safe_commit
 from field_sales.utils.store import (
 	assign_user_to_store,
+	can_be_embedded_user,
 	get_store,
 	get_store_name,
 	get_store_value,
@@ -181,12 +182,13 @@ def get_embedded_user() -> str:
 	else ``shopify-admin@<site>`` (created on first use with the Sales Manager role and its own
 	Sales Rep, so the manager screens and Reports To work for it).
 	"""
-	user = get_store_value("embedded_user")
-	# Never sign a Shopify token in as Administrator, whatever the Store says.
-	if user and user not in ("Administrator", "Guest") and frappe.db.get_value("User", user, "enabled"):
+	store = get_store_name(required=True)
+	user = get_store_value("embedded_user", store=store)
+	# Checked again here, whatever the Store says (values written without validation, or older
+	# than it): never Administrator, vendor staff or another store's user.
+	if can_be_embedded_user(user, store) and frappe.db.get_value("User", user, "enabled"):
 		return user
 
-	store = get_store_name(required=True)
 	email = embedded_email(store)
 	previous_user = frappe.session.user
 	frappe.set_user("Administrator")

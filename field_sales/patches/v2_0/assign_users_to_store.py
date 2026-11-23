@@ -7,7 +7,8 @@ Put the users of a single-store site into its Store (one store per user).
 - Every enabled user holding Sales Manager / Field Sales Rep / Field Sales Retailer, or being the
   Store's ``embedded_user``, gets the store's default User Permission (``assign_user_to_store``).
 - The embedded user also gets the Store Admin role.
-- System Managers are left alone: with no store they are vendor staff.
+- System Managers are left alone, also when they hold one of those roles: with no store they
+  are vendor staff (on a single-store site, the site's owner).
 
 Only on a site with exactly one Store (a shared site's users are assigned as they are created).
 Safe to run again. Also run by ``install.after_install``.
@@ -39,7 +40,10 @@ def execute():
 	if embedded:
 		users.add(embedded)
 
-	for user in sorted(users):
+	system_managers = set(
+		frappe.get_all("Has Role", filters={"parenttype": "User", "role": "System Manager"}, pluck="parent")
+	)
+	for user in sorted(users - system_managers):
 		if user in ("Administrator", "Guest") or not frappe.db.get_value("User", user, "enabled"):
 			continue
 		other = frappe.db.get_value("User Permission", {"user": user, "allow": "Store"}, "for_value")

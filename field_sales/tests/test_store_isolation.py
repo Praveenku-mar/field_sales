@@ -381,7 +381,7 @@ class TestStoreAdminLimits(StoreIsolationCase):
 		self.assertEqual(frappe.db.get_value("Store", "ISA", "company_name"), "ISA Traders")
 
 	def test_the_embedded_user_is_never_administrator_or_another_stores_user(self):
-		for user in ("Administrator", self.b.manager):
+		for user in ("Administrator", self.b.manager, self.vendor):
 			doc = frappe.get_doc("Store", "ISA")
 			doc.embedded_user = user
 			with self.subTest(user=user), self.assertRaises(frappe.ValidationError):
@@ -395,6 +395,35 @@ class TestStoreAdminLimits(StoreIsolationCase):
 		# It commits once it has made the store's own embedded user; not in a test.
 		with use_store("ISA"), patch("field_sales.shopify.embedded.safe_commit"):
 			self.assertNotEqual(get_embedded_user(), "Administrator")
+
+	def test_a_shopify_token_never_signs_in_as_vendor_staff_or_another_stores_user(self):
+		from field_sales.shopify.embedded import get_embedded_user
+		from field_sales.utils.store import use_store
+
+		for user in (self.vendor, self.b.manager):
+			# Written without validation, as an older value or a direct write would be.
+			frappe.db.set_value("Store", "ISA", "embedded_user", user)
+			with self.subTest(user=user), use_store("ISA"), patch("field_sales.shopify.embedded.safe_commit"):
+				self.assertNotEqual(get_embedded_user(), user)
+
+	def test_a_single_store_sites_system_manager_still_changes_the_connection(self):
+		from field_sales.tests.store_fixtures import make_user
+
+		# The site owner: System Manager and Sales Manager, so assigned to the store.
+		owner = make_user("isa.owner@example.com", ["System Manager", "Sales Manager"])
+		assign_user_to_store(owner, "ISA")
+		self.as_user(owner)
+		doc = frappe.get_doc("Store", "ISA")
+		doc.shopify_api_version = "2026-10"
+		doc.save()
+		self.assertEqual(frappe.db.get_value("Store", "ISA", "shopify_api_version"), "2026-10")
+
+		# On the shared site the same user is a merchant's, not the vendor's.
+		with patch.dict(frappe.conf, MULTI):
+			doc = frappe.get_doc("Store", "ISA")
+			doc.shopify_api_version = "2026-07"
+			with self.assertRaises(frappe.PermissionError):
+				doc.save()
 
 	def test_rep_performance_shows_only_the_own_stores_reps(self):
 		from field_sales.field_sales.report.rep_performance.rep_performance import get_reps_in_scope

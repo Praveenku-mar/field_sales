@@ -9,11 +9,11 @@ from frappe.utils.password import remove_encrypted_password
 from field_sales.connectors import CONNECTORS
 from field_sales.utils.store import (
 	CODE_PATTERN,
+	can_be_embedded_user,
+	can_change_connection,
 	clear_store_cache,
 	enqueue_in_store,
 	is_multi_store,
-	is_vendor,
-	user_store,
 )
 
 # Set by the Shopify install flow: store_url is then filled by it, not typed by the user.
@@ -72,10 +72,11 @@ class Store(Document):
 	def _guard_vendor_fields(self):
 		"""
 		Store Admin may edit its Store, but not who embedded requests sign in as, nor the
-		connection and app credentials: only vendor staff (``is_vendor()``) change those. The
-		install flow saves as Administrator; code paths write them with ``set_store_value``.
+		connection and app credentials: only ``can_change_connection()`` users (vendor staff; on a
+		single-store site also its System Managers) change those. The install flow saves as
+		Administrator; code paths write them with ``set_store_value``.
 		"""
-		if self.is_new() or is_vendor():
+		if self.is_new() or can_change_connection():
 			return
 		before = self.get_doc_before_save()
 		if not before:
@@ -93,15 +94,13 @@ class Store(Document):
 				)
 
 	def _validate_embedded_user(self):
-		"""Embedded requests run as this user: never Administrator, Guest or another store's user."""
+		"""
+		Embedded requests run as this user: never Administrator, Guest, vendor staff (they see every
+		store) or another store's user (``can_be_embedded_user``).
+		"""
 		user = self.embedded_user
-		if not user:
-			return
-		if user in ("Administrator", "Guest"):
-			frappe.throw(_("{0} cannot be the Embedded User").format(user))
-		own = user_store(user)
-		if own and not self.is_new() and own != self.name:
-			frappe.throw(_("{0} belongs to another store").format(user))
+		if user and not can_be_embedded_user(user, self.name):
+			frappe.throw(_("{0} cannot be this store's Embedded User").format(user))
 
 	def _validate_store_code(self):
 		self.store_code = (self.store_code or "").strip().upper()

@@ -24,7 +24,7 @@ from field_sales.permissions import MANAGER_ROLES, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
 from field_sales.utils.db import safe_commit
 from field_sales.utils.money import store_currency
-from field_sales.utils.store import for_each_store, store_filters, store_today
+from field_sales.utils.store import for_each_store, in_store_of, store_filters, store_today
 
 
 def generate_monthly_statements():
@@ -73,6 +73,7 @@ def build_statement(sales_rep: str, period_start, period_end):
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Commission Statement", "name")
 def regenerate_statement(name: str) -> dict:
 	"""
 	Rebuild a Draft statement from the current entries (after refunds, new earnings or manual changes).
@@ -104,6 +105,7 @@ def regenerate_statement(name: str) -> dict:
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Commission Statement", "name")
 def mark_paid(name: str, paid_on: str | None = None, payment_reference: str | None = None) -> dict:
 	"""
 	Record payment of an Approved statement.

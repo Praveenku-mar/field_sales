@@ -11,6 +11,7 @@ from field_sales.utils.limits import SALES_REPS, check_limit
 from field_sales.utils.store import (
 	assign_user_to_store,
 	get_store_value,
+	in_own_store,
 	is_vendor,
 	store_scope,
 	user_store,
@@ -91,6 +92,7 @@ def sync_sales_rep_roles(user_name: str, is_sales_manager: bool, is_sales_rep: b
 
 
 class SalesRep(Document):
+	@in_own_store
 	def validate(self):
 		if self.max_discount_pct is not None and not 0 <= flt(self.max_discount_pct) <= 100:
 			frappe.throw(_("Max Discount % must be between 0 and 100."))
@@ -168,6 +170,7 @@ class SalesRep(Document):
 				frappe.PermissionError,
 			)
 
+	@in_own_store
 	def on_update(self):
 		# The hierarchy may have changed; later checks in this request must see it.
 		clear_allowed_reps_cache()
@@ -179,5 +182,6 @@ class SalesRep(Document):
 	def sync_user_roles(self):
 		sync_sales_rep_roles(self.user, bool(cint(self.sales_manager)), bool(cint(self.sales_rep)))
 
+	@in_own_store
 	def on_trash(self):
 		clear_allowed_reps_cache()

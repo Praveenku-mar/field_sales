@@ -28,7 +28,7 @@ from field_sales.commission.statements import (
 from field_sales.permissions import get_allowed_reps, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
 from field_sales.utils.money import store_currency
-from field_sales.utils.store import store_today
+from field_sales.utils.store import in_store_of, store_today
 
 PERIODS = ("this_month", "last_month", "this_year", "all")
 MAX_PAGE_LENGTH = 2500
@@ -386,6 +386,7 @@ def assign_commission_plan(
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Sales Rep", "sales_rep")
 def create_adjustment(
 	sales_rep: str,
 	amount: float,

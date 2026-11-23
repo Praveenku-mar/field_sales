@@ -40,7 +40,7 @@ from field_sales.shopify.config import OAUTH_MODE
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.db import safe_commit
 from field_sales.utils.money import record_currency, store_currency
-from field_sales.utils.store import get_store, is_multi_store
+from field_sales.utils.store import get_store, in_store_of, is_multi_store
 from field_sales.utils.urls import public_url
 
 API_BASE = "https://api.razorpay.com/v1"
@@ -333,6 +333,7 @@ def payment_links_disabled_reason() -> str | None:
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Field Order", "field_order")
 def create_link_for_order(field_order: str, replace: bool = False) -> dict:
 	"""
 	Create (or return the still-valid) Razorpay payment link for a submitted Field Order.

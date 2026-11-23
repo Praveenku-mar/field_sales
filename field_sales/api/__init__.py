@@ -49,6 +49,8 @@ from field_sales.utils.geo import (
 from field_sales.utils.limits import SALES_REPS, check_limit
 from field_sales.utils.store import (
 	get_store_value,
+	in_store_of,
+	record_stores,
 	set_store_value,
 	store_mail_args,
 	store_today,
@@ -718,7 +720,9 @@ def sync_retailers(names: str | list) -> dict:
 	for name in names:
 		frappe.has_permission("Retailer", "write", name, throw=True)
 
-	get_connector()  # fails fast if the store is disabled
+	# Fails fast if a store is disabled: each retailer's own store (each push runs in it).
+	for store in record_stores("Retailer", names):
+		get_connector(store=store)
 	push_retailers(names)
 	return {"message": _("Sync to store queued for {0} retailer(s)").format(len(names))}
 
@@ -741,6 +745,7 @@ def _check_visit_date(doc) -> None:
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Visit", "visit")
 def check_in(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
@@ -952,6 +957,7 @@ RETRY_SYNC_MAX_ORDERS = 500
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Field Order", "field_order")
 def retry_sync(field_order: str) -> dict:
 	"""Queue another push of a submitted Field Order whose sync failed."""
 	_check_retry(field_order)
@@ -978,7 +984,9 @@ def retry_sync_orders(field_orders: str | list) -> dict:
 		frappe.throw(_("Retry at most {0} orders at a time").format(RETRY_SYNC_MAX_ORDERS))
 	for name in names:
 		_check_retry(name)
-	get_connector()  # fails fast if the store is disabled
+	# Fails fast if a store is disabled: each order's own store (vendor staff may select several).
+	for store in record_stores("Field Order", names):
+		get_connector(store=store)
 	for name in names:
 		enqueue_push_order(name)
 	return {"queued": len(names), "message": _("Retry queued for {0} order(s)").format(len(names))}
@@ -1001,6 +1009,7 @@ def _check_retry(field_order: str) -> None:
 
 
 @frappe.whitelist()
+@in_store_of("Field Order", "field_order")
 def get_store_order_url(field_order: str) -> str | None:
 	"""Admin URL of the synced order (or its draft) on the store, for "Open in Store"."""
 	frappe.has_permission("Field Order", "read", field_order, throw=True)
@@ -1147,6 +1156,7 @@ def get_retailer_cities(txt: str | None = None) -> list[str]:
 
 
 @frappe.whitelist()
+@in_store_of("Retailer", "retailer")
 def get_retailer_summary(retailer: str) -> dict:
 	"""
 	Last 30 days at a retailer, for the summary bar on its form.

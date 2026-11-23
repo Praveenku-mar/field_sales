@@ -13,7 +13,7 @@ from field_sales.sync.customers import SYNCED_FIELDS, enqueue_push
 from field_sales.utils.geo import has_coords
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.phone import example_number, is_valid
-from field_sales.utils.store import assign_user_to_store, get_store_value
+from field_sales.utils.store import assign_user_to_store, get_store_value, in_own_store
 
 # Written only by the server: the customer sync (_record_result) and Visit (last_visit).
 SERVER_FIELDS = (
@@ -40,6 +40,7 @@ class Retailer(Document):
 		if not self.sales_rep and not is_admin() and not self.flags.ignore_sync:
 			self.sales_rep = get_own_rep()
 
+	@in_own_store
 	def validate(self):
 		if not self.country and self.is_new():
 			self.country = get_default_country()
@@ -88,6 +89,7 @@ class Retailer(Document):
 				frappe.PermissionError,
 			)
 
+	@in_own_store
 	def on_update(self):
 		# A retailer's login belongs to the retailer's store (refuses a user of another store).
 		if self.user and self.store:

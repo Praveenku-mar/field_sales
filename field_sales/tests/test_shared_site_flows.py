@@ -282,3 +282,86 @@ class TestOrderCurrency(SharedSiteFlowCase):
 		with self.assertRaises(ConnectorError) as raised:
 			conn._get_currency(frappe.get_doc("Field Order", order.name))
 		self.assertEqual(raised.exception.code, "CURRENCY_MISMATCH")
+
+
+class TestVendorActsOnStoreRecords(SharedSiteFlowCase):
+	"""
+	Vendor staff in Desk have no store of their own: every action on one record runs in that
+	record's store (never "Several stores exist; no store was given", never another store).
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self.as_user(self.vendor)
+		self.used = []
+
+	def connector(self, *args, store=None, **kwargs):
+		from field_sales.utils.store import current_store
+
+		self.used.append(store or current_store())
+		conn = MagicMock()
+		conn.settings = frappe._dict(platform="Shopify", order_mode="Draft", enabled=1)
+		conn.get_order_url.return_value = "https://shop.example/admin/orders/1"
+		return conn
+
+	def test_order_actions_use_the_orders_store(self):
+		from field_sales import api
+		from field_sales.sync import orders
+
+		frappe.db.set_value(
+			"Field Order",
+			self.b.order,
+			{"docstatus": 1, "sync_status": "Failed", "external_order_id": "9001"},
+		)
+		with (
+			patch.object(api, "get_connector", side_effect=self.connector),
+			patch.object(api, "enqueue_push_order"),
+			patch.object(orders, "enqueue_in_store"),
+		):
+			api.retry_sync(self.b.order)
+			self.assertEqual(api.get_store_order_url(self.b.order), "https://shop.example/admin/orders/1")
+			api.retry_sync_orders([self.b.order])
+		self.assertEqual(set(self.used), {"ISB"}, self.used)
+
+	def test_bulk_actions_check_each_records_own_store(self):
+		from field_sales import api
+
+		with patch.object(api, "get_connector", side_effect=self.connector), patch.object(api, "push_retailers"):
+			api.sync_retailers([self.a.retailer, self.b.retailer])
+		self.assertEqual(sorted(self.used), ["ISA", "ISB"])
+
+	def test_record_views_never_need_a_store_of_their_own(self):
+		from field_sales import api, frontend_api
+		from field_sales.commission import statements
+		from field_sales.utils.store import NoStoreContext
+
+		calls = {
+			"get_retailer_summary": lambda: api.get_retailer_summary(self.b.retailer),
+			"get_order_sync_info": lambda: frontend_api.get_order_sync_info(self.b.order),
+			"get_order_payment_info": lambda: frontend_api.get_order_payment_info(self.b.order),
+			"get_product_activity": lambda: frontend_api.get_product_activity(self.b.product),
+			"get_rep_month_stats": lambda: frontend_api.get_rep_month_stats(self.b.rep),
+			"regenerate_statement": lambda: statements.regenerate_statement(self.b.commission_statement),
+		}
+		for label, call in calls.items():
+			with self.subTest(label):
+				try:
+					call()
+				except NoStoreContext:
+					self.fail(f"{label} looked for the user's store instead of the record's")
+				except (frappe.ValidationError, frappe.PermissionError):
+					pass  # refused for its own reasons (e.g. statement state), not for a missing store
+				finally:
+					frappe.db.rollback(save_point="shared_site_flows")
+					frappe.db.savepoint("shared_site_flows")
+
+	def test_saving_another_stores_order_in_desk_uses_its_store(self):
+		from field_sales.utils.store import NoStoreContext
+
+		order = frappe.get_doc("Field Order", self.b.order)
+		order.remarks = "checked by support"
+		try:
+			order.save()
+		except NoStoreContext:
+			self.fail("the order's validation looked for the user's store instead of its own")
+		self.assertEqual(frappe.db.get_value("Field Order", self.b.order, "remarks"), "checked by support")

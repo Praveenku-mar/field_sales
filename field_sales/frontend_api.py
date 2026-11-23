@@ -31,6 +31,7 @@ from field_sales.utils.store import (
 	NoStoreContext,
 	get_store_name,
 	get_store_value,
+	in_store_of,
 	is_multi_store,
 	is_vendor,
 	set_vendor_store,
@@ -330,6 +331,7 @@ def get_dashboard() -> dict:
 
 
 @frappe.whitelist()
+@in_store_of("Platform Product", "product")
 def get_product_activity(product: str) -> dict:
 	"""
 	A product's last 30 days of sales, its recent orders and its sibling variants.
@@ -411,6 +413,7 @@ def _product_sales(product: str, since) -> dict:
 
 
 @frappe.whitelist()
+@in_store_of("Field Order", "field_order")
 def get_order_sync_info(field_order: str) -> dict:
 	"""
 	What the order page's sync panel shows beyond the order's own fields.
@@ -452,6 +455,7 @@ def get_order_sync_info(field_order: str) -> dict:
 
 
 @frappe.whitelist()
+@in_store_of("Sales Rep", "sales_rep")
 def get_rep_month_stats(sales_rep: str | None = None) -> dict:
 	"""
 	Month-to-date numbers per Sales Rep the user can see (one rep with ``sales_rep``),
@@ -607,6 +611,7 @@ def _team_this_month(today: str) -> list[dict]:
 
 
 @frappe.whitelist(methods=["GET"])
+@in_store_of("Field Order", "field_order")
 def get_order_payment_info(field_order: str) -> dict:
 	"""
 	Order Detail's Payment card: the order's payment fields, whether Razorpay is enabled,

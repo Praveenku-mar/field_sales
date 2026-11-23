@@ -24,7 +24,7 @@ from field_sales.sync.stock import (
 from field_sales.utils.guards import is_system_manager, keep_server_fields
 from field_sales.utils.limits import ORDERS_PER_MONTH, check_limit
 from field_sales.utils.money import record_currency
-from field_sales.utils.store import order_series
+from field_sales.utils.store import in_own_store, order_series
 
 # May set a line's rate other than the product's price.
 PRICE_OVERRIDE_ROLES = MANAGER_ROLES
@@ -76,6 +76,7 @@ class FieldOrder(Document):
 		if series:
 			self.name = make_autoname(series, doc=self)
 
+	@in_own_store
 	def validate(self):
 		self._keep_sync_fields()
 		keep_server_fields(self, PAYMENT_FIELDS)
@@ -92,6 +93,7 @@ class FieldOrder(Document):
 		self._validate_amounts()
 		self._validate_discount()
 
+	@in_own_store
 	def before_submit(self):
 		# Server time, never the client's: the plan's monthly order limit counts by it, and order_date
 		# is an ordinary editable date (an order dated last month would escape this month's count).
@@ -100,6 +102,7 @@ class FieldOrder(Document):
 		self._apply_live_stock()
 		self._block_on_stock_warning()
 
+	@in_own_store
 	def on_update(self):
 		# A draft counts as an order taken on the visit, even while stock is short.
 		update_order_taken(self.visit)
@@ -107,14 +110,17 @@ class FieldOrder(Document):
 		if before and before.visit and before.visit != self.visit:
 			update_order_taken(before.visit)
 
+	@in_own_store
 	def before_update_after_submit(self):
 		# validate() does not run for "Update" on a submitted order.
 		keep_server_fields(self, PAYMENT_FIELDS)
 
+	@in_own_store
 	def on_submit(self):
 		self.db_set("sync_status", "Pending")
 		enqueue_push_order(self.name)
 
+	@in_own_store
 	def before_cancel(self):
 		if self.payment_status in ("Paid", "Partially Paid"):
 			frappe.throw(
@@ -125,6 +131,7 @@ class FieldOrder(Document):
 			)
 		self._settle_store_order_before_cancel()
 
+	@in_own_store
 	def on_cancel(self):
 		self.db_set("sync_status", "Draft")
 		self.db_set("client_temp_key", None, update_modified=False)
@@ -205,6 +212,7 @@ class FieldOrder(Document):
 			# A draft completed on the store that link_completed_drafts() has not linked yet.
 			self.db_set("external_order_id", order_id, update_modified=False)
 
+	@in_own_store
 	def on_trash(self):
 		update_order_taken(self.visit, exclude=self.name)
 

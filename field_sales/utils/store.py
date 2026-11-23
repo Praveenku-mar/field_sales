@@ -21,8 +21,10 @@ site, where Razorpay and Confirmed order mode are off (App Store requirement 1.1
 from __future__ import annotations
 
 import datetime
+import functools
+import inspect
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -94,6 +96,56 @@ def enqueue_in_store(method: str, store: str | None = None, **kwargs):
 def record_store(doctype: str, name: str) -> str | None:
 	"""The ``store`` of one record (for queueing a job about it in its own store)."""
 	return frappe.db.get_value(doctype, name, "store")
+
+
+def in_record_store(doctype: str, name: str | None):
+	"""
+	A ``with`` block that works in the store of one record (``doctype`` / ``name``); unchanged when
+	there is no such record. Code acting on one record must use that record's store, not the
+	signed-in user's: vendor staff in Desk have none, and may have picked another in the app.
+	"""
+	store = record_store(doctype, name) if name else None
+	return use_store(store) if store else nullcontext()
+
+
+def in_store_of(doctype: str, param: str):
+	"""
+	Endpoint decorator (below ``@frappe.whitelist()``): run inside the store of the ``doctype``
+	record named by the argument ``param``. Permission checks are unaffected: they follow the user
+	(``store_scope``), never the current store.
+	"""
+
+	def decorate(fn):
+		signature = inspect.signature(fn)
+
+		@functools.wraps(fn)
+		def wrapper(*args, **kwargs):
+			name = signature.bind_partial(*args, **kwargs).arguments.get(param)
+			with in_record_store(doctype, name if isinstance(name, str) else None):
+				return fn(*args, **kwargs)
+
+		return wrapper
+
+	return decorate
+
+
+def in_own_store(method):
+	"""Document method decorator: run inside the document's own store (``self.store``)."""
+
+	@functools.wraps(method)
+	def wrapper(self, *args, **kwargs):
+		store = self.get("store")
+		with use_store(store) if store else nullcontext():
+			return method(self, *args, **kwargs)
+
+	return wrapper
+
+
+def record_stores(doctype: str, names: list[str]) -> set[str]:
+	"""The stores of several records (for checks per store in a bulk action)."""
+	if not names:
+		return set()
+	return set(frappe.get_all(doctype, filters={"name": ("in", list(names))}, pluck="store")) - {None, ""}
 
 
 def run_in_store(store_method: str, store_name: str | None = None, **kwargs):

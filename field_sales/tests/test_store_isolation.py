@@ -1271,6 +1271,26 @@ class TestStoreLifecycle(StoreIsolationCase):
 			sync_shop_settings({"currency": "INR", "timezone": "Asia/Kolkata", "country": "IN"})
 		self.assertEqual(frappe.db.get_value("Store", store, "tax_mode"), "None")
 
+	def test_a_new_shop_installs_from_the_shopify_admin_as_guest(self):
+		from field_sales.shopify import embedded, oauth
+		from field_sales.utils.store import store_for_shop
+
+		# The embedded first load: no signed-in user, a valid Shopify token, no Store yet.
+		shop = "islc-guest.myshopify.com"
+		self.as_user("Guest")
+		with (
+			patch.object(embedded, "_exchange", return_value={"access_token": "t", "scope": ""}),
+			patch.object(oauth, "save_oauth_tokens"),
+			patch.object(oauth, "enqueue_in_store"),
+			patch.object(embedded, "safe_commit"),
+			patch("field_sales.connectors.shopify.safe_commit", create=True),
+		):
+			embedded.ensure_offline_token(shop, "id-token")
+		store = store_for_shop(shop)
+		self.assertTrue(store)
+		# Its install is logged in its own store, though no user is signed in.
+		self.assertTrue(frappe.db.exists("Sync Log", {"store": store, "operation": "Install", "status": "Success"}))
+
 	# -- uninstall, redact, reinstall ---------------------------------------------------
 
 	def test_users_of_an_uninstalled_store_cannot_sign_in(self):

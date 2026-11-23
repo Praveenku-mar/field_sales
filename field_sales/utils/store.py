@@ -601,11 +601,18 @@ def stamp_store(doc, method: str | None = None) -> None:
 	"""
 	``before_insert`` for store-linked doctypes: fill ``store`` from the context when empty, and
 	refuse a record for another store than the user's own (vendor staff may create for any).
+
+	Guest is not checked: its records are the site's own work (a Shopify install, a webhook,
+	their logs), made in the store the request was routed to; Guest cannot insert through the API
+	(role permissions refuse it). On the shared site Guest belongs to no store, so checking it
+	would refuse every install.
 	"""
 	if not doc.get("store"):
 		# A record of a rep belongs to the rep's store, else to the current store.
 		rep = doc.get("sales_rep") if doc.meta.has_field("sales_rep") else None
 		doc.store = (frappe.db.get_value("Sales Rep", rep, "store") if rep else None) or get_store_name()
+	if frappe.session.user in (None, "", "Guest"):
+		return
 	scope = store_scope()
 	if scope is not None and doc.store != scope:
 		frappe.throw(

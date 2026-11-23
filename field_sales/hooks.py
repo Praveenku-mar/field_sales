@@ -245,6 +245,7 @@ doc_events = {
 			# Links into another store are refused (utils/store.py -> check_store_links).
 			"validate": [
 				"field_sales.utils.store.check_store_links",
+				*(["field_sales.utils.money.keep_currency"] if doctype in _PRICED else []),
 				*(["field_sales.permissions.check_owner_change"] if doctype in _OWNER_CHECKED else []),
 			],
 		}

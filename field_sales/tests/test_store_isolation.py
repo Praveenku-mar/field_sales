@@ -1250,8 +1250,25 @@ class TestStoreLifecycle(StoreIsolationCase):
 		with use_store(store):
 			sync_shop_settings(shop)  # first sync: GST from the country
 			self.assertEqual(frappe.db.get_value("Store", store, "tax_mode"), "GST")
-			frappe.db.set_value("Store", store, "tax_mode", "None")  # not GST-registered
+			# The merchant (not GST-registered) chooses no tax in Settings.
+			doc = frappe.get_doc("Store", store)
+			doc.tax_mode = "None"
+			doc.save(ignore_permissions=True)
 			sync_shop_settings(shop)  # the daily sync
+		self.assertEqual(frappe.db.get_value("Store", store, "tax_mode"), "None")
+
+	def test_a_tax_choice_made_before_the_first_successful_sync_is_kept(self):
+		from field_sales.sync.shop_settings import sync_shop_settings
+		from field_sales.utils.store import use_store
+
+		# The install's shop settings sync failed, so the store has no country yet.
+		store = self.install("islc-early-choice.myshopify.com")
+		self.assertFalse(frappe.db.get_value("Store", store, "shop_country"))
+		doc = frappe.get_doc("Store", store)
+		doc.tax_mode = "None"
+		doc.save(ignore_permissions=True)
+		with use_store(store):
+			sync_shop_settings({"currency": "INR", "timezone": "Asia/Kolkata", "country": "IN"})
 		self.assertEqual(frappe.db.get_value("Store", store, "tax_mode"), "None")
 
 	# -- uninstall, redact, reinstall ---------------------------------------------------
@@ -1376,3 +1393,14 @@ class TestVendorStoreSwitch(StoreIsolationCase):
 		self.assertEqual(session["currency"], "INR")
 		self.assertEqual(session["store"]["tax_mode"], "None")
 		self.assertFalse(session["is_vendor"])
+
+	def test_a_store_admin_signed_in_with_a_password_reaches_the_store_settings(self):
+		from field_sales.shopify import merchant_settings
+
+		# On the shared site Settings always uses the merchant endpoints (no Shopify token here).
+		self.as_user(self.a.admin)
+		settings = merchant_settings.get_store_settings()
+		self.assertTrue(settings)
+		# A plain manager without the shop's session token still cannot.
+		self.as_user(self.a.manager)
+		self.assertRaises(frappe.PermissionError, merchant_settings.get_store_settings)

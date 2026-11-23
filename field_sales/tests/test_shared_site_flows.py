@@ -244,3 +244,41 @@ class TestCrossStoreLinks(SharedSiteFlowCase):
 		)
 		self.assertRaises(frappe.PermissionError, visit.insert)
 		self.assert_store_b_untouched()
+
+
+class TestOrderCurrency(SharedSiteFlowCase):
+	"""An order's currency is its store's: a client cannot choose it, on insert or later."""
+
+	def test_a_rep_cannot_choose_an_orders_currency(self):
+		from field_sales.connectors import ConnectorError, get_connector
+		from field_sales.utils.store import store_today
+
+		for code in ("EUR",):
+			if not frappe.db.exists("Currency", code):
+				frappe.get_doc({"doctype": "Currency", "currency_name": code, "enabled": 1}).insert()
+		frappe.db.set_value("Store", "ISA", "shop_currency", "INR")
+		self.as_user(self.a.rep_user)
+		order = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"currency": "EUR",  # sent by the client
+				"retailer": self.a.retailer,
+				"sales_rep": self.a.rep,
+				"order_date": store_today("ISA"),
+				"items": [{"product": self.a.product, "qty": 1, "rate": 100}],
+			}
+		).insert()
+		self.assertEqual(order.currency, "INR")
+
+		order.reload()
+		order.currency = "EUR"
+		order.save()
+		self.assertEqual(frappe.db.get_value("Field Order", order.name, "currency"), "INR")
+
+		# The shop has since moved to EUR: the push is refused, prices are never sent as EUR.
+		frappe.set_user("Administrator")
+		conn = get_connector(require_enabled=False, store="ISA")
+		conn._currency = "EUR"
+		with self.assertRaises(ConnectorError) as raised:
+			conn._get_currency(frappe.get_doc("Field Order", order.name))
+		self.assertEqual(raised.exception.code, "CURRENCY_MISMATCH")

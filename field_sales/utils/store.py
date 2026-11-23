@@ -147,8 +147,11 @@ def _release_savepoint(save_point: str) -> None:
 	"""Release a finished store's savepoint (gone already if ``fn`` committed)."""
 	try:
 		frappe.db.release_savepoint(save_point)
-	except Exception:
-		pass  # fn committed: the transaction, and with it the savepoint, has ended
+	except Exception as e:
+		# fn committed: the transaction, and with it the savepoint, has ended. Anything else (a
+		# lost connection) is a real error.
+		if "savepoint" not in str(e).lower():
+			raise
 
 
 def _undo_store_work(save_point: str) -> None:

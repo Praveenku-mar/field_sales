@@ -725,7 +725,10 @@ def switch_store(store: str | None = None) -> dict:
 		if not frappe.db.exists("Store", store):
 			frappe.throw(_("Store {0} not found").format(store), frappe.DoesNotExistError)
 		frappe.get_doc("Store", store).add_comment(
-			"Info", _("{0} opened this store in Agamsale (vendor support).").format(frappe.session.user)
+			"Info",
+			_("{0} opened this store in Agamsale (vendor support) from {1}.").format(
+				frappe.session.user, getattr(frappe.local, "request_ip", None) or _("an unknown address")
+			),
 		)
 	set_vendor_store(store or None)
 	return {"store": store or None}

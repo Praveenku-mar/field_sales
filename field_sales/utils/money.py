@@ -38,12 +38,12 @@ def fill_currency(doc, method: str | None = None) -> None:
 	"""
 	``before_insert`` (after ``stamp_store``) of Field Order and Platform Product: their currency.
 
-	On the shared site a new store's currency is not known until its first shop settings sync;
-	until then the record is left without one (never the site's, which would stay wrong), and
-	``fill_store_currency`` gives it the store's once that sync saves it.
+	Always the store's, whatever the request sent: "read only" is a form setting only, and an
+	order whose currency a client chose would pass the push's currency check with its prices
+	unconverted. On the shared site a new store's currency is not known until its first shop
+	settings sync; until then the record is left without one (never the site's, which would stay
+	wrong), and ``fill_store_currency`` gives it the store's once that sync saves it.
 	"""
-	if doc.get("currency"):
-		return
 	if is_multi_store():
 		try:
 			doc.currency = get_store_value("shop_currency", store=doc.get("store")) or None
@@ -51,6 +51,18 @@ def fill_currency(doc, method: str | None = None) -> None:
 			doc.currency = None
 		return
 	doc.currency = site_currency()
+
+
+def keep_currency(doc, method: str | None = None) -> None:
+	"""
+	``validate`` of Field Order and Platform Product: a saved record's currency never changes
+	through a save (only ``fill_store_currency`` fills a missing one, directly in the database).
+	"""
+	if doc.is_new():
+		return
+	before = doc.get_doc_before_save()
+	if before and (doc.get("currency") or None) != (before.get("currency") or None):
+		doc.currency = before.get("currency")
 
 
 def fill_store_currency(store: str, currency: str) -> None:

@@ -53,8 +53,6 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 	if country:
 		values["shop_country"] = country
 	zone_changed = bool(timezone) and timezone != get_store_value("shop_timezone")
-	# The first sync of a store: its tax mode and missing record currencies come from it.
-	first_sync = not get_store_value("shop_country")
 	locked = _locked_currency(currency)
 	if locked:
 		values.pop("shop_currency")
@@ -66,8 +64,7 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		fill_store_currency(get_store_name(), values["shop_currency"])
 
 	changes = []
-	# Only at the first sync: afterwards the tax mode is the merchant's own choice.
-	tax_mode = _tax_mode_for_country(country) if first_sync else None
+	tax_mode = _tax_mode_for_country(country)
 	if tax_mode:
 		set_store_value("tax_mode", tax_mode)
 		changes.append(_("Tax mode set to {0}").format(_(tax_mode)))
@@ -86,10 +83,10 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 def _tax_mode_for_country(country: str) -> str | None:
 	"""
 	On the shared site, a new store's tax mode from its shop's country: GST in India, else none.
-	Only while the store has no order yet (later it is the merchant's own setting); ``None`` when
-	nothing changes.
+	Only until someone chose a tax mode (``tax_mode_chosen``, set by ``Store`` when it changes
+	there) and while the store has no order; ``None`` when nothing changes.
 	"""
-	if not country or not is_multi_store():
+	if not country or not is_multi_store() or get_store_value("tax_mode_chosen"):
 		return None
 	if frappe.db.exists("Field Order", {"store": get_store_name()}):
 		return None

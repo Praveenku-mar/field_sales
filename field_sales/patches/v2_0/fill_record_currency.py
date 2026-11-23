@@ -31,17 +31,18 @@ def execute():
 
 def _fill(doctype: str, where: dict | None, currency: str) -> None:
 	condition, values = "(currency is null or currency = '')", {"currency": currency, "batch": BATCH}
+	filters = {"currency": ("is", "not set")}
 	if where:
 		condition += " and store = %(store)s"
 		values["store"] = where["store"]
+		filters["store"] = where["store"]
 	else:
 		condition += " and (store is null or store = '')"
-	while True:
+		filters["store"] = ("is", "not set")
+	# Count what is left rather than read the driver's row count: portable, and it always ends.
+	while frappe.db.count(doctype, filters):
 		frappe.db.sql(
 			f"update `tab{doctype}` set currency = %(currency)s where {condition} limit %(batch)s",
 			values,
 		)
-		changed = frappe.db.sql("select row_count()")[0][0]
 		frappe.db.commit()
-		if not changed:
-			break

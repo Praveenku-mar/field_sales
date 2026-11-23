@@ -21,7 +21,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-from field_sales.permissions import MANAGER_ROLES
+from field_sales.permissions import MANAGER_ROLES, STORE_ADMIN_ROLE
 from field_sales.utils.db import safe_commit
 from field_sales.utils.guards import is_system_manager
 from field_sales.utils.store import get_store, get_store_value, is_multi_store
@@ -91,8 +91,12 @@ MERCHANT_EMAIL_ACCOUNTS_KEY = "field_sales_merchant_email_accounts"
 
 
 def _require_merchant() -> None:
-	"""A System Manager, or a manager on a request signed by the connected shop's session token."""
-	if is_system_manager():
+	"""
+	A System Manager; the store's Store Admin (the merchant's owner, also on a password login: on
+	the shared site Settings always uses these endpoints, and a Store Admin only reaches their own
+	store); or a manager on a request signed by the connected shop's session token.
+	"""
+	if is_system_manager() or STORE_ADMIN_ROLE in frappe.get_roles():
 		return
 	shop = getattr(frappe.local, "shopify_shop", None)
 	store = (get_store_value("store_url") or "").lower()

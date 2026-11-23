@@ -9,7 +9,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-21 10:00:00.000000",
+ "modified": "2026-11-23 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store",
@@ -76,6 +76,16 @@
    "options": "GST\nNone",
    "default": "GST",
    "description": "GST prints a GST tax invoice and needs the GSTIN. None prints a plain invoice."
+  },
+  {
+   "fieldname": "tax_mode_chosen",
+   "fieldtype": "Check",
+   "label": "Tax Mode Chosen",
+   "default": "0",
+   "hidden": 1,
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Set when someone chooses the tax mode; the shop's country no longer sets it after that."
   },
   {
    "fieldname": "connection_section",
@@ -408,6 +418,7 @@
   "store_code",
   "col_break_identity",
   "tax_mode",
+  "tax_mode_chosen",
   "connection_section",
   "platform",
   "col_break_connection",

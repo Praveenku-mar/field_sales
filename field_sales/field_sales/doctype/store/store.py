@@ -40,6 +40,7 @@ class Store(Document):
 		self._validate_embedded_user()
 		self._validate_store_code()
 		self._validate_order_mode()
+		self._remember_tax_mode_choice()
 		self._normalize_store_url()
 		self._clear_token_on_credential_change()
 		self._validate_locations()
@@ -108,6 +109,15 @@ class Store(Document):
 			frappe.throw(_("Rename the store to change its code"))
 		if not CODE_PATTERN.match(self.store_code):
 			frappe.throw(_("Store Code must be 2 to 4 letters or digits"))
+
+	def _remember_tax_mode_choice(self):
+		"""
+		A tax mode changed through the Store (Settings, Desk) is the merchant's choice: from then
+		on the shop's country no longer sets it (``sync/shop_settings.py``, which writes the Store
+		directly and never passes here).
+		"""
+		if not self.is_new() and self.has_value_changed("tax_mode"):
+			self.tax_mode_chosen = 1
 
 	def _validate_order_mode(self):
 		"""The shared App Store site sends orders as drafts only (paid on Shopify checkout)."""

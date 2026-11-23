@@ -1464,3 +1464,140 @@ class TestStoreRecordAccess(StoreIsolationCase):
 		self.as_user(self.vendor)
 		self.assertTrue(frappe.has_permission("Store", "write", "ISB"))
 		self.assertTrue({"ISA", "ISB"} <= set(frappe.get_list("Store", pluck="name")))
+
+
+class TestStoreAdminOnboarding(StoreIsolationCase):
+	"""After a Shopify install the merchant names the store's admin, who gets an invitation."""
+
+	def setUp(self):
+		super().setUp()
+		from frappe.email.doctype.email_account.email_account import EmailAccount
+
+		from field_sales.utils.store import set_current_store
+
+		frappe.db.savepoint("admin_onboarding")
+		self.addCleanup(set_current_store, None)
+		for p in (
+			patch.dict(frappe.conf, MULTI),
+			patch.object(
+				EmailAccount, "find_default_outgoing", return_value=frappe._dict(email_id="noreply@vendor.example.com")
+			),
+			patch("field_sales.shopify.embedded.safe_commit"),
+		):
+			p.start()
+			self.addCleanup(p.stop)
+		self.store = self.install_new_shop("isob-owner.myshopify.com")
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="admin_onboarding")
+		super().tearDown()
+
+	def install_new_shop(self, shop):
+		from field_sales.shopify import oauth
+		from field_sales.utils.store import store_for_shop
+
+		with patch.object(oauth, "save_oauth_tokens"), patch.object(oauth, "enqueue_in_store"):
+			oauth.save_installation(shop, {"scope": ""})
+		frappe.db.set_value(
+			"Store", store_for_shop(shop), {"company_name": "Owner Traders", "company_email": "sales@owner.example.com"}
+		)
+		return store_for_shop(shop)
+
+	def as_shopify_admin(self):
+		"""Signed in as the install's automatic user, as the Shopify admin first is."""
+		from field_sales.shopify.embedded import get_embedded_user
+		from field_sales.utils.store import use_store
+
+		self.as_user("Administrator")
+		with use_store(self.store):
+			user = get_embedded_user()
+		self.as_user(user)
+		return user
+
+	def set_admin(self, email):
+		from field_sales.shopify import store_admin
+
+		with patch.object(store_admin.frappe, "sendmail") as sendmail:
+			result = store_admin.set_store_admin(email)
+		return result, sendmail
+
+	def test_a_new_store_asks_for_its_admin_and_invites_them(self):
+		from field_sales.shopify.embedded import get_embedded_user
+		from field_sales.shopify.store_admin import needs_admin_setup
+		from field_sales.utils.store import use_store, user_store
+
+		self.as_shopify_admin()
+		self.assertTrue(needs_admin_setup(self.store))
+
+		result, sendmail = self.set_admin("Owner.Onboard@example.com")
+		email = "owner.onboard@example.com"
+		self.assertEqual(result, {"email": email, "invited": True})
+
+		roles = set(frappe.get_roles(email))
+		self.assertTrue({"Store Admin", "Sales Manager", "Field Sales Rep"} <= roles, roles)
+		reset_request_caches()
+		self.assertEqual(user_store(email), self.store)
+		rep = frappe.db.get_value("Sales Rep", {"user": email}, ["store", "sales_manager", "sales_rep"], as_dict=True)
+		self.assertEqual((rep.store, rep.sales_manager, rep.sales_rep), (self.store, 1, 1))
+
+		mail = sendmail.call_args.kwargs
+		self.assertEqual(mail["recipients"], [email])
+		self.assertEqual(mail["template"], "store_admin_invite")
+		self.assertIn("/update-password?key=", mail["args"]["link"])
+		# Sent by Field Sales itself (the site's default account): no store sender, no store reply-to.
+		self.assertNotIn("sender", mail)
+		self.assertNotIn("reply_to", mail)
+		self.assertEqual(mail["args"]["store_name"], "Owner Traders")
+
+		self.assertFalse(needs_admin_setup(self.store))
+		self.as_user("Administrator")
+		with use_store(self.store):
+			self.assertEqual(get_embedded_user(), email)
+
+	def test_only_the_stores_admin_may_name_it_and_never_with_a_foreign_account(self):
+		from field_sales.shopify import store_admin
+
+		self.as_shopify_admin()
+		for email in (self.b.manager, self.vendor, "Administrator"):
+			with self.subTest(email=email), self.assertRaises(frappe.ValidationError):
+				self.set_admin(email)
+		# A manager of store A (no Store Admin role) cannot name store A's admin.
+		self.as_user(self.a.manager)
+		self.assertRaises(frappe.PermissionError, store_admin.set_store_admin, "someone@example.com")
+
+	def test_setting_a_password_from_the_link_leads_to_the_login_page(self):
+		from unittest.mock import MagicMock
+
+		from field_sales.shopify import store_admin
+
+		frappe.local.login_manager = MagicMock()
+		self.addCleanup(setattr, frappe.local, "login_manager", None)
+		with patch.object(store_admin, "_frappe_update_password", return_value="/desk"):
+			self.as_user(self.a.rep_user)
+			self.assertEqual(store_admin.update_password("N3w-pass!", key="k"), store_admin.LOGIN_AFTER_PASSWORD)
+			frappe.local.login_manager.logout.assert_called_once()
+			# A password change while signed in, and vendor staff, keep Frappe's own result.
+			self.assertEqual(store_admin.update_password("N3w-pass!", old_password="old"), "/desk")
+			self.as_user(self.vendor)
+			self.assertEqual(store_admin.update_password("N3w-pass!", key="k"), "/desk")
+
+	def test_after_redaction_the_store_asks_again_and_the_same_email_comes_back(self):
+		from field_sales.shopify.privacy import shop_redact
+		from field_sales.shopify.store_admin import needs_admin_setup
+
+		self.as_shopify_admin()
+		self.set_admin("owner.again@example.com")
+		self.as_user("Administrator")
+		shop_redact(frappe._dict(name="PRIV-TEST", store=self.store), {})
+		self.assertEqual(frappe.db.get_value("User", "owner.again@example.com", "enabled"), 0)
+
+		self.as_shopify_admin()  # reinstalled: the automatic user signs in again
+		self.assertTrue(needs_admin_setup(self.store))
+		self.set_admin("owner.again@example.com")
+		self.assertEqual(frappe.db.get_value("User", "owner.again@example.com", "enabled"), 1)
+
+	def test_a_single_store_site_is_never_asked(self):
+		from field_sales.shopify.store_admin import needs_admin_setup
+
+		with patch.dict(frappe.conf, {"field_sales_multi_store": 0}):
+			self.assertFalse(needs_admin_setup(self.store))

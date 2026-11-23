@@ -46,6 +46,25 @@
           />
         </div>
       </section>
+      <!-- The merchant's admin account (shared site): resend its invitation, or hand it to someone else. -->
+      <section v-if="embedded && session.store.admin_email" class="border-t border-[#f1f2f4] p-6 sm:p-8">
+        <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Store admin</h3>
+        <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-4 md:grid-cols-2">
+          <TextInput :model-value="session.store.admin_email" label="Admin email" disabled />
+          <div class="flex items-end">
+            <Button label="Resend invitation" :loading="adminBusy === 'resend'" @click="resendAdminInvite" />
+          </div>
+          <TextInput v-model="newAdminEmail" type="email" label="Change to" placeholder="new.admin@yourstore.com" />
+          <div class="flex items-end">
+            <Button
+              label="Change admin"
+              :loading="adminBusy === 'change'"
+              :disabled="!newAdminEmail.trim()"
+              @click="changeAdmin"
+            />
+          </div>
+        </div>
+      </section>
       <!-- Connection -->
       <section v-if="!embedded" class="p-6 sm:p-8">
         <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Connection</h3>
@@ -239,6 +258,7 @@ import {
 } from 'frappe-ui'
 import EmptyState from '@/components/EmptyState.vue'
 import { callMethod } from '@/utils/api'
+import { useSessionStore } from '@/stores/session'
 import { isEmbedded } from '@/shopify/embedded'
 import { createMerchantStoreDoc, merchantLocationsUrl } from '@/shopify/merchantSettings'
 import { daysAgo, formatDate, formatDateTime, formatTime, msUntil, nowSql } from '@/utils/format'
@@ -246,6 +266,33 @@ import { daysAgo, formatDate, formatDateTime, formatTime, msUntil, nowSql } from
 // The merchant's view: inside the Shopify admin, and always on the shared site (App Store installs
 // only; the connection and credentials are the vendor's there, and the server refuses them).
 const embedded = isEmbedded() || !!window.multi_store
+const session = useSessionStore()
+
+// The store's admin account (shared site): resend its invitation or change it.
+const newAdminEmail = ref('')
+const adminBusy = ref(null)
+async function resendAdminInvite() {
+  adminBusy.value = 'resend'
+  try {
+    const r = await callMethod('field_sales.shopify.store_admin.resend_admin_invite')
+    toast.success(`Invitation sent to ${r.email}`)
+  } catch {
+    // callMethod showed the error
+  } finally {
+    adminBusy.value = null
+  }
+}
+async function changeAdmin() {
+  adminBusy.value = 'change'
+  try {
+    const r = await callMethod('field_sales.shopify.store_admin.set_store_admin', { email: newAdminEmail.value.trim() })
+    toast.success(`Invitation sent to ${r.email}`)
+    // The Shopify sign-in is now that account: start again as it.
+    window.location.reload()
+  } catch {
+    adminBusy.value = null
+  }
+}
 // The Store this user works in (boot value `store`). In the merchant's view the merchant
 // endpoints are used instead (only locations, defaults and similar can change there).
 const doc = embedded

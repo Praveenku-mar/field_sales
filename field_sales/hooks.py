@@ -313,9 +313,11 @@ scheduler_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "field_sales.event.get_events"
-# }
+# A store's user who sets a password from an invitation or reset link is sent to the login page
+# (shopify/store_admin.py -> update_password; everyone else gets Frappe's own result).
+override_whitelisted_methods = {
+	"frappe.core.doctype.user.user.update_password": "field_sales.shopify.store_admin.update_password",
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

@@ -22,6 +22,7 @@ from field_sales.permissions import (
 	is_manager_or_admin,
 	is_retailer_user,
 )
+from field_sales.shopify.store_admin import needs_admin_setup, store_admin_email
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
 from field_sales.utils.money import store_currency
 from field_sales.utils.phone import whatsapp_digits
@@ -778,6 +779,9 @@ def _store_info() -> dict:
 		"title": values.get("shop_name") or values.get("name"),
 		# "None": the store charges no GST (orders show no GST line; invoices no GSTIN).
 		"tax_mode": values.get("tax_mode") or "GST",
+		# Shared site, right after install: the app asks for the merchant's admin email first.
+		"needs_admin_setup": needs_admin_setup(values.get("name")),
+		"admin_email": store_admin_email(values.get("name")),
 		"name": host.removesuffix(".myshopify.com") or None,
 		"platform": values.get("platform"),
 		"enabled": bool(values.get("enabled")),

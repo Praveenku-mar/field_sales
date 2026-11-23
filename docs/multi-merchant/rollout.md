@@ -16,7 +16,8 @@ How to bring up the shared multi-store site and keep it healthy. Design: `design
   - products synced per store;
   - order numbers `FO-<code>-…`;
   - per store: currency, time zone and tax mode;
-  - uninstall one store and reinstall it: only its users are refused, and the same Store comes back.
+  - uninstall one store and reinstall it: only its users are refused, and the same Store comes back;
+  - the admin-email prompt after install: the invitation arrives, its link sets the password, the login page follows, and the Shopify admin then opens as that account.
 - **Automated tests**, on the test site:
   - `bench --site fieldsales-test.localhost run-tests --app field_sales`
   - `tests/test_store_isolation.py`, `tests/test_shared_site_flows.py` and `tests/test_rollout.py` cover the shared site.

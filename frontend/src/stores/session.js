@@ -53,6 +53,8 @@ export const useSessionStore = defineStore('session', () => {
   // Vendor staff on the shared site: they work in one store at a time (VendorStorePicker).
   const isVendor = computed(() => !!data.value.is_vendor)
   const needsStore = computed(() => isVendor.value && !store.value.code)
+  // Shared site, right after a Shopify install: the merchant's admin email comes first.
+  const needsAdminSetup = computed(() => !!store.value.needs_admin_setup)
 
   function hasRole(...wanted) {
     return wanted.some((role) => roles.value.includes(role))
@@ -130,6 +132,7 @@ export const useSessionStore = defineStore('session', () => {
     user,
     isVendor,
     needsStore,
+    needsAdminSetup,
     fullName,
     userImage,
     roles,

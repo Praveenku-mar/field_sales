@@ -6,6 +6,10 @@
     <div v-else-if="session.ready && session.user && session.needsStore" class="flex h-full items-center justify-center p-6">
       <VendorStorePicker />
     </div>
+    <!-- Right after a Shopify install the merchant names the store's admin first (shared site). -->
+    <div v-else-if="session.ready && session.user && session.needsAdminSetup" class="flex h-full items-center justify-center p-6">
+      <StoreAdminSetup />
+    </div>
     <AppLayout v-else-if="session.ready && session.user">
       <RouterView :key="$route.fullPath" />
     </AppLayout>
@@ -35,6 +39,7 @@ import { Button, FrappeUIProvider, LoadingIndicator } from 'frappe-ui'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import StoreAdminSetup from '@/components/StoreAdminSetup.vue'
 import VendorStorePicker from '@/components/VendorStorePicker.vue'
 import { useSessionStore } from '@/stores/session'
 

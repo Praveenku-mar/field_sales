@@ -9,11 +9,12 @@ visits and orders, a manager sees their team's."""
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, date_diff, flt, get_first_day, get_first_day_of_week, getdate, nowdate
+from frappe.utils import add_days, date_diff, flt, get_first_day, get_first_day_of_week, getdate
 
 from field_sales.frontend_api import get_attention_presets
 from field_sales.permissions import MANAGER_ROLES
 from field_sales.www.fieldsales import has_app_access
+from field_sales.utils.store import store_today
 
 PERIODS = ("today", "week", "month", "last_month", "custom")
 TOP_REPS = 10
@@ -39,7 +40,7 @@ def get_dashboard(
 	if period not in PERIODS:
 		frappe.throw(_("Period must be one of: {0}").format(", ".join(PERIODS)))
 
-	today = getdate(nowdate())
+	today = store_today()
 	if period == "today":
 		from_d = to_d = today
 	elif period == "week":

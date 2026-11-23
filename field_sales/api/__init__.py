@@ -13,7 +13,7 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.query_builder.functions import Count, Sum
 from frappe.rate_limiter import rate_limit
 from frappe.sessions import clear_sessions
-from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
+from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime
 from frappe.utils.password import check_password
 
 from field_sales.api import mobile as _mobile  # loads field_sales.api.mobile with this package
@@ -46,7 +46,7 @@ from field_sales.utils.geo import (
 	point_geojson,
 )
 from field_sales.utils.limits import SALES_REPS, check_limit
-from field_sales.utils.store import get_store_value, set_store_value, user_is_reachable
+from field_sales.utils.store import get_store_value, set_store_value, store_today, user_is_reachable
 from field_sales.utils.urls import public_url
 
 VISIT_MANAGER_ROLES = MANAGER_ROLES
@@ -695,7 +695,7 @@ def sync_retailers(names: str | list) -> dict:
 
 def _check_visit_date(doc) -> None:
 	"""A visit can only be checked in to on its own date (in the system time zone)."""
-	visit_date, today = getdate(doc.visit_date), getdate(nowdate())
+	visit_date, today = getdate(doc.visit_date), store_today()
 	if visit_date > today:
 		frappe.throw(
 			_("This visit is planned for {0}. You can check in on that day.").format(formatdate(visit_date)),
@@ -1125,7 +1125,7 @@ def get_retailer_summary(retailer: str) -> dict:
 	user may see (their hierarchy; a retailer login its own orders; admins everything).
 	"""
 	frappe.has_permission("Retailer", "read", retailer, throw=True)
-	since = frappe.utils.add_days(frappe.utils.nowdate(), -30)
+	since = frappe.utils.add_days(str(store_today()), -30)
 	user = frappe.session.user
 
 	from frappe.query_builder.functions import Count, Sum

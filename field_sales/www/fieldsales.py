@@ -56,6 +56,12 @@ def _boot_store() -> str | None:
 		return None
 
 
+def _boot_time_zone() -> str:
+	from field_sales.utils.store import store_timezone
+
+	return store_timezone()
+
+
 def get_boot(embedded: dict | None = None) -> dict:
 	"""
 	Values the SPA reads from `window` before it mounts (see frontend/src/main.js).
@@ -69,10 +75,12 @@ def get_boot(embedded: dict | None = None) -> dict:
 			"site_name": frappe.local.site,
 			"default_route": _app_base(),
 			"sysdefaults": frappe.defaults.get_defaults(),
-			# The site's time zone (System Settings; the store's when its settings are matched):
-			# server dates and times are in it, so "today" and expiry checks use it, not the
-			# browser's (utils/format.js). Read directly: the defaults copy can lag behind.
-			"time_zone": frappe.utils.get_system_timezone(),
+			# Two zones (utils/format.js). server_time_zone: the site's (System Settings), in which
+			# every stored datetime is written, so expiry checks compare against it. time_zone: the
+			# store's (utils/store.py -> store_timezone), for "today" and for showing times. The
+			# same zone on single-store sites. Read directly: the defaults copy can lag behind.
+			"server_time_zone": frappe.utils.get_system_timezone(),
+			"time_zone": _boot_time_zone(),
 			# The Store this user works in (Settings forms edit it); None before one is connected.
 			"store": _boot_store(),
 			# Realtime socket (composables/useRealtime.js): its own port under bench start.

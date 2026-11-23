@@ -13,7 +13,7 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import add_months, cint, flt, get_first_day, get_last_day, getdate, nowdate
+from frappe.utils import add_months, cint, flt, get_first_day, get_last_day, getdate
 
 from field_sales.commission import require_commission_enabled
 from field_sales.commission.engine import load_plans
@@ -27,6 +27,7 @@ from field_sales.commission.statements import (
 )
 from field_sales.permissions import get_allowed_reps, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
+from field_sales.utils.store import store_today
 
 PERIODS = ("this_month", "last_month", "this_year", "all")
 MAX_PAGE_LENGTH = 2500
@@ -411,7 +412,7 @@ def create_adjustment(
 	if not (reason or "").strip():
 		frappe.throw(_("Reason is required."))
 
-	posting_date = getdate(posting_date) if posting_date else getdate(nowdate())
+	posting_date = getdate(posting_date) if posting_date else store_today()
 	currency = frappe.db.get_default("currency")
 	if not currency:
 		frappe.throw(_("Set a default Currency before adding an adjustment."))
@@ -513,7 +514,7 @@ def _period_range(period: str):
 	if period not in PERIODS:
 		frappe.throw(_("Period must be one of: {0}").format(", ".join(PERIODS)))
 
-	today = getdate(nowdate())
+	today = store_today()
 	if period == "this_month":
 		return get_first_day(today), get_last_day(today)
 	if period == "last_month":
@@ -623,7 +624,7 @@ def _next_slab_gap(rep: str) -> dict | None:
 	if not plan_name or frappe.db.get_value("Commission Plan", plan_name, "rule_type") != "Tiered Slab":
 		return None
 
-	today = getdate(nowdate())
+	today = store_today()
 	rows = frappe.get_all(
 		"Commission Entry",
 		filters={

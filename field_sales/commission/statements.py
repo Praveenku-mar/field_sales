@@ -16,20 +16,21 @@ its own rate, shown as one blended rate), keeping the discount penalty as a rati
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, get_first_day, getdate, nowdate
+from frappe.utils import add_days, cint, flt, get_first_day, getdate
 
 from field_sales.commission import commission_enabled, require_commission_enabled
 from field_sales.commission.engine import load_plans, penalty_multiplier, slab_rate
 from field_sales.permissions import MANAGER_ROLES, get_own_rep, is_admin
 from field_sales.push.events import notify_statement
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import for_each_store, store_filters
+from field_sales.utils.store import for_each_store, store_filters, store_today
 
 
 def generate_monthly_statements():
 	"""
-	Scheduler (1st of the month, 02:00), for every Store: a Draft statement for last month for
-	each commission-active rep who has unstatemented Earned entries or Adjustments.
+	Scheduler (hourly on the site's 1st and 2nd), for every Store whose own month has ended (its
+	local date is the 1st or 2nd): a Draft statement for last month for each commission-active
+	rep who has unstatemented Earned entries or Adjustments. Repeats do nothing (``_statement_exists``).
 
 	Entries that became Earned after an earlier statement was made are picked up here too (anything
 	earned up to the period end), so none is stranded. A rep who already has a statement for the
@@ -41,7 +42,11 @@ def generate_monthly_statements():
 def _generate_store_statements():
 	if not commission_enabled():
 		return
-	period_end = add_days(get_first_day(getdate(nowdate())), -1)
+	today = store_today()
+	if today.day > 2:
+		# The job runs on the site's 1st and 2nd; a store behind the site is still in last month.
+		return
+	period_end = add_days(get_first_day(today), -1)
 	period_start = get_first_day(period_end)
 
 	reps = frappe.get_all("Sales Rep", filters={**store_filters(), "commission_active": 1}, pluck="name")
@@ -115,7 +120,7 @@ def mark_paid(name: str, paid_on: str | None = None, payment_reference: str | No
 	if doc.docstatus != 1 or doc.status != "Approved":
 		frappe.throw(_("Only an Approved Commission Statement can be marked as paid."))
 
-	paid_on = getdate(paid_on) if paid_on else getdate(nowdate())
+	paid_on = getdate(paid_on) if paid_on else store_today()
 	doc.db_set({"status": "Paid", "paid_on": paid_on, "payment_reference": payment_reference or ""})
 	notify_statement(doc, "statement_paid")
 	return {"name": doc.name, "status": "Paid", "paid_on": str(paid_on)}

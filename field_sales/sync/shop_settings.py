@@ -18,7 +18,14 @@ import frappe
 from frappe import _
 
 from field_sales.connectors import get_connector
-from field_sales.utils.store import for_each_store, get_store_value, is_multi_store, set_store_value
+from field_sales.utils.store import (
+	for_each_store,
+	get_store_name,
+	get_store_value,
+	is_multi_store,
+	set_store_value,
+	use_store_timezone_for_users,
+)
 
 
 def sync_shop_settings(shop: dict | None = None) -> dict:
@@ -44,8 +51,11 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		values["shop_timezone"] = timezone
 	if country:
 		values["shop_country"] = country
+	zone_changed = bool(timezone) and timezone != get_store_value("shop_timezone")
 	if values:
 		set_store_value(values)
+	if zone_changed and is_multi_store():
+		use_store_timezone_for_users(get_store_name())
 
 	changes = []
 	# Never on the shared site: one store's sync would change every other store's currency and dates.

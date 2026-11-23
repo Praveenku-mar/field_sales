@@ -225,6 +225,9 @@ field_sales_store_doctypes = [
 ]
 # No moving another team's record to your own rep (permissions.check_owner_change).
 _OWNER_CHECKED = ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+# Their date field is the merchant's local date: filled from the store's clock when left empty
+# (utils/store.py -> fill_store_dates; STORE_DATE_FIELDS there).
+_STORE_DATED = ("Field Order", "Visit", "Commission Entry")
 
 doc_events = {
 	# Push bell notifications made by push.notify.notify_users to the mobile app.
@@ -232,7 +235,10 @@ doc_events = {
 	# A new record belongs to the current store (utils/store.py -> stamp_store).
 	**{
 		doctype: {
-			"before_insert": "field_sales.utils.store.stamp_store",
+			"before_insert": [
+				"field_sales.utils.store.stamp_store",
+				*(["field_sales.utils.store.fill_store_dates"] if doctype in _STORE_DATED else []),
+			],
 			**(
 				{"validate": "field_sales.permissions.check_owner_change"}
 				if doctype in _OWNER_CHECKED
@@ -272,12 +278,13 @@ scheduler_events = {
 		"*/15 * * * *": [
 			"field_sales.sync.orders.retry_failed_orders",
 		],
-		# Daily team summary to each manager, in the system timezone.
-		"0 20 * * *": [
+		# Daily team summary to each manager: hourly, sent at 20:00 on each store's clock.
+		"0 * * * *": [
 			"field_sales.daily_summary.send_daily_summary",
 		],
-		# Draft Commission Statements for last month, on the 1st.
-		"0 2 1 * *": [
+		# Draft Commission Statements for last month: hourly on the 1st and 2nd (site clock), made
+		# for each store once its own month has ended (a store west of the site is a day behind).
+		"0 * 1,2 * *": [
 			"field_sales.commission.statements.generate_monthly_statements",
 		],
 	},

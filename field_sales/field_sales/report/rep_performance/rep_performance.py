@@ -31,12 +31,11 @@ from frappe.utils import (
 	get_first_day,
 	get_last_day,
 	getdate,
-	nowdate,
-)
+	)
 from pypika.terms import PseudoColumn
 
 from field_sales.permissions import get_allowed_reps, is_admin
-from field_sales.utils.store import store_scope
+from field_sales.utils.store import store_scope, store_today
 
 DATE_GROUPS = ("Day", "Week", "Month")
 NOT_SET = "(Not Set)"
@@ -110,7 +109,7 @@ def _build_context(filters) -> frappe._dict:
 	ctx = frappe._dict(
 		from_date=from_date,
 		to_date=to_date,
-		today=getdate(nowdate()),
+		today=store_today(),
 		group_by=group_by,
 		compare=compare,
 		city=filters.city,
@@ -941,7 +940,7 @@ def get_rep_stats(from_date, to_date, reps: dict) -> list[dict]:
 	ctx = frappe._dict(
 		from_date=getdate(from_date),
 		to_date=getdate(to_date),
-		today=getdate(nowdate()),
+		today=store_today(),
 		group_by="Sales Rep",
 		compare=None,
 		reps=reps,

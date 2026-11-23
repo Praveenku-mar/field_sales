@@ -18,12 +18,13 @@ import frappe
 import xlsxwriter
 from frappe import _
 from frappe.desk.utils import provide_binary_file
-from frappe.utils import getdate, nowdate
+from frappe.utils import getdate
 from frappe.utils.csvutils import read_csv_content
 from frappe.utils.xlsxutils import make_xlsx
 from openpyxl import load_workbook
 
 from field_sales.permissions import MANAGER_ROLES, get_allowed_reps, is_admin
+from field_sales.utils.store import store_today
 
 MAX_ROWS = 500
 DEFAULT_PURPOSE = "Order Taking"
@@ -98,7 +99,7 @@ def download_visit_template() -> None:
 	example = [
 		reps[0]["name"] if reps else "",
 		customers[0]["name"] if customers else "",
-		nowdate(),
+		str(store_today()),
 		DEFAULT_PURPOSE,
 		"Example row: replace or delete it",
 	]

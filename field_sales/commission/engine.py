@@ -26,7 +26,7 @@ from collections import defaultdict
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, get_first_day, get_last_day, nowdate
+from frappe.utils import cint, flt, get_first_day, get_last_day
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import get_connector
@@ -35,7 +35,7 @@ from field_sales.field_sales.doctype.commission_entry.commission_entry import (
 	make_dedupe_key,
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
-from field_sales.utils.store import enqueue_in_store, get_store_value, record_store
+from field_sales.utils.store import enqueue_in_store, get_store_value, record_store, store_today
 
 ENTRY_FIELDS = [
 	"name",
@@ -144,7 +144,7 @@ class _Context:
 		self.order = order
 		self.external_id = str(order.get("external_order_id") or field_order.external_order_id)
 		self.currency = order.get("currency") or frappe.db.get_default("currency")
-		self.today = nowdate()
+		self.today = str(store_today())
 		self.precision = cint(frappe.get_precision("Commission Entry", "amount"))
 		self._plans: dict[str, object] = {}
 		self.pairs = self._map_lines()

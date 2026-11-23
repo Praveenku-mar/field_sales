@@ -9,7 +9,7 @@ from contextlib import suppress
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
+from frappe.utils import add_days, cint, flt, get_first_day, strip_html
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
@@ -25,7 +25,7 @@ from field_sales.permissions import (
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
-from field_sales.utils.store import get_store_value
+from field_sales.utils.store import get_store_value, store_timezone, store_today
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
 
 SEARCH_LIMIT = 6
@@ -41,7 +41,7 @@ def get_attention_presets(today: str | None = None) -> dict[str, dict]:
 	same ones (via ``get_list_preset``), so a card and the list it opens always
 	agree. Each preset is one doctype; "Failed Syncs" is two presets on one page.
 	"""
-	today = today or nowdate()
+	today = today or str(store_today())
 	# Every retailer is visible to a rep; these lists are the ones they act on.
 	mine = hierarchy_filters("Retailer")
 	return {
@@ -98,7 +98,7 @@ def get_card_presets(today: str | None = None) -> dict[str, dict]:
 
 	``get_list_preset`` serves these exactly like the attention presets.
 	"""
-	today = today or nowdate()
+	today = today or str(store_today())
 	return {
 		"orders_today": {
 			"doctype": "Field Order",
@@ -132,7 +132,7 @@ def get_session() -> dict:
 	also gets ``is_retailer`` and its ``retailer``; an inactive or unlinked one
 	is refused here, so My Orders never loads for it.
 
-	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled"}``
+	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled", "time_zone", "server_time_zone"}``
 	"""
 	_check_access()
 	user = frappe.session.user
@@ -168,6 +168,10 @@ def get_session() -> dict:
 		),
 		"store": _store_info(),
 		"commission_enabled": commission_enabled(),
+		# The mobile app needs both, as the web app does (www/fieldsales.py boot): stored times are
+		# in server_time_zone; "today" and shown times are in time_zone (the store's).
+		"time_zone": store_timezone(),
+		"server_time_zone": frappe.utils.get_system_timezone(),
 	}
 
 
@@ -247,7 +251,7 @@ def get_dashboard() -> dict:
 	"""
 	frappe.has_permission("Field Order", "read", throw=True)
 	_check_access()
-	today = nowdate()
+	today = str(store_today())
 
 	visits_today = frappe.get_list(
 		"Visit",
@@ -317,7 +321,7 @@ def get_product_activity(product: str) -> dict:
 	"""
 	_check_access()
 	frappe.has_permission("Platform Product", "read", product, throw=True)
-	since = add_days(nowdate(), -30)
+	since = add_days(str(store_today()), -30)
 
 	recent = frappe.get_list(
 		"Field Order",
@@ -444,7 +448,7 @@ def get_rep_month_stats(sales_rep: str | None = None) -> dict:
 		get_reps_in_scope,
 	)
 
-	today = nowdate()
+	today = str(store_today())
 	reps = get_reps_in_scope({"sales_rep": sales_rep} if sales_rep else {})
 	keys = (
 		"planned_visits",

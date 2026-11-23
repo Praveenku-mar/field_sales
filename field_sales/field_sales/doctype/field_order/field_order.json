@@ -135,7 +135,6 @@
    "fieldtype": "Date",
    "label": "Order Date",
    "reqd": 1,
-   "default": "Today",
    "search_index": 1,
    "in_list_view": 1,
    "in_standard_filter": 1
@@ -533,7 +532,7 @@
  "is_submittable": 1,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-21 12:00:00.000000",
+ "modified": "2026-11-23 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Field Order",

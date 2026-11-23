@@ -9,12 +9,18 @@ from contextlib import suppress
 import frappe
 from frappe import _
 from frappe.model.naming import make_autoname
-from frappe.utils import fmt_money, format_datetime, now_datetime, today
+from frappe.utils import fmt_money, format_datetime, now_datetime
 
 from field_sales.payments.razorpay import link_for_confirmation
 from field_sales.utils.db import safe_commit
 from field_sales.utils.money import site_currency
-from field_sales.utils.store import enqueue_in_store, get_store_value, invoice_series, record_store
+from field_sales.utils.store import (
+	enqueue_in_store,
+	get_store_value,
+	invoice_series,
+	record_store,
+	store_today,
+)
 
 SENDING_STATUS = "Sending…"
 INVOICE_SERIES = "INV-.YYYY.-.#####"
@@ -77,7 +83,7 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 			doc.db_set(
 				{
 					"invoice_no": make_autoname(invoice_series(doc.store, INVOICE_SERIES)),
-					"invoice_date": today(),
+					"invoice_date": store_today(doc.store),
 				},
 				update_modified=False,
 			)

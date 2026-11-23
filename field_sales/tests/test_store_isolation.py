@@ -6,6 +6,7 @@ Two stores on one site: a user of store A reaches nothing of store B, whatever t
 and vendor staff (a System Manager with no store) reach both.
 """
 
+import datetime
 from unittest.mock import patch
 
 import frappe
@@ -753,7 +754,15 @@ class TestStoreContext(StoreIsolationCase):
 
 		frappe.db.set_value("Store", "ISB", "uninstalled_on", frappe.utils.now_datetime())
 		seen = []
-		with patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []):
+		evening = datetime.datetime(2026, 12, 2, 20, 0)
+		for store in ("ISA", "ISB"):
+			key = frappe.cache.make_key(f"field_sales:daily_summary:{store}:2026-12-02")
+			frappe.cache.delete(key)
+			self.addCleanup(frappe.cache.delete, key)
+		with (
+			patch.object(daily_summary, "store_now", return_value=evening),
+			patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []),
+		):
 			daily_summary.send_daily_summary()
 		self.assertIn("ISA", seen)
 		self.assertNotIn("ISB", seen)
@@ -855,3 +864,130 @@ class TestStoreContext(StoreIsolationCase):
 		self.assertEqual(seen, ["ISB"])
 		self.assertEqual(frappe.session.user, self.b.admin)
 		self.assertEqual(current_store(), "ISB")
+
+
+class TestStoreLocale(StoreIsolationCase):
+	"""Phase 5: each store's own clock decides "today" and "this month" on the shared site."""
+
+	# The site clock (Asia/Kolkata): 08:00 on the 1st is still the 30th in New York.
+	SITE_NOW = datetime.datetime(2026, 12, 1, 8, 0)
+
+	def setUp(self):
+		super().setUp()
+		from field_sales.utils.store import clear_timezone_cache
+
+		frappe.db.savepoint("store_locale")
+		self.addCleanup(clear_timezone_cache)
+		clear_timezone_cache()
+		frappe.db.set_value("Store", "ISA", "shop_timezone", "Asia/Kolkata")
+		frappe.db.set_value("Store", "ISB", "shop_timezone", "America/New_York")
+		self.multi = patch.dict(frappe.conf, MULTI)
+		self.multi.start()
+		self.addCleanup(self.multi.stop)
+		self.clock = patch("field_sales.utils.store.now_datetime", return_value=self.SITE_NOW)
+		self.clock.start()
+		self.addCleanup(self.clock.stop)
+		self.site_zone = patch("field_sales.utils.store.get_system_timezone", return_value="Asia/Kolkata")
+		self.site_zone.start()
+		self.addCleanup(self.site_zone.stop)
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="store_locale")
+		super().tearDown()
+
+	def test_each_store_has_its_own_today(self):
+		from field_sales.utils.store import store_month_bounds, store_now, store_today
+
+		self.assertEqual(store_today("ISA"), datetime.date(2026, 12, 1))
+		self.assertEqual(store_today("ISB"), datetime.date(2026, 11, 30))
+		self.assertEqual(store_now("ISB"), datetime.datetime(2026, 11, 30, 21, 30))
+		self.assertEqual(store_month_bounds(store="ISB"), (datetime.date(2026, 11, 1), datetime.date(2026, 11, 30)))
+
+	def test_a_store_midnight_in_site_time(self):
+		from field_sales.utils.store import site_to_store, store_to_site
+
+		midnight_ny = datetime.datetime(2026, 12, 1, 0, 0)
+		on_site = store_to_site(midnight_ny, "ISB")
+		self.assertEqual(on_site, datetime.datetime(2026, 12, 1, 10, 30))
+		self.assertEqual(site_to_store(on_site, "ISB"), midnight_ny)
+
+	def test_an_empty_store_date_is_the_stores_today(self):
+		from field_sales.utils.store import fill_store_dates
+
+		for doctype, field in (("Visit", "visit_date"), ("Field Order", "order_date")):
+			doc = frappe.get_doc({"doctype": doctype, "store": "ISB"})
+			fill_store_dates(doc)
+			self.assertEqual(doc.get(field), datetime.date(2026, 11, 30))
+		# A date the user chose stays.
+		doc = frappe.get_doc({"doctype": "Visit", "store": "ISB", "visit_date": "2026-11-28"})
+		fill_store_dates(doc)
+		self.assertEqual(str(doc.visit_date), "2026-11-28")
+
+	def test_the_dashboard_today_follows_the_users_store(self):
+		from field_sales.frontend_api import get_card_presets
+
+		self.as_user(self.b.manager)
+		presets = get_card_presets()
+		self.assertIn(["order_date", "=", "2026-11-30"], presets["orders_today"]["filters"])
+
+	def test_an_unknown_zone_or_a_single_store_site_uses_the_site_clock(self):
+		from field_sales.utils.store import clear_timezone_cache, store_timezone
+
+		frappe.db.set_value("Store", "ISB", "shop_timezone", "Mars/Olympus")
+		clear_timezone_cache()
+		self.assertEqual(store_timezone("ISB"), "Asia/Kolkata")
+		self.multi.stop()
+		clear_timezone_cache()
+		frappe.db.set_value("Store", "ISB", "shop_timezone", "America/New_York")
+		self.assertEqual(store_timezone("ISB"), "Asia/Kolkata")
+		self.multi.start()
+
+	# -- Step 2: clocks of the web app, Desk and local-time jobs ------------------------
+
+	def test_the_session_tells_the_app_both_zones(self):
+		from field_sales.frontend_api import get_session
+
+		self.as_user(self.b.manager)
+		session = get_session()
+		self.assertEqual(session["time_zone"], "America/New_York")
+		self.assertEqual(session["server_time_zone"], frappe.utils.get_system_timezone())
+
+	def test_a_new_store_user_sees_desk_in_the_stores_zone(self):
+		user = make_user("isb.zone@example.com", ["Field Sales Rep"])
+		assign_user_to_store(user, "ISB")
+		self.assertEqual(frappe.db.get_value("User", user, "time_zone"), "America/New_York")
+
+	def test_the_daily_summary_goes_at_each_stores_evening_once(self):
+		from field_sales import daily_summary
+		from field_sales.utils.store import current_store
+
+		# 06:30 on the site (Kolkata) is 20:00 of the day before in New York, morning in store A.
+		self.clock.stop()
+		self.clock = patch("field_sales.utils.store.now_datetime", return_value=datetime.datetime(2026, 12, 1, 6, 30))
+		self.clock.start()
+		key = frappe.cache.make_key("field_sales:daily_summary:ISB:2026-11-30")
+		frappe.cache.delete(key)
+		self.addCleanup(frappe.cache.delete, key)
+		seen = []
+		with patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []):
+			daily_summary.send_daily_summary()
+			daily_summary.send_daily_summary()  # the same hour again: nothing more
+		self.assertEqual(seen, ["ISB"])
+
+	def test_statements_wait_for_the_stores_own_month_to_end(self):
+		from field_sales.commission import statements
+		from field_sales.utils.store import current_store
+
+		# Site 1 Dec 08:00: store A is in December, store B still on 30 November.
+		seen = []
+		with (
+			patch.object(statements, "commission_enabled", return_value=True),
+			patch.object(
+				statements,
+				"store_filters",
+				side_effect=lambda: seen.append(current_store()) or {"store": current_store()},
+			),
+		):
+			statements.generate_monthly_statements()
+		self.assertIn("ISA", seen)
+		self.assertNotIn("ISB", seen)

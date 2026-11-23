@@ -26,12 +26,18 @@ import json
 import frappe
 import requests
 from frappe import _
-from frappe.utils import add_months, cint, get_first_day, nowdate
+from frappe.utils import add_months, cint
 
 from field_sales.connectors.shopify import REQUEST_TIMEOUT, is_oauth
 from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
-from field_sales.utils.store import get_store, get_store_name, get_store_value
+from field_sales.utils.store import (
+	get_store,
+	get_store_name,
+	get_store_value,
+	store_month_bounds,
+	store_to_site,
+)
 
 # One cached plan per store: f"{CACHE_KEY}:{store}" (_cache_key).
 CACHE_KEY = "field_sales:shopify_active_plan"
@@ -175,15 +181,16 @@ def usage(kind: str) -> int:
 			filters["user"] = ("!=", embedded_user)
 		return frappe.db.count("Sales Rep", filters)
 	if kind == ORDERS_PER_MONTH:
-		# By submission time, which only the server sets; order_date can be back-dated.
-		first = get_first_day(nowdate())
+		# By submission time, which only the server sets; order_date can be back-dated. The month is
+		# the store's (its local midnight on the 1st), turned into the site clock submitted_on uses.
+		first, _last = store_month_bounds(store=store)
 		return frappe.db.count(
 			"Field Order",
 			[
 				*([["store", "=", store]] if store else []),
 				["docstatus", "=", 1],
-				["submitted_on", ">=", f"{first} 00:00:00"],
-				["submitted_on", "<", f"{add_months(first, 1)} 00:00:00"],
+				["submitted_on", ">=", store_to_site(first, store)],
+				["submitted_on", "<", store_to_site(add_months(first, 1), store)],
 			],
 		)
 	raise ValueError(kind)

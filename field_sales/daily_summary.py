@@ -1,21 +1,27 @@
 # Copyright (c) 2026, Your Company and contributors
 # For license information, please see license.txt
 
-"""Daily email to each manager summarising their reps' day (scheduler, 20:00)."""
+"""Daily email to each manager summarising their reps' day, at 20:00 on each store's clock."""
 
 import frappe
 from frappe import _
-from frappe.utils import escape_html, fmt_money, formatdate, get_url, nowdate
+from frappe.utils import escape_html, fmt_money, formatdate, get_url
 
 from field_sales.field_sales.report.rep_performance.rep_performance import get_rep_stats, get_reps_in_scope
 from field_sales.permissions import clear_allowed_reps_cache
-from field_sales.utils.store import for_each_store, store_criterion
+from field_sales.utils.store import current_store, for_each_store, store_criterion, store_now
+
+# Local hour the summary goes out, and how long a store-day's "sent" mark is kept.
+SEND_HOUR = 20
+SENT_MARK_SECONDS = 2 * 24 * 60 * 60
 
 
 def send_daily_summary():
 	"""
-	For every Store, email every manager (a user whose Sales Rep has others reporting to it)
-	a summary of today for everyone under them, at all levels.
+	Hourly: for every Store where it is now ``SEND_HOUR`` on the store's clock, email every
+	manager (a user whose Sales Rep has others reporting to it) a summary of the store's today
+	for everyone under them, at all levels. Once per store and local date, so an hour run twice
+	(or a slow worker) sends nothing more.
 
 	Managers whose team had no activity and no failures get no email. Disabled Stores are
 	included (their reps may still have worked today, e.g. while a token refresh is failing),
@@ -30,7 +36,13 @@ def send_daily_summary():
 
 
 def _send_store_summaries():
-	today = nowdate()
+	now = store_now()
+	if now.hour != SEND_HOUR:
+		return
+	today = str(now.date())
+	sent = frappe.cache.make_key(f"field_sales:daily_summary:{current_store()}:{today}")
+	if not frappe.cache.set(sent, 1, nx=True, ex=SENT_MARK_SECONDS):
+		return
 	for manager in _get_managers():
 		try:
 			_send_to_manager(manager, today)

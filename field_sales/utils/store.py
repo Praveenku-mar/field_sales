@@ -20,12 +20,15 @@ site, where Razorpay and Confirmed order mode are off (App Store requirement 1.1
 
 from __future__ import annotations
 
+import datetime
 import re
 from contextlib import contextmanager
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import frappe
 from frappe import _
+from frappe.utils import get_first_day, get_last_day, get_system_timezone, getdate, now_datetime
 
 from field_sales.utils.db import safe_commit
 
@@ -216,6 +219,26 @@ def assign_user_to_store(user: str, store: str) -> None:
 		}
 	).insert(ignore_permissions=True)
 	clear_user_store_cache()
+	_use_store_timezone(user, store)
+
+
+def use_store_timezone_for_users(store: str) -> None:
+	"""After a store's ``shop_timezone`` changed: its users' Desk follows (shared site only)."""
+	clear_timezone_cache()
+	users = frappe.get_all(
+		"User Permission", filters={"allow": STORE_DOCTYPE, "for_value": store}, pluck="user"
+	)
+	for user in users:
+		_use_store_timezone(user, store)
+
+
+def _use_store_timezone(user: str, store: str) -> None:
+	"""On the shared site, Desk shows the user times in their store's zone (User ``time_zone``)."""
+	if not is_multi_store():
+		return
+	zone = frappe.db.get_value(STORE_DOCTYPE, store, "shop_timezone")
+	if _is_zone(zone) and frappe.db.get_value("User", user, "time_zone") != zone:
+		frappe.db.set_value("User", user, "time_zone", zone)
 
 
 def is_vendor(user: str | None = None) -> bool:
@@ -330,6 +353,106 @@ def get_store_value(fieldname: str | list[str], store: str | None = None, as_dic
 			return frappe._dict() if as_dict else [None] * len(fieldname)
 		return None
 	return frappe.db.get_value(STORE_DOCTYPE, name, fieldname, as_dict=as_dict)
+
+
+# ----------------------------------------------------------------------
+# The store's clock (design D1: one fixed site clock; the store's zone decides "which day")
+# ----------------------------------------------------------------------
+
+_TIMEZONES_KEY = "field_sales_store_timezones"
+
+
+def store_timezone(store: str | None = None) -> str:
+	"""
+	The IANA zone "today" and "this month" follow for ``store`` (default: the current store).
+
+	The store's ``shop_timezone`` on the shared multi-store site; else (single-store sites, no
+	store in context, or an unknown zone name) the site's own zone, as before.
+	"""
+	site = get_system_timezone()
+	if not is_multi_store():
+		return site
+	try:
+		name = get_store_name(store)
+	except NoStoreContext:
+		return site  # vendor staff with no store chosen: the site clock
+	if not name:
+		return site
+	cache = getattr(frappe.local, _TIMEZONES_KEY, None)
+	if cache is None:
+		cache = {}
+		setattr(frappe.local, _TIMEZONES_KEY, cache)
+	if name not in cache:
+		zone = frappe.db.get_value(STORE_DOCTYPE, name, "shop_timezone")
+		cache[name] = zone if _is_zone(zone) else site
+	return cache[name]
+
+
+def clear_timezone_cache() -> None:
+	"""Forget the request's cached store zones (after a store's ``shop_timezone`` changes)."""
+	setattr(frappe.local, _TIMEZONES_KEY, None)
+
+
+def _is_zone(name: str | None) -> bool:
+	if not name:
+		return False
+	try:
+		ZoneInfo(name)
+	except (ZoneInfoNotFoundError, ValueError):
+		return False
+	return True
+
+
+def site_to_store(value, store: str | None = None) -> datetime.datetime:
+	"""A naive site-clock datetime (as stored) as the naive wall time in the store's zone."""
+	site, zone = get_system_timezone(), store_timezone(store)
+	value = frappe.utils.get_datetime(value)
+	if site == zone:
+		return value
+	return value.replace(tzinfo=ZoneInfo(site)).astimezone(ZoneInfo(zone)).replace(tzinfo=None)
+
+
+def store_to_site(value, store: str | None = None) -> datetime.datetime:
+	"""
+	A naive wall time in the store's zone as the naive site-clock datetime, e.g. to filter a
+	Datetime field from the start of a store day or month.
+	"""
+	site, zone = get_system_timezone(), store_timezone(store)
+	value = frappe.utils.get_datetime(value)
+	if site == zone:
+		return value
+	return value.replace(tzinfo=ZoneInfo(zone)).astimezone(ZoneInfo(site)).replace(tzinfo=None)
+
+
+def store_now(store: str | None = None) -> datetime.datetime:
+	"""Now as the store's wall clock shows it (naive)."""
+	return site_to_store(now_datetime(), store)
+
+
+def store_today(store: str | None = None) -> datetime.date:
+	"""Today's date for the store: the merchant's local date (order, visit and posting dates)."""
+	return store_now(store).date()
+
+
+def store_month_bounds(day=None, store: str | None = None) -> tuple[datetime.date, datetime.date]:
+	"""First and last day of the store month holding ``day`` (default: the store's today)."""
+	day = getdate(day) if day else store_today(store)
+	return get_first_day(day), get_last_day(day)
+
+
+# Date fields that mean "the merchant's local date", filled on insert when left empty.
+STORE_DATE_FIELDS = {
+	"Field Order": "order_date",
+	"Visit": "visit_date",
+	"Commission Entry": "posting_date",
+}
+
+
+def fill_store_dates(doc, method: str | None = None) -> None:
+	"""``before_insert`` (after ``stamp_store``): an empty store date becomes the store's today."""
+	field = STORE_DATE_FIELDS.get(doc.doctype)
+	if field and not doc.get(field):
+		doc.set(field, store_today(doc.get("store")))
 
 
 def set_store_value(values: dict | str, value: Any = None, store: str | None = None) -> None:

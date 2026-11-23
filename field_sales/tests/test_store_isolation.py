@@ -1404,3 +1404,43 @@ class TestVendorStoreSwitch(StoreIsolationCase):
 		# A plain manager without the shop's session token still cannot.
 		self.as_user(self.a.manager)
 		self.assertRaises(frappe.PermissionError, merchant_settings.get_store_settings)
+
+
+class TestStoreRecordAccess(StoreIsolationCase):
+	"""The Store records themselves (and merchant settings): only vendor staff and the store's own users."""
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.savepoint("store_record_access")
+		self.multi = patch.dict(frappe.conf, MULTI)
+		self.multi.start()
+		self.addCleanup(self.multi.stop)
+
+	def tearDown(self):
+		frappe.db.rollback(save_point="store_record_access")
+		super().tearDown()
+
+	def test_a_store_admin_in_no_store_reaches_no_store(self):
+		from frappe.client import get as client_get
+
+		from field_sales.shopify import merchant_settings
+
+		self.as_user(make_user("isx.unassigned.admin@example.com", ["Store Admin"]))
+		for store in ("ISA", "ISB"):
+			with self.subTest(store=store):
+				self.assertFalse(frappe.has_permission("Store", "read", store))
+				self.assertFalse(frappe.has_permission("Store", "write", store))
+				self.assertRaises(frappe.PermissionError, client_get, "Store", store)
+		self.assertEqual(frappe.get_list("Store", pluck="name"), [])
+		self.assertRaises((frappe.PermissionError, frappe.ValidationError), merchant_settings.get_store_settings)
+
+	def test_a_store_admin_reaches_only_their_own_store(self):
+		self.as_user(self.a.admin)
+		self.assertTrue(frappe.has_permission("Store", "write", "ISA"))
+		self.assertFalse(frappe.has_permission("Store", "read", "ISB"))
+		self.assertEqual(frappe.get_list("Store", pluck="name"), ["ISA"])
+
+	def test_vendor_staff_reach_every_store(self):
+		self.as_user(self.vendor)
+		self.assertTrue(frappe.has_permission("Store", "write", "ISB"))
+		self.assertTrue({"ISA", "ISB"} <= set(frappe.get_list("Store", pluck="name")))

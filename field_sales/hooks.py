@@ -187,6 +187,8 @@ permission_query_conditions = {
 	"Sync Log": "field_sales.permissions.sync_log_query",
 	"Commission Plan": "field_sales.permissions.commission_plan_query",
 	"Privacy Request": "field_sales.permissions.privacy_request_query",
+	# The Store record itself: vendor staff all, a store's users their own, others none.
+	"Store": "field_sales.permissions.store_query",
 }
 
 has_permission = {
@@ -197,6 +199,7 @@ has_permission = {
 	"Commission Entry": "field_sales.permissions.commission_entry_has_permission",
 	"Commission Statement": "field_sales.permissions.commission_statement_has_permission",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_has_permission",
+	"Store": "field_sales.permissions.store_has_permission",
 	**{
 		doctype: "field_sales.permissions.store_only_has_permission"
 		for doctype in ("Platform Product", "Product Stock", "Sync Log", "Commission Plan", "Privacy Request")

@@ -430,6 +430,25 @@ def payment_transaction_has_permission(doc, ptype: str | None = None, user: str 
 	return _rep_in_allowed(frappe.db.get_value("Field Order", order, "sales_rep"), user)
 
 
+def store_query(user: str | None = None) -> str:
+	"""
+	The Store doctype itself: vendor staff see every Store, a store's user only theirs, and a
+	user in no store (on the shared site) none, whatever their role (also Store Admin).
+	"""
+	scope = store_scope(user or frappe.session.user)
+	if scope is None:
+		return ""
+	if scope == "":
+		return "1=0"
+	return f"`tabStore`.`name` = {frappe.db.escape(scope)}"
+
+
+def store_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
+	"""A Store is reached only by vendor staff and by the users who belong to it."""
+	scope = store_scope(user or frappe.session.user)
+	return scope is None or (bool(scope) and doc.name == scope)
+
+
 def store_only_has_permission(doc, ptype: str | None = None, user: str | None = None) -> bool:
 	"""Platform Product, Product Stock, Sync Log, Commission Plan, Privacy Request: the user's store."""
 	return _in_store(doc, user)

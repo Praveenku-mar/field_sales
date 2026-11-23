@@ -27,8 +27,8 @@ def send_daily_summary():
 	"""
 	Hourly: for every Store where it is ``SEND_HOUR`` or later on the store's clock, email every
 	manager (a user whose Sales Rep has others reporting to it) a summary of the store's today
-	for everyone under them, at all levels. Once per store and local date, so an hour run twice
-	(or a slow worker) sends nothing more.
+	for everyone under them, at all levels. Once per manager and local date, so an hour run twice
+	(or a slow worker) sends nothing more to a manager who already got it.
 
 	Managers whose team had no activity and no failures get no email. Disabled Stores are
 	included (their reps may still have worked today, e.g. while a token refresh is failing),
@@ -48,13 +48,16 @@ def _send_store_summaries():
 	if now.hour < SEND_HOUR:
 		return
 	today = str(now.date())
-	sent = frappe.cache.make_key(f"field_sales:daily_summary:{current_store()}:{today}")
-	if not frappe.cache.set(sent, 1, nx=True, ex=SENT_MARK_SECONDS):
-		return
 	for manager in _get_managers():
+		# Claimed per manager and store day before sending (NX: two overlapping runs never both
+		# send), and released when it fails, so the next hourly run tries that manager again.
+		sent = frappe.cache.make_key(f"field_sales:daily_summary:{current_store()}:{today}:{manager.user}")
+		if not frappe.cache.set(sent, 1, nx=True, ex=SENT_MARK_SECONDS):
+			continue
 		try:
 			_send_to_manager(manager, today)
 		except Exception:
+			frappe.cache.delete(sent)
 			# One bad manager record must not stop the others' summaries.
 			frappe.log_error(title=f"Field Sales daily summary failed for {manager.user}")
 

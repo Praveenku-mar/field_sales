@@ -179,3 +179,68 @@ class TestMobileFlows(SharedSiteFlowCase):
 				self.assertTrue(names, f"no {doctype} rows")
 				stores = set(frappe.get_all(doctype, filters={"name": ("in", names)}, pluck="store"))
 				self.assertEqual(stores, {"ISA"})
+
+
+class TestCrossStoreLinks(SharedSiteFlowCase):
+	"""A store A record can never point at store B's records, whatever ids its user knows."""
+
+	def new_order(self, **values):
+		from field_sales.utils.store import store_today
+
+		doc = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"retailer": self.a.retailer,
+				"sales_rep": self.a.rep,
+				"order_date": store_today("ISA"),
+				"items": [{"product": self.a.product, "qty": 1, "rate": 100}],
+				**values,
+			}
+		)
+		doc.flags.ignore_links = False
+		return doc
+
+	def test_an_order_cannot_use_another_stores_retailer_visit_or_product(self):
+		self.as_user(self.a.rep_user)
+		cases = {
+			"retailer": {"retailer": self.b.retailer},
+			"visit": {"visit": self.b.visit},
+			"product": {"items": [{"product": self.b.product, "qty": 1, "rate": 100}]},
+		}
+		for label, values in cases.items():
+			# The visit is refused first by the order's own rule (a visit to another retailer).
+			with self.subTest(link=label), self.assertRaises((frappe.PermissionError, frappe.ValidationError)):
+				self.new_order(**values).insert()
+		self.assert_store_b_untouched()
+
+	def test_a_saved_order_cannot_take_another_stores_product_later(self):
+		from field_sales.sync import orders
+
+		self.as_user(self.a.rep_user)
+		order = self.new_order().insert()
+		order.reload()
+		order.append("items", {"product": self.b.product, "qty": 1, "rate": 100})
+		with patch.object(orders, "enqueue_push_order") as push:
+			self.assertRaises(frappe.PermissionError, order.save)
+			# Submitting it (a fresh copy: the failed save stamped this one) is refused the same way.
+			order = frappe.get_doc("Field Order", order.name)
+			order.append("items", {"product": self.b.product, "qty": 1, "rate": 100})
+			self.assertRaises(frappe.PermissionError, order.submit)
+		push.assert_not_called()
+		self.assert_store_b_untouched()
+
+	def test_a_visit_cannot_go_to_another_stores_retailer(self):
+		from field_sales.utils.store import store_today
+
+		self.as_user(self.a.rep_user)
+		visit = frappe.get_doc(
+			{
+				"doctype": "Visit",
+				"sales_rep": self.a.rep,
+				"retailer": self.b.retailer,
+				"visit_date": store_today("ISA"),
+				"status": "Planned",
+			}
+		)
+		self.assertRaises(frappe.PermissionError, visit.insert)
+		self.assert_store_b_untouched()

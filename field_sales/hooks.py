@@ -242,11 +242,11 @@ doc_events = {
 				*(["field_sales.utils.store.fill_store_dates"] if doctype in _STORE_DATED else []),
 				*(["field_sales.utils.money.fill_currency"] if doctype in _PRICED else []),
 			],
-			**(
-				{"validate": "field_sales.permissions.check_owner_change"}
-				if doctype in _OWNER_CHECKED
-				else {}
-			),
+			# Links into another store are refused (utils/store.py -> check_store_links).
+			"validate": [
+				"field_sales.utils.store.check_store_links",
+				*(["field_sales.permissions.check_owner_change"] if doctype in _OWNER_CHECKED else []),
+			],
 		}
 		for doctype in field_sales_store_doctypes
 	},

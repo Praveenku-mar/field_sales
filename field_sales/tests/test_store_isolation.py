@@ -141,7 +141,8 @@ class TestRowIsolation(StoreIsolationCase):
 		self.as_user("Administrator")
 		doc = frappe.get_doc("Retailer", self.a.retailer)
 		doc.store = "ISB"
-		with self.assertRaises(frappe.ValidationError):
+		# Refused by the store-change rule, or (first) because its rep stays in store A.
+		with self.assertRaises((frappe.ValidationError, frappe.PermissionError)):
 			doc.save(ignore_permissions=True)
 
 	def test_a_user_cannot_create_a_record_for_another_store(self):
@@ -957,39 +958,50 @@ class TestStoreLocale(StoreIsolationCase):
 		assign_user_to_store(user, "ISB")
 		self.assertEqual(frappe.db.get_value("User", user, "time_zone"), "America/New_York")
 
-	def test_the_daily_summary_goes_at_each_stores_evening_once(self):
+	def run_summaries(self, site_now, runs=1, fail_first=False) -> list:
+		"""Run the hourly summary ``runs`` times at ``site_now``; returns (store, manager) per sent mail."""
 		from field_sales import daily_summary
 		from field_sales.utils.store import current_store
 
-		# 06:30 on the site (Kolkata) is 20:00 of the day before in New York, morning in store A.
 		self.clock.stop()
-		self.clock = patch("field_sales.utils.store.now_datetime", return_value=datetime.datetime(2026, 12, 1, 6, 30))
+		self.clock = patch("field_sales.utils.store.now_datetime", return_value=site_now)
 		self.clock.start()
-		key = frappe.cache.make_key("field_sales:daily_summary:ISB:2026-11-30")
-		frappe.cache.delete(key)
-		self.addCleanup(frappe.cache.delete, key)
-		seen = []
-		with patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []):
-			daily_summary.send_daily_summary()
-			daily_summary.send_daily_summary()  # the same hour again: nothing more
-		self.assertEqual(seen, ["ISB"])
+		manager = frappe._dict(user="isb.summary@example.com", name="ISB-MGR", full_name="ISB Manager")
+		for store, day in (("ISA", site_now.date()), ("ISB", (site_now - datetime.timedelta(days=1)).date())):
+			for date in (site_now.date(), day):
+				key = frappe.cache.make_key(f"field_sales:daily_summary:{store}:{date}:{manager.user}")
+				frappe.cache.delete(key)
+				self.addCleanup(frappe.cache.delete, key)
+		sent, failures = [], [fail_first]
+
+		def send(mgr, today):
+			if failures[0]:
+				failures[0] = False
+				raise ConnectionError("mail queue down")
+			sent.append((current_store(), mgr.user))
+
+		with (
+			patch.object(daily_summary, "_get_managers", side_effect=lambda: [manager] if current_store() in ("ISA", "ISB") else []),
+			patch.object(daily_summary, "_send_to_manager", side_effect=send),
+			patch.object(frappe, "log_error"),
+		):
+			for _ in range(runs):
+				daily_summary.send_daily_summary()
+		return sent
+
+	def test_the_daily_summary_goes_at_each_stores_evening_once(self):
+		# 06:30 on the site (Kolkata) is 20:00 of the day before in New York, morning in store A.
+		sent = self.run_summaries(datetime.datetime(2026, 12, 1, 6, 30), runs=2)
+		self.assertEqual(sent, [("ISB", "isb.summary@example.com")])
 
 	def test_a_late_run_still_sends_the_days_summary_once(self):
-		from field_sales import daily_summary
-		from field_sales.utils.store import current_store
-
 		# 07:35 on the site is 21:05 in New York: the 20:00 run was missed.
-		self.clock.stop()
-		self.clock = patch("field_sales.utils.store.now_datetime", return_value=datetime.datetime(2026, 12, 1, 7, 35))
-		self.clock.start()
-		key = frappe.cache.make_key("field_sales:daily_summary:ISB:2026-11-30")
-		frappe.cache.delete(key)
-		self.addCleanup(frappe.cache.delete, key)
-		seen = []
-		with patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []):
-			daily_summary.send_daily_summary()
-			daily_summary.send_daily_summary()
-		self.assertEqual(seen, ["ISB"])
+		sent = self.run_summaries(datetime.datetime(2026, 12, 1, 7, 35), runs=2)
+		self.assertEqual(sent, [("ISB", "isb.summary@example.com")])
+
+	def test_a_failed_summary_is_tried_again_next_run(self):
+		sent = self.run_summaries(datetime.datetime(2026, 12, 1, 6, 30), runs=2, fail_first=True)
+		self.assertEqual(sent, [("ISB", "isb.summary@example.com")])
 
 	def test_statements_wait_for_the_stores_own_month_to_end(self):
 		from field_sales.commission import statements

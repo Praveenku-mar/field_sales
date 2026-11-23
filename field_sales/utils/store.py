@@ -661,6 +661,42 @@ def report_store(filters, user: str | None = None) -> str | None:
 	return None
 
 
+def check_store_links(doc, method: str | None = None) -> None:
+	"""
+	``validate`` of every store doctype: each link to a store-scoped record (Retailer, Visit,
+	Sales Rep, Platform Product, …), in the document and in its child rows (an order's items),
+	must point into the document's own store.
+
+	Frappe only checks that a linked record exists, not whose it is, so without this a user of
+	store A who knows store B's ids could build an A order on B's retailer or products.
+	"""
+	store = doc.get("store")
+	if not store:
+		return
+	scoped = set(store_doctypes())
+	wanted: dict[str, set[str]] = {}
+
+	def collect(row, meta):
+		for df in meta.get_link_fields():
+			value = row.get(df.fieldname)
+			if value and df.options in scoped:
+				wanted.setdefault(df.options, set()).add(value)
+
+	collect(doc, doc.meta)
+	for table in doc.meta.get_table_fields():
+		child_meta = frappe.get_meta(table.options)
+		for row in doc.get(table.fieldname) or []:
+			collect(row, child_meta)
+
+	for doctype, names in wanted.items():
+		for row in frappe.get_all(doctype, filters={"name": ("in", list(names))}, fields=["name", "store"]):
+			if row.store and row.store != store:
+				frappe.throw(
+					_("{0} {1} belongs to another store").format(_(doctype), row.name),
+					frappe.PermissionError,
+				)
+
+
 def store_doctypes() -> list[str]:
 	"""The business doctypes that carry a ``store`` link (hook ``field_sales_store_doctypes``)."""
 	return list(frappe.get_hooks("field_sales_store_doctypes", app_name="field_sales"))

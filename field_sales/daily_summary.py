@@ -10,7 +10,13 @@ from frappe.utils import escape_html, fmt_money, formatdate, get_url
 from field_sales.field_sales.report.rep_performance.rep_performance import get_rep_stats, get_reps_in_scope
 from field_sales.permissions import clear_allowed_reps_cache
 from field_sales.utils.money import store_currency
-from field_sales.utils.store import current_store, for_each_store, store_criterion, store_now
+from field_sales.utils.store import (
+	current_store,
+	for_each_store,
+	store_criterion,
+	store_mail_args,
+	store_now,
+)
 
 # Local hour the summary goes out, and how long a store-day's "sent" mark is kept.
 SEND_HOUR = 20
@@ -86,6 +92,7 @@ def _send_to_manager(manager, today: str):
 		return
 
 	frappe.sendmail(
+		**store_mail_args(),
 		recipients=[manager.user],
 		subject=_("Agamsale summary for {0}").format(formatdate(today)),
 		message=_render(manager, today, active),

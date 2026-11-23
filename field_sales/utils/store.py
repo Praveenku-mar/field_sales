@@ -552,6 +552,37 @@ def stamp_store(doc, method: str | None = None) -> None:
 		)
 
 
+def store_mail_args(store: str | None = None) -> dict:
+	"""
+	``frappe.sendmail`` arguments that send a store's mail in its name (design D3), on the shared
+	site: the site's one outgoing account as sender with the store's name, and replies to the
+	store's company email. ``{}`` on single-store sites and without a store (mail as before).
+	"""
+	if not is_multi_store():
+		return {}
+	try:
+		name = get_store_name(store)
+	except NoStoreContext:
+		return {}
+	if not name:
+		return {}
+	from email.utils import formataddr
+
+	from frappe.email.doctype.email_account.email_account import EmailAccount
+
+	store_doc = frappe.db.get_value(
+		STORE_DOCTYPE, name, ["shop_name", "company_name", "company_email"], as_dict=True
+	) or frappe._dict()
+	args = {}
+	account = EmailAccount.find_default_outgoing()
+	if account and account.get("email_id"):
+		label = store_doc.company_name or store_doc.shop_name or name
+		args["sender"] = formataddr((label, account.email_id))
+	if store_doc.company_email:
+		args["reply_to"] = store_doc.company_email
+	return args
+
+
 def report_store(filters, user: str | None = None) -> str | None:
 	"""
 	The store a report covers: the user's own (``""``: none at all), or for vendor staff the

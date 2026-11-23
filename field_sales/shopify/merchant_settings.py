@@ -24,7 +24,7 @@ from frappe.utils import cint
 from field_sales.permissions import MANAGER_ROLES
 from field_sales.utils.db import safe_commit
 from field_sales.utils.guards import is_system_manager
-from field_sales.utils.store import get_store, get_store_value
+from field_sales.utils.store import get_store, get_store_value, is_multi_store
 
 # Store fields the merchant may change (the Settings forms send the whole doc).
 EDITABLE_FIELDS = (
@@ -214,8 +214,19 @@ def get_email_accounts() -> list[dict]:
 	"""
 	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
+	_refuse_on_shared_site()
 	filters = None if is_system_manager() else {"name": ("in", list(_merchant_accounts()) or [""])}
 	return _email_accounts(filters)
+
+
+def _refuse_on_shared_site() -> None:
+	"""
+	No merchant Email Accounts on the shared site: an Email Account serves the whole site, so one
+	merchant's account would send (and its list show) every merchant's mail. Mail goes out from
+	the vendor's account in the store's name instead (``utils/store.py -> store_mail_args``).
+	"""
+	if is_multi_store():
+		frappe.throw(_("Email accounts are managed by support on this site"), frappe.PermissionError)
 
 
 def _email_accounts(filters: dict | None) -> list[dict]:
@@ -242,6 +253,7 @@ def save_email_account(values: dict | str, name: str | None = None) -> dict:
 	"""
 	frappe.only_for(list(MANAGER_ROLES))
 	_require_merchant()
+	_refuse_on_shared_site()
 	values = frappe.parse_json(values) or {}
 	clean = {f: values[f] for f in EMAIL_FIELDS if f in values}
 	if values.get("password"):

@@ -1061,3 +1061,47 @@ class TestStoreLocale(StoreIsolationCase):
 			self.assertEqual(store_currency("ISB"), site_currency())
 		finally:
 			self.multi.start()
+
+	# -- Step 4: mail in the store's name, no merchant mail accounts, non-GST stores ------
+
+	def test_store_mail_goes_out_in_the_stores_name(self):
+		from frappe.email.doctype.email_account.email_account import EmailAccount
+
+		from field_sales.utils.store import store_mail_args
+
+		frappe.db.set_value(
+			"Store", "ISB", {"company_name": "ISB Traders", "company_email": "orders@isb.example.com"}
+		)
+		vendor_account = frappe._dict(email_id="noreply@vendor.example.com")
+		with patch.object(EmailAccount, "find_default_outgoing", return_value=vendor_account):
+			args = store_mail_args("ISB")
+			self.multi.stop()
+			try:
+				self.assertEqual(store_mail_args("ISB"), {})  # single-store sites: mail as before
+			finally:
+				self.multi.start()
+		self.assertEqual(args["sender"], "ISB Traders <noreply@vendor.example.com>")
+		self.assertEqual(args["reply_to"], "orders@isb.example.com")
+
+	def test_merchants_cannot_add_mail_accounts_on_the_shared_site(self):
+		from field_sales.shopify import merchant_settings
+
+		self.assertRaises(frappe.PermissionError, merchant_settings._refuse_on_shared_site)
+		self.multi.stop()
+		try:
+			merchant_settings._refuse_on_shared_site()  # allowed on single-store sites
+		finally:
+			self.multi.start()
+
+	def test_a_non_gst_store_charges_no_tax(self):
+		frappe.db.set_value("Store", "ISB", "tax_mode", "None")
+		doc = frappe.get_doc("Field Order", self.b.order)
+		doc.tax_percent = 18
+		doc._apply_tax_mode()
+		self.assertEqual(doc.tax_percent, 0)
+
+		frappe.db.set_value("Store", "ISA", "tax_mode", "GST")
+		doc = frappe.get_doc("Field Order", self.a.order)
+		doc.tax_percent = 18
+		doc._apply_tax_mode()
+		self.assertEqual(doc.tax_percent, 18)

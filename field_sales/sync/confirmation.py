@@ -19,6 +19,7 @@ from field_sales.utils.store import (
 	get_store_value,
 	invoice_series,
 	record_store,
+	store_mail_args,
 	store_today,
 )
 
@@ -202,6 +203,7 @@ def _send(doc, retailer, pay_link: dict | None = None):
 	pdf_bytes = _build_pdf(doc)
 
 	frappe.sendmail(
+		**store_mail_args(doc.store),
 		recipients=[retailer.email],
 		subject=_("Order confirmed: {0} — Invoice {1}").format(order_no, doc.invoice_no),
 		template="order_confirmation",

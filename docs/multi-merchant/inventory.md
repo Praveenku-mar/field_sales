@@ -246,8 +246,8 @@ Mechanisms: **doc permission** = `check_permission` / `has_permission` (the stor
 | `field_sales.shopify.merchant_settings.get_store_settings` |  | the user's own store |
 | `field_sales.shopify.merchant_settings.save_store_settings` |  | the user's own store |
 | `field_sales.shopify.merchant_settings.fetch_locations` |  | the user's own store |
-| `field_sales.shopify.merchant_settings.get_email_accounts` |  | site-wide Email Accounts: Phase 5 (vendor sender, D3) |
-| `field_sales.shopify.merchant_settings.save_email_account` |  | site-wide Email Accounts: Phase 5 (vendor sender, D3) |
+| `field_sales.shopify.merchant_settings.get_email_accounts` |  | refused on the shared site (`_refuse_on_shared_site`; mail goes out in the store's name, D3); single-store: merchant's own accounts only |
+| `field_sales.shopify.merchant_settings.save_email_account` |  | refused on the shared site (`_refuse_on_shared_site`; mail goes out in the store's name, D3); single-store: merchant's own accounts only |
 | `field_sales.shopify.oauth.install` | yes | guest; install of a shop: Phase 6 (a Store per shop) |
 | `field_sales.shopify.oauth.callback` | yes | guest; install of a shop: Phase 6 (a Store per shop) |
 | `field_sales.shopify.oauth.reset_connection` |  | vendor role gate; acts on the current store |

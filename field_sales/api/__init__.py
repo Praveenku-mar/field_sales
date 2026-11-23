@@ -46,7 +46,13 @@ from field_sales.utils.geo import (
 	point_geojson,
 )
 from field_sales.utils.limits import SALES_REPS, check_limit
-from field_sales.utils.store import get_store_value, set_store_value, store_today, user_is_reachable
+from field_sales.utils.store import (
+	get_store_value,
+	set_store_value,
+	store_mail_args,
+	store_today,
+	user_is_reachable,
+)
 from field_sales.utils.urls import public_url
 
 VISIT_MANAGER_ROLES = MANAGER_ROLES
@@ -603,6 +609,7 @@ def _send_retailer_invite(user: str, retailer: str) -> None:
 	link = frappe.get_doc("User", user)._reset_password(send_email=False)
 	store = _store_display_name()
 	frappe.sendmail(
+		**store_mail_args(frappe.db.get_value("Retailer", retailer, "store")),
 		recipients=[user],
 		subject=_("Welcome to {0}").format(store),
 		template="retailer_invite",

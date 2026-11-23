@@ -87,6 +87,7 @@ class FieldOrder(Document):
 		self._validate_products_for_sale()
 		self._validate_no_duplicate_products()
 		self._compute_item_amounts()
+		self._apply_tax_mode()
 		self._compute_totals()
 		self._validate_amounts()
 		self._validate_discount()
@@ -520,6 +521,11 @@ class FieldOrder(Document):
 			flt(self.net_total) + flt(self.tax_amount) - flt(self.discount_amount),
 			self.precision("grand_total"),
 		)
+
+	def _apply_tax_mode(self):
+		"""A store that charges no GST (Store ``tax_mode`` None) has no tax on its orders."""
+		if self.store and frappe.db.get_value("Store", self.store, "tax_mode") == "None":
+			self.tax_percent = 0
 
 	def _validate_amounts(self):
 		"""Bounds on what is sent to the store as the order's tax and discount."""

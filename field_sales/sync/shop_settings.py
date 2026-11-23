@@ -18,6 +18,7 @@ import frappe
 from frappe import _
 
 from field_sales.connectors import get_connector
+from field_sales.utils.money import fill_store_currency
 from field_sales.utils.store import (
 	for_each_store,
 	get_store_name,
@@ -52,6 +53,8 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 	if country:
 		values["shop_country"] = country
 	zone_changed = bool(timezone) and timezone != get_store_value("shop_timezone")
+	# The first sync of a store: its tax mode and missing record currencies come from it.
+	first_sync = not get_store_value("shop_country")
 	locked = _locked_currency(currency)
 	if locked:
 		values.pop("shop_currency")
@@ -59,9 +62,12 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		set_store_value(values)
 	if zone_changed and is_multi_store():
 		use_store_timezone_for_users(get_store_name())
+	if values.get("shop_currency") and is_multi_store():
+		fill_store_currency(get_store_name(), values["shop_currency"])
 
 	changes = []
-	tax_mode = _tax_mode_for_country(country)
+	# Only at the first sync: afterwards the tax mode is the merchant's own choice.
+	tax_mode = _tax_mode_for_country(country) if first_sync else None
 	if tax_mode:
 		set_store_value("tax_mode", tax_mode)
 		changes.append(_("Tax mode set to {0}").format(_(tax_mode)))

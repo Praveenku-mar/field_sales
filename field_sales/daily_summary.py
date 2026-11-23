@@ -25,7 +25,7 @@ SENT_MARK_SECONDS = 2 * 24 * 60 * 60
 
 def send_daily_summary():
 	"""
-	Hourly: for every Store where it is now ``SEND_HOUR`` on the store's clock, email every
+	Hourly: for every Store where it is ``SEND_HOUR`` or later on the store's clock, email every
 	manager (a user whose Sales Rep has others reporting to it) a summary of the store's today
 	for everyone under them, at all levels. Once per store and local date, so an hour run twice
 	(or a slow worker) sends nothing more.
@@ -44,7 +44,8 @@ def send_daily_summary():
 
 def _send_store_summaries():
 	now = store_now()
-	if now.hour != SEND_HOUR:
+	# From SEND_HOUR on (not only during it): a late run (busy workers, a restart) still sends.
+	if now.hour < SEND_HOUR:
 		return
 	today = str(now.date())
 	sent = frappe.cache.make_key(f"field_sales:daily_summary:{current_store()}:{today}")

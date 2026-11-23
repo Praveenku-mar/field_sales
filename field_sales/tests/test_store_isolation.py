@@ -974,6 +974,23 @@ class TestStoreLocale(StoreIsolationCase):
 			daily_summary.send_daily_summary()  # the same hour again: nothing more
 		self.assertEqual(seen, ["ISB"])
 
+	def test_a_late_run_still_sends_the_days_summary_once(self):
+		from field_sales import daily_summary
+		from field_sales.utils.store import current_store
+
+		# 07:35 on the site is 21:05 in New York: the 20:00 run was missed.
+		self.clock.stop()
+		self.clock = patch("field_sales.utils.store.now_datetime", return_value=datetime.datetime(2026, 12, 1, 7, 35))
+		self.clock.start()
+		key = frappe.cache.make_key("field_sales:daily_summary:ISB:2026-11-30")
+		frappe.cache.delete(key)
+		self.addCleanup(frappe.cache.delete, key)
+		seen = []
+		with patch.object(daily_summary, "_get_managers", side_effect=lambda: seen.append(current_store()) or []):
+			daily_summary.send_daily_summary()
+			daily_summary.send_daily_summary()
+		self.assertEqual(seen, ["ISB"])
+
 	def test_statements_wait_for_the_stores_own_month_to_end(self):
 		from field_sales.commission import statements
 		from field_sales.utils.store import current_store
@@ -1187,6 +1204,43 @@ class TestStoreLifecycle(StoreIsolationCase):
 		with use_store("ISB"):
 			sync_shop_settings({**shop, "country": "US"})
 		self.assertEqual(frappe.db.get_value("Store", "ISB", "tax_mode"), "GST")
+
+	def test_records_made_before_the_store_currency_is_known_get_it_later(self):
+		from field_sales.sync.shop_settings import sync_shop_settings
+		from field_sales.utils.store import use_store
+
+		if not frappe.db.exists("Currency", "USD"):
+			frappe.get_doc({"doctype": "Currency", "currency_name": "USD", "enabled": 1}).insert()
+		store = self.install("islc-early.myshopify.com")
+		with use_store(store):
+			product = frappe.get_doc(
+				{
+					"doctype": "Platform Product",
+					"platform": "Shopify",
+					"product_title": "Early product",
+					"external_product_id": "8801",
+					"external_variant_id": "8801",
+					"status": "Active",
+					"price": 10,
+				}
+			).insert(ignore_permissions=True)
+			# Never the site's currency while the store's is unknown.
+			self.assertFalse(product.currency)
+			sync_shop_settings({"currency": "USD", "timezone": "America/New_York", "country": "US"})
+		self.assertEqual(frappe.db.get_value("Platform Product", product.name, "currency"), "USD")
+
+	def test_a_merchants_tax_mode_choice_survives_later_syncs(self):
+		from field_sales.sync.shop_settings import sync_shop_settings
+		from field_sales.utils.store import use_store
+
+		shop = {"currency": "INR", "timezone": "Asia/Kolkata", "country": "IN"}
+		store = self.install("islc-choice.myshopify.com")
+		with use_store(store):
+			sync_shop_settings(shop)  # first sync: GST from the country
+			self.assertEqual(frappe.db.get_value("Store", store, "tax_mode"), "GST")
+			frappe.db.set_value("Store", store, "tax_mode", "None")  # not GST-registered
+			sync_shop_settings(shop)  # the daily sync
+		self.assertEqual(frappe.db.get_value("Store", store, "tax_mode"), "None")
 
 	# -- uninstall, redact, reinstall ---------------------------------------------------
 

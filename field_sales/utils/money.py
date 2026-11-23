@@ -30,7 +30,34 @@ def record_currency(doc) -> str:
 	return doc.get("currency") or store_currency(doc.get("store"))
 
 
+# Records that carry their store's currency (filled on insert, and backfilled by fill_store_currency).
+PRICED_DOCTYPES = ("Field Order", "Platform Product")
+
+
 def fill_currency(doc, method: str | None = None) -> None:
-	"""``before_insert`` (after ``stamp_store``) of Field Order and Platform Product: their currency."""
-	if not doc.get("currency"):
-		doc.currency = store_currency(doc.get("store"))
+	"""
+	``before_insert`` (after ``stamp_store``) of Field Order and Platform Product: their currency.
+
+	On the shared site a new store's currency is not known until its first shop settings sync;
+	until then the record is left without one (never the site's, which would stay wrong), and
+	``fill_store_currency`` gives it the store's once that sync saves it.
+	"""
+	if doc.get("currency"):
+		return
+	if is_multi_store():
+		try:
+			doc.currency = get_store_value("shop_currency", store=doc.get("store")) or None
+		except NoStoreContext:
+			doc.currency = None
+		return
+	doc.currency = site_currency()
+
+
+def fill_store_currency(store: str, currency: str) -> None:
+	"""Give ``store``'s records still without a currency (made before it was known) ``currency``."""
+	for doctype in PRICED_DOCTYPES:
+		frappe.db.sql(
+			f"""update `tab{doctype}` set currency = %(currency)s
+			where store = %(store)s and (currency is null or currency = '')""",
+			{"currency": currency, "store": store},
+		)

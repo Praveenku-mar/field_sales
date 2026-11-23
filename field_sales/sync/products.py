@@ -21,7 +21,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.push.events import crossed_low_stock, notify_low_stock
 from field_sales.sync.stock import get_sell_locations, set_location_stock
 from field_sales.utils.db import safe_commit
-from field_sales.utils.store import get_store, get_store_name, use_store
+from field_sales.utils.store import get_store_name, use_store
 
 # One queued sync per store: f"{JOB_ID}:{store}" (sync_job_id), so one store's sync never hides another's.
 JOB_ID = "field_sales:product_sync"
@@ -122,7 +122,9 @@ def _due_since(store: str):
 	``False`` when ``store``'s product sync is not due; else its last product sync time (``None``:
 	never synced), used to queue the most overdue store first.
 	"""
-	settings = get_store(store)
+	settings = frappe.db.get_value(
+		"Store", store, ["default_location_id", "product_sync_frequency"], as_dict=True
+	) or frappe._dict()
 	if not settings.default_location_id:
 		return False
 

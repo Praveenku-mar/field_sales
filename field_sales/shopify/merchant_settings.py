@@ -179,12 +179,21 @@ def setup_new_store() -> None:
 	Background job after an install: if no default location is set yet, use the store's first
 	location (ticked Sell from here) and start the first product sync. Never overrides a choice.
 	"""
-	settings = get_store()
-	if settings.default_location_id or not settings.enabled:
+	state = get_store_value(["default_location_id", "enabled"], as_dict=True) or frappe._dict()
+	if state.default_location_id or not state.enabled:
 		return
 	from field_sales.connectors import get_connector
 	from field_sales.sync.products import enqueue_sync
+	from field_sales.sync.shop_settings import sync_shop_settings
 
+	# The shop's currency, time zone and country first: products are recorded in its currency.
+	# A failure is logged and the daily sync tries again; products made meanwhile are filled then.
+	# Before the Store is loaded below: the sync writes to it.
+	try:
+		sync_shop_settings()
+	except Exception:
+		frappe.log_error(title="Field Sales: shop settings at install failed")
+	settings = get_store()
 	locations = get_connector().get_locations()
 	if not locations:
 		return

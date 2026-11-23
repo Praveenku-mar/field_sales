@@ -18,6 +18,11 @@ frappe.ui.form.on("Field Order", {
 
 	onload: function (frm) {
 		_listen_for_sync(frm);
+		// No "Today" default in the DocType (the server fills the store's date: fill_store_dates);
+		// Desk shows today in the user's time zone, which is the store's on the shared site.
+		if (frm.is_new() && !frm.doc.order_date) {
+			frm.set_value("order_date", frappe.datetime.get_today());
+		}
 	},
 
 	refresh: function (frm) {

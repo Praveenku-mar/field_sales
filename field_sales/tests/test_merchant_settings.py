@@ -125,6 +125,11 @@ class TestMerchantSettings(IntegrationTestCase):
 				"field_sales.connectors.shopify.ShopifyConnector.get_locations",
 				return_value=[{"id": "7", "name": "Warehouse"}, {"id": "8", "name": "Shop"}],
 			),
+			# setup_new_store reads the shop's currency / zone / country first.
+			patch(
+				"field_sales.connectors.shopify.ShopifyConnector.get_shop_settings",
+				return_value={"currency": "INR", "timezone": "Asia/Kolkata", "country": "IN"},
+			),
 			patch("field_sales.sync.products.frappe.enqueue") as sync,
 			patch.object(frappe.db, "commit"),
 		):

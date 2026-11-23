@@ -21,6 +21,8 @@ function test_connection(frm) {
 	frappe
 		.call({
 			method: "field_sales.api.test_connection",
+			// This Store: vendor staff on the shared site have no store of their own.
+			args: { store: frm.doc.name },
 			freeze: true,
 			freeze_message: __("Testing connection..."),
 		})
@@ -63,6 +65,7 @@ function fetch_locations(frm) {
 		.call({
 			method: "field_sales.api.get_locations",
 			type: "GET",
+			args: { store: frm.doc.name },
 			freeze: true,
 			freeze_message: __("Fetching locations..."),
 		})

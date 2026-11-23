@@ -3,6 +3,7 @@
 
 """Whitelisted endpoints used by the Store, Retailer, Visit and Field Order forms and the Platform Product view."""
 
+from contextlib import nullcontext
 from typing import NoReturn
 from urllib.parse import urlsplit
 
@@ -51,6 +52,7 @@ from field_sales.utils.store import (
 	set_store_value,
 	store_mail_args,
 	store_today,
+	use_store,
 	user_is_reachable,
 )
 from field_sales.utils.urls import public_url
@@ -76,9 +78,28 @@ def _retailer_login_url() -> str:
 
 
 @frappe.whitelist(methods=["POST"])
-def test_connection() -> dict:
+def test_connection(store: str | None = None) -> dict:
+	"""
+	Test the store's Shopify connection. ``store``: the Store form's own record (Desk, where vendor
+	staff have no store of their own); the app leaves it out and tests the user's store.
+	"""
 	frappe.only_for(list(ADMIN_ROLES))
+	with _in_store_of_form(store):
+		return _test_connection()
 
+
+def _in_store_of_form(store: str | None):
+	"""
+	Run inside ``store`` once the user may write that Store (vendor staff any, a store's admin
+	only their own: ``permissions.store_has_permission``); without ``store``, the user's own.
+	"""
+	if not store:
+		return nullcontext()
+	frappe.has_permission("Store", "write", store, throw=True)
+	return use_store(store)
+
+
+def _test_connection() -> dict:
 	conn = get_connector()
 	result = conn.test_connection()
 	if result.get("ok"):
@@ -113,13 +134,15 @@ def _sync_shop_settings(result: dict) -> dict:
 
 
 @frappe.whitelist()
-def get_locations() -> list[dict]:
+def get_locations(store: str | None = None) -> list[dict]:
+	"""The shop's locations; ``store`` as for ``test_connection`` (the Store form passes its own)."""
 	frappe.only_for(list(ADMIN_ROLES))
 
-	try:
-		return get_connector().get_locations()
-	except ConnectorError as e:
-		frappe.throw(e.message, title=_("Could not fetch locations"))
+	with _in_store_of_form(store):
+		try:
+			return get_connector().get_locations()
+		except ConnectorError as e:
+			frappe.throw(e.message, title=_("Could not fetch locations"))
 
 
 @frappe.whitelist()

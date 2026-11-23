@@ -149,8 +149,8 @@ Mechanisms: **doc permission** = `check_permission` / `has_permission` (the stor
 
 | Endpoint | Guest | Stays in the store by |
 |---|---|---|
-| `field_sales.api.test_connection` |  | role gate; acts on the user's own store |
-| `field_sales.api.get_locations` |  | role gate; acts on the user's own store |
+| `field_sales.api.test_connection` |  | role gate; acts on the user's own store, or on the Store form's `store` after `has_permission("Store", "write")` (vendor staff any, a store's admin only their own) |
+| `field_sales.api.get_locations` |  | role gate; the user's own store, or the Store form's `store` (as `test_connection`) |
 | `field_sales.api.get_sell_locations` |  | doc permission |
 | `field_sales.api.enqueue_product_sync` |  | role gate; syncs the user's own store (job id per store) |
 | `field_sales.api.enqueue_customer_import` |  | role gate; imports into the user's own store (`enqueue_in_store`, job id per store) |

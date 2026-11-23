@@ -1601,3 +1601,31 @@ class TestStoreAdminOnboarding(StoreIsolationCase):
 
 		with patch.dict(frappe.conf, {"field_sales_multi_store": 0}):
 			self.assertFalse(needs_admin_setup(self.store))
+
+	def test_the_store_forms_buttons_act_on_that_store(self):
+		from unittest.mock import MagicMock
+
+		from field_sales import api
+		from field_sales.utils.store import current_store
+
+		used = []
+
+		def connector(*args, **kwargs):
+			used.append(current_store())
+			conn = MagicMock()
+			conn.test_connection.return_value = {"ok": False, "message": "test"}
+			conn.get_locations.return_value = [{"id": "1", "name": "Main"}]
+			return conn
+
+		with patch.object(api, "get_connector", side_effect=connector):
+			# Vendor staff (no store of their own) on Store B's form.
+			self.as_user(self.vendor)
+			api.test_connection(store="ISB")
+			api.get_locations(store="ISB")
+			self.assertEqual(used, ["ISB", "ISB"])
+			# A store's admin: their own store's form only.
+			self.as_user(self.a.admin)
+			self.assertRaises(frappe.PermissionError, api.test_connection, store="ISB")
+			used.clear()
+			api.test_connection()  # no store: the user's own (resolved by get_connector), never B
+			self.assertNotIn("ISB", used)

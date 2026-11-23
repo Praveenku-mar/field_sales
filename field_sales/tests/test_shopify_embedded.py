@@ -127,8 +127,15 @@ class TestSessionToken(EmbeddedTestCase):
 		self.assertEqual(frappe.local.form_dict, {"doctype": "Retailer", "key": "open_orders"})
 
 	def test_auth_hook_uses_configured_embedded_user(self):
+		from field_sales.tests.store_fixtures import make_user
+
+		user = make_user("embedded.configured@example.com", ["Sales Manager"])
+		set_store_value("embedded_user", user)
+		self.assertEqual(self.authenticate(make_token()), user)
+
+	def test_auth_hook_never_signs_in_as_administrator(self):
 		set_store_value("embedded_user", "Administrator")
-		self.assertEqual(self.authenticate(make_token()), "Administrator")
+		self.assertEqual(self.authenticate(make_token()), f"shopify-admin@{frappe.local.site}")
 
 	def test_cookie_session_wins(self):
 		self.request(token=make_token(secret="wrong"))

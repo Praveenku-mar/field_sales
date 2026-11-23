@@ -467,7 +467,13 @@ def link_order_from_event(conn, external_order_id: str, payload: dict) -> str | 
 		return None
 	d = frappe.db.get_value(
 		"Field Order",
-		{"name": name, "docstatus": 1, "sync_status": "Synced", "external_draft_id": ("is", "set")},
+		{
+			**store_filters(),
+			"name": name,
+			"docstatus": 1,
+			"sync_status": "Synced",
+			"external_draft_id": ("is", "set"),
+		},
 		LINK_FIELDS,
 		as_dict=True,
 	)

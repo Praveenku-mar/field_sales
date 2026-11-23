@@ -36,7 +36,13 @@ from field_sales.field_sales.doctype.commission_entry.commission_entry import (
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
 from field_sales.utils.money import record_currency
-from field_sales.utils.store import enqueue_in_store, get_store_value, record_store, store_today
+from field_sales.utils.store import (
+	enqueue_in_store,
+	get_store_value,
+	record_store,
+	store_filters,
+	store_today,
+)
 
 ENTRY_FIELDS = [
 	"name",
@@ -101,8 +107,11 @@ def reconcile_order(external_order_id: str) -> dict:
 		return {"note": "Ignored: commission is turned off"}
 	external_order_id = str(external_order_id or "")
 	# Cancelled Field Orders too: their store order's cancel / refund must still reverse the entries.
+	# Only the current store's: an event of one shop never reaches another store's order.
 	name = frappe.db.get_value(
-		"Field Order", {"external_order_id": external_order_id, "docstatus": ("in", (1, 2))}, "name"
+		"Field Order",
+		{**store_filters(), "external_order_id": external_order_id, "docstatus": ("in", (1, 2))},
+		"name",
 	)
 	if not name:
 		return {"note": "Ignored: not a Field Sales order"}

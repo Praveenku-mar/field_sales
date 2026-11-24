@@ -23,6 +23,8 @@ from field_sales.utils.store import is_multi_store, make_store_code, store_docty
 SOURCE = "Store Connection"
 VENDOR_FIELDS = ("failed_log_retention_days", "plan_limits")
 PASSWORD_FIELDS = ("shopify_client_secret", "access_token", "refresh_token")
+# Records given their store per UPDATE (and commit) by _fill_store_links.
+BATCH_SIZE = 10_000
 
 
 def execute():
@@ -92,7 +94,19 @@ def _fill_store_links(store: str) -> None:
 	for doctype in store_doctypes():
 		if not frappe.db.has_column(doctype, "store"):
 			frappe.reload_doc("field_sales", "doctype", frappe.scrub(doctype))
-		frappe.db.sql(
-			f"update `tab{doctype}` set store = %s where store is null or store = ''",
-			store,
-		)
+		_fill_doctype(doctype, store)
+
+
+def _fill_doctype(doctype: str, store: str) -> None:
+	"""
+	Give ``doctype``'s records without a store ``store``, ``BATCH_SIZE`` rows at a time with a
+	commit after each: one ``UPDATE`` over years of Sync Logs or Product Stock would lock the
+	table for the whole migrate. Picked by name (``store`` is indexed), so it also runs on Postgres.
+	"""
+	table = frappe.qb.DocType(doctype)
+	no_store = table.store.isnull() | (table.store == "")
+	while names := (
+		frappe.qb.from_(table).select(table.name).where(no_store).limit(BATCH_SIZE).run(pluck=True)
+	):
+		frappe.qb.update(table).set(table.store, store).where(table.name.isin(names)).run()
+		frappe.db.commit()

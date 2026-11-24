@@ -3,7 +3,8 @@
 
 """
 Two stores on one site: a user of store A reaches nothing of store B, whatever their role,
-and vendor staff (a System Manager with no store) reach both.
+and vendor staff (a user of no store holding Field Sales Vendor; on a single-store site a System
+Manager of no store) reach both.
 """
 
 import datetime
@@ -14,6 +15,7 @@ from frappe.tests import IntegrationTestCase
 
 from field_sales.tests.store_fixtures import make_store_team, make_user, reset_request_caches
 from field_sales.utils.store import (
+	VENDOR_ROLE,
 	assign_user_to_store,
 	clear_store_cache,
 	is_vendor,
@@ -60,7 +62,7 @@ class StoreIsolationCase(IntegrationTestCase):
 		frappe.set_user("Administrator")
 		cls.a = make_store_team("ISA")
 		cls.b = make_store_team("ISB")
-		cls.vendor = make_user("isolation.vendor@example.com", ["System Manager"])
+		cls.vendor = make_user("isolation.vendor@example.com", ["System Manager", VENDOR_ROLE])
 		# A user of store B who is not a rep (yet): store A must not be able to adopt them.
 		cls.b.spare = make_user("isb.spare@example.com", ["Field Sales Rep"])
 		assign_user_to_store(cls.b.spare, "ISB")
@@ -969,9 +971,9 @@ class TestStoreLocale(StoreIsolationCase):
 		manager = frappe._dict(user="isb.summary@example.com", name="ISB-MGR", full_name="ISB Manager")
 		for store, day in (("ISA", site_now.date()), ("ISB", (site_now - datetime.timedelta(days=1)).date())):
 			for date in (site_now.date(), day):
-				key = frappe.cache.make_key(f"field_sales:daily_summary:{store}:{date}:{manager.user}")
-				frappe.cache.delete(key)
-				self.addCleanup(frappe.cache.delete, key)
+				for key in daily_summary._summary_keys(store, str(date), manager.user):
+					frappe.cache.delete(key)
+					self.addCleanup(frappe.cache.delete, key)
 		sent, failures = [], [fail_first]
 
 		def send(mgr, today):
@@ -1629,3 +1631,104 @@ class TestStoreAdminOnboarding(StoreIsolationCase):
 			used.clear()
 			api.test_connection()  # no store: the user's own (resolved by get_connector), never B
 			self.assertNotIn("ISB", used)
+
+	def test_an_existing_account_of_no_store_cannot_be_made_the_admin(self):
+		from field_sales.utils.store import user_store
+
+		# Support staff (no store, no vendor role) and a disabled website user: naming either
+		# would let the store's Shopify admins sign in as them and move them into the store.
+		staff = make_user("isob.support@example.com", ["Sales Manager"])
+		disabled = make_user("isob.disabled@example.com", ["Field Sales Rep"])
+		frappe.db.set_value("User", disabled, "enabled", 0)
+		self.as_shopify_admin()
+		for email in (staff, disabled):
+			with self.subTest(email=email), self.assertRaises(frappe.ValidationError):
+				self.set_admin(email)
+			reset_request_caches()
+			self.assertIsNone(user_store(email))
+			self.assertNotIn("Store Admin", frappe.get_roles(email))
+		self.assertEqual(frappe.db.get_value("User", disabled, "enabled"), 0)
+
+	def test_a_store_user_holding_a_site_wide_role_cannot_be_the_admin(self):
+		user = make_user("isob.sysman@example.com", ["Sales Manager", "System Manager"])
+		assign_user_to_store(user, self.store)
+		self.as_shopify_admin()
+		self.assertRaises(frappe.ValidationError, self.set_admin, user)
+
+	def test_naming_the_admin_keeps_the_callers_session(self):
+		self.as_shopify_admin()
+		# A real request's session (frappe.set_user in a test leaves sid = the user's name).
+		frappe.session.sid = "isob-session-sid"
+		frappe.session.data = frappe._dict(csrf_token="isob-csrf")
+		session = frappe.session.user, frappe.session.sid, dict(frappe.session.data)
+		frappe.local.form_dict = frappe._dict(email="owner.session@example.com")
+		self.set_admin("owner.session@example.com")
+		self.assertEqual((frappe.session.user, frappe.session.sid, dict(frappe.session.data)), session)
+		self.assertEqual(frappe.local.form_dict.email, "owner.session@example.com")
+
+	def test_a_changed_admin_is_no_longer_store_admin(self):
+		self.as_shopify_admin()
+		self.set_admin("owner.first@example.com")
+		self.as_user("owner.first@example.com")
+		self.set_admin("owner.second@example.com")
+		self.assertNotIn("Store Admin", frappe.get_roles("owner.first@example.com"))
+		# Still a manager of the store.
+		self.assertIn("Sales Manager", frappe.get_roles("owner.first@example.com"))
+		self.assertIn("Store Admin", frappe.get_roles("owner.second@example.com"))
+
+
+class TestSharedSiteVendorRule(StoreIsolationCase):
+	"""On the shared site only the vendor role makes a user of no store vendor staff."""
+
+	def setUp(self):
+		super().setUp()
+		multi = patch.dict(frappe.conf, MULTI)
+		multi.start()
+		self.addCleanup(multi.stop)
+
+	def test_a_system_manager_of_no_store_reaches_no_store(self):
+		user = make_user("isolation.sysman-only@example.com", ["System Manager"])
+		self.as_user(user)
+		self.assertFalse(is_vendor())
+		self.assertEqual(store_scope(), "")
+		self.assertEqual(frappe.get_list("Retailer", pluck="name"), [])
+
+	def test_the_vendor_role_reaches_every_store(self):
+		self.as_user(self.vendor)
+		self.assertTrue(is_vendor())
+		self.assertIsNone(store_scope())
+
+	def test_an_unassigned_user_never_falls_back_to_the_only_store(self):
+		from field_sales.utils.store import get_store_name
+
+		user = make_user("isolation.unassigned@example.com", ["Sales Manager"])
+		self.as_user(user)
+		# Even with a single Store on the site (early rollout).
+		with patch("field_sales.utils.store.frappe.get_all", return_value=["ISA"]):
+			self.assertIsNone(get_store_name())
+			self.assertRaises(frappe.PermissionError, get_store_name, required=True)
+
+	def test_vendor_alerts_go_to_vendor_staff_only(self):
+		from field_sales.sync.notify import clear_role_users_cache, users_with_roles
+
+		make_user("isolation.sysman-only@example.com", ["System Manager"])
+		clear_role_users_cache()
+		vendors = users_with_roles(("System Manager",), vendor=True)
+		self.assertIn(self.vendor, vendors)
+		self.assertNotIn("isolation.sysman-only@example.com", vendors)
+
+	def test_products_of_two_stores_may_share_a_variant_id(self):
+		names = []
+		for store in ("ISA", "ISB"):
+			doc = frappe.get_doc(
+				{
+					"doctype": "Platform Product",
+					"platform": "Shopify",
+					"external_variant_id": "isolation-shared-variant",
+					"external_product_id": "isolation-shared-product",
+					"product_title": "Shared",
+					"store": store,
+				}
+			).insert(ignore_permissions=True)
+			names.append(doc.name)
+		self.assertEqual(names, ["Shopify-ISA-isolation-shared-variant", "Shopify-ISB-isolation-shared-variant"])

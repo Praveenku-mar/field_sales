@@ -227,7 +227,7 @@ Mechanisms: **doc permission** = `check_permission` / `has_permission` (the stor
 | `field_sales.frontend_api.get_session` |  | the session user's own roles, rep and store |
 | `field_sales.frontend_api.get_vendor_stores` |  | vendor staff on the shared site only (`_require_vendor`); lists Stores, no records |
 | `field_sales.frontend_api.switch_store` |  | vendor staff on the shared site only; sets this session's store (`set_vendor_store`) and comments on the Store |
-| `field_sales.shopify.store_admin.set_store_admin` |  | the current store's Store Admin (`store_scope()` == the store) or vendor staff, shared site only; the email may not be vendor staff or another store's user (`can_be_embedded_user`) |
+| `field_sales.shopify.store_admin.set_store_admin` |  | the current store's Store Admin (`store_scope()` == the store) or vendor staff, shared site only; the email is a new account or one already in this store (`_check_admin_candidate`: never an existing account of no store, vendor staff, another store's user or a holder of System Manager / Field Sales Vendor); the previous admin loses Store Admin |
 | `field_sales.shopify.store_admin.resend_admin_invite` |  | as `set_store_admin`; mails the store's own admin |
 | `field_sales.shopify.store_admin.update_password` | yes | Frappe's `update_password` (override); only adds a sign-out and the login page for a store's user after a reset link |
 | `field_sales.frontend_api.get_sidebar_counts` |  | counts through `get_list` (store + hierarchy hooks) |

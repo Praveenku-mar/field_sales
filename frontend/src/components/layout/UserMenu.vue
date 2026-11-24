@@ -40,7 +40,11 @@ const { canInstall, showIosHint, install } = useInstallPrompt()
 const iosHintOpen = ref(false)
 
 async function switchStore() {
-  await callMethod('field_sales.frontend_api.switch_store')
+  try {
+    await callMethod('field_sales.frontend_api.switch_store')
+  } catch {
+    return // callMethod showed the error
+  }
   window.location.reload()
 }
 

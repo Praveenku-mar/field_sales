@@ -197,7 +197,7 @@ Platform-neutral (D2).
 
 **Decided (21 Nov 2026):**
 - **Q1 Store code.** Generated at install from the shop name (2–4 chars, numeric suffix if taken). Vendor staff can change it until the store's first invoice is issued; after that it is fixed (`Store.validate` refuses the change once any Field Order of the store has an `invoice_no`).
-- **Q2 Vendor support access.** Vendor System Managers have no store by default and see all stores in Desk. In the web app they pick a store with a "switch store" control, which sets the current store for their session only (vendor staff only) and writes a Comment / Activity Log entry on the Store for each switch.
+- **Q2 Vendor support access.** Vendor staff have no store and hold the **Field Sales Vendor** role (`utils/store.py → VENDOR_ROLE`; on a single-store site a System Manager of no store), and see all stores in Desk. Lacking a store alone never grants it: a System Manager of no store without the role reaches no store. In the web app they pick a store with a "switch store" control, which sets the current store for their session only (vendor staff only) and writes a Comment / Activity Log entry on the Store for each switch.
 - **Q3 Install type.** The shared site accepts OAuth (App Store) installs only. `Store.shopify_auth_mode` is fixed to OAuth there. The client-credentials code path stays for single-store sites and is selected by a site_config flag (`field_sales_multi_store`), so the client id/secret fields are dropped from Store.
 - **Q4 Razorpay.** Dropped from the shared site entirely (App Store requirement 1.1.2); kept for single-store sites. Rep collections are recorded in Field Sales only and never pushed to Shopify as payments.
 

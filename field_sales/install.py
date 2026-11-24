@@ -16,10 +16,12 @@ def after_install():
 	- ``create_first_store``: a single-store site gets its Store (code ``MAIN`` until a shop is
 	  connected) so settings and new records have a store; skipped on the shared multi-store site.
 	- ``assign_users_to_store``: its existing users belong to that store.
+	- ``vendor_role``: the role that makes a user of no store vendor staff on the shared site.
 	"""
 	from field_sales.patches.v1_0 import retailer_role
-	from field_sales.patches.v2_0 import assign_users_to_store, create_first_store
+	from field_sales.patches.v2_0 import assign_users_to_store, create_first_store, vendor_role
 
 	retailer_role.execute()
 	create_first_store.execute()
 	assign_users_to_store.execute()
+	vendor_role.execute()

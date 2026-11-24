@@ -499,7 +499,9 @@ def _assign_order_location(conn, field_order, order_id: str, location_id: str | 
 	try:
 		conn.assign_order_location(order_id, location_id, field_order)
 	except ConnectorError:
-		pass
+		# Not lost: every failed store call (and token refresh) already wrote a Failed Sync Log
+		# for this order (connectors/shopify.py -> _graphql), which the sync monitor shows.
+		return
 	except Exception:
 		frappe.log_error(title=f"Assigning the store order location failed: {field_order.name}")
 

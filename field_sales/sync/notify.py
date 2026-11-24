@@ -8,7 +8,7 @@ from frappe import _
 
 from field_sales.permissions import ADMIN_ROLES, MANAGER_ROLES
 from field_sales.push.notify import notify_users
-from field_sales.utils.store import get_store_name, is_multi_store, user_store
+from field_sales.utils.store import get_store_name, is_multi_store, is_vendor, user_store
 
 # Roles that can open the Sync Failures page and inspect sync logs (Admin only).
 MONITOR_ROLES = tuple(ADMIN_ROLES)
@@ -70,7 +70,9 @@ def users_with_roles(roles: tuple[str, ...], store: str | None = None, vendor: b
 def _in_scope(user: str, store: str | None, vendor: bool) -> bool:
 	own = user_store(user)
 	if vendor:
-		return not own
+		# Vendor staff only: on the shared site a user of no store without the vendor role is
+		# nobody's staff and gets no alerts (utils/store.py -> is_vendor).
+		return not own and (not is_multi_store() or is_vendor(user))
 	return own == store or (not own and not is_multi_store())
 
 

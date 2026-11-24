@@ -3,6 +3,8 @@
 
 """Daily email to each manager summarising their reps' day, at 20:00 on each store's clock."""
 
+import functools
+
 import frappe
 from frappe import _
 from frappe.utils import escape_html, fmt_money, formatdate, get_url
@@ -21,6 +23,9 @@ from field_sales.utils.store import (
 # Local hour the summary goes out, and how long a store-day's "sent" mark is kept.
 SEND_HOUR = 20
 SENT_MARK_SECONDS = 2 * 24 * 60 * 60
+# How long a run holds a manager's summary while sending it: shorter than the hourly tick, so a
+# run that died before its commit (worker killed, timeout) leaves the next run free to send.
+CLAIM_SECONDS = 50 * 60
 
 
 def send_daily_summary():
@@ -49,17 +54,26 @@ def _send_store_summaries():
 		return
 	today = str(now.date())
 	for manager in _get_managers():
-		# Claimed per manager and store day before sending (NX: two overlapping runs never both
-		# send), and released when it fails, so the next hourly run tries that manager again.
-		sent = frappe.cache.make_key(f"field_sales:daily_summary:{current_store()}:{today}:{manager.user}")
-		if not frappe.cache.set(sent, 1, nx=True, ex=SENT_MARK_SECONDS):
+		sent, claim = _summary_keys(current_store(), today, manager.user)
+		# Sent already (committed), or another run is sending it now (NX claim).
+		if frappe.cache.get(sent) or not frappe.cache.set(claim, 1, nx=True, ex=CLAIM_SECONDS):
 			continue
 		try:
 			_send_to_manager(manager, today)
 		except Exception:
-			frappe.cache.delete(sent)
+			frappe.cache.delete(claim)
 			# One bad manager record must not stop the others' summaries.
 			frappe.log_error(title=f"Field Sales daily summary failed for {manager.user}")
+			continue
+		# The email is in the Email Queue only once the job commits: marked sent then, so a run
+		# that never committed sends it again once its claim expires.
+		frappe.db.after_commit.add(functools.partial(frappe.cache.set, sent, 1, ex=SENT_MARK_SECONDS))
+
+
+def _summary_keys(store: str, today: str, user: str) -> tuple[str, str]:
+	"""Redis keys of one manager's summary for one store day: (sent mark, sending claim)."""
+	base = frappe.cache.make_key(f"field_sales:daily_summary:{store}:{today}:{user}")
+	return base, f"{base}:claim"
 
 
 def _get_managers() -> list:

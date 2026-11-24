@@ -41,6 +41,11 @@ _ONLY_KEY = "field_sales_only_store"
 # {user: store} for the request (user_store()).
 _USER_STORES_KEY = "field_sales_user_stores"
 CODE_PATTERN = re.compile(r"^[A-Z0-9]{2,4}$")
+# Vendor staff on the shared site hold this role (and belong to no store). Explicit, so a System
+# Manager who merely lost (or never got) their store does not silently see every merchant.
+VENDOR_ROLE = "Field Sales Vendor"
+# Roles that reach beyond one store: never held by a store's own (embedded) user on the shared site.
+SITE_WIDE_ROLES = frozenset({"System Manager", VENDOR_ROLE})
 
 
 class NoStoreContext(frappe.ValidationError):
@@ -334,13 +339,19 @@ def _use_store_timezone(user: str, store: str) -> None:
 
 
 def is_vendor(user: str | None = None) -> bool:
-	"""Vendor staff: Administrator, or a System Manager who belongs to no store. They see every store."""
+	"""
+	Vendor staff, who see every store: Administrator, or a user of no store holding
+	``VENDOR_ROLE`` on the shared site (``System Manager`` on a single-store site, its owner).
+
+	On the shared site the role must be given on purpose: a System Manager with no store and no
+	vendor role reaches no store at all (``store_scope`` is ``""``), never every store.
+	"""
 	user = user or frappe.session.user
 	if user == "Administrator":
 		return True
 	if user_store(user):
 		return False
-	return "System Manager" in frappe.get_roles(user)
+	return (VENDOR_ROLE if is_multi_store() else "System Manager") in frappe.get_roles(user)
 
 
 def refuse_uninstalled_store_user(login_manager=None) -> None:
@@ -366,13 +377,20 @@ def refuse_uninstalled_store_user(login_manager=None) -> None:
 
 def can_be_embedded_user(user: str | None, store: str) -> bool:
 	"""
-	Whether Shopify admin requests of ``store`` may sign in as ``user``: never Administrator,
-	Guest or vendor staff (they would see every store), nor a user of another store.
+	Whether Shopify admin requests of ``store`` may sign in as ``user`` (with no password): never
+	Administrator, Guest or vendor staff (they would see every store), nor a user of another store.
+
+	On the shared site only a user already in ``store``, holding no site-wide role: a user of no
+	store may be someone else's account (support staff, a website user), and naming it here would
+	let the store's Shopify admins act as that person. On a single-store site a user of no store
+	belongs to its one Store, so it may be named.
 	"""
 	if not user or user in ("Administrator", "Guest") or is_vendor(user):
 		return False
 	own = user_store(user)
-	return not own or own == store
+	if not is_multi_store():
+		return not own or own == store
+	return own == store and not SITE_WIDE_ROLES & set(frappe.get_roles(user))
 
 
 def can_change_connection(user: str | None = None) -> bool:
@@ -426,12 +444,20 @@ def get_store_name(store: str | None = None, required: bool = False) -> str | No
 	The store to work for: ``store``, else the current store, else the session user's own store
 	(``user_store()``), else the site's only Store.
 
+	On the shared site a signed-in user of no store (not vendor staff) has none: the "only Store"
+	fallback is for the site's own work (Guest webhooks and installs, Administrator, jobs), never a
+	way for an unassigned user to reach the first merchant to install.
+
 	:param required: Raise when there is no Store at all (else return ``None``).
 	:raises NoStoreContext: Several stores exist and none was given or set.
 	"""
 	name = store or current_store() or user_store() or vendor_store()
 	if name:
 		return name
+	if _is_unassigned_store_user():
+		if required:
+			frappe.throw(_("You do not belong to any store"), frappe.PermissionError)
+		return None
 	only = getattr(frappe.local, _ONLY_KEY, None)
 	if only:
 		return only
@@ -444,6 +470,16 @@ def get_store_name(store: str | None = None, required: bool = False) -> str | No
 	if required:
 		frappe.throw(_("No store is connected yet"))
 	return None
+
+
+def _is_unassigned_store_user() -> bool:
+	"""On the shared site: the session user is signed in, belongs to no store and is not vendor staff."""
+	if not is_multi_store():
+		return False
+	user = getattr(frappe.session, "user", None)
+	if not user or user in ("Administrator", "Guest"):
+		return False
+	return not user_store(user) and not is_vendor(user)
 
 
 def get_store(store: str | None = None, for_update: bool = False):
@@ -575,32 +611,6 @@ def set_store_value(values: dict | str, value: Any = None, store: str | None = N
 		values = {values: value}
 	name = get_store_name(store, required=True)
 	frappe.db.set_value(STORE_DOCTYPE, name, values)
-
-
-def get_store_password(fieldname: str, store: str | None = None) -> str | None:
-	"""A decrypted Password field of the store, or ``None`` if unset."""
-	from frappe.utils.password import get_decrypted_password
-
-	name = get_store_name(store)
-	if not name:
-		return None
-	return get_decrypted_password(STORE_DOCTYPE, name, fieldname, raise_exception=False)
-
-
-def set_store_password(fieldname: str, value: str, store: str | None = None) -> None:
-	"""Store an encrypted Password field of the store."""
-	from frappe.utils.password import set_encrypted_password
-
-	set_encrypted_password(STORE_DOCTYPE, get_store_name(store, required=True), value, fieldname)
-
-
-def remove_store_password(fieldname: str, store: str | None = None) -> None:
-	"""Delete an encrypted Password field of the store."""
-	from frappe.utils.password import remove_encrypted_password
-
-	name = get_store_name(store)
-	if name:
-		remove_encrypted_password(STORE_DOCTYPE, name, fieldname)
 
 
 def store_for_shop(shop_domain: str | None) -> str | None:

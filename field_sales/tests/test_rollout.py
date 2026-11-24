@@ -84,3 +84,19 @@ class TestSharedSiteChecks(StoreIsolationCase):
 		self.assertTrue(has_failures(checks))
 		failed = {label for level, label, _detail in checks if level == "fail"}
 		self.assertTrue({"Shared site flag", "App client id", "Public address"} <= failed, failed)
+
+	def test_system_managers_without_the_vendor_role_are_listed(self):
+		from field_sales.tests.store_fixtures import make_user
+		from field_sales.utils.store import assign_user_to_store
+
+		roleless = make_user("rollout.sysman@example.com", ["System Manager"])
+		in_store = make_user("rollout.store-sysman@example.com", ["System Manager"])
+		assign_user_to_store(in_store, "ISA")
+
+		checks = self.checks(MULTI)
+		self.assertEqual(checks["Vendor staff"][0], "ok")
+		self.assertIn(self.vendor, checks["Vendor staff"][1])
+		self.assertEqual(checks["System Managers in no store"][0], "warn")
+		self.assertIn(roleless, checks["System Managers in no store"][1])
+		self.assertEqual(checks["Store users with site-wide roles"][0], "fail")
+		self.assertIn(in_store, checks["Store users with site-wide roles"][1])

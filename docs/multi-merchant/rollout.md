@@ -42,6 +42,7 @@ Then in Desk:
 - **System Settings time zone:** set it once, before the first store. Never change it afterwards: every stored time is in it.
 - **Default outgoing Email Account:** SPF/DKIM on the vendor domain. Every store's mail goes out from it, in the store's name.
 - **Razorpay Settings:** leave them off. Razorpay is always off on the shared site.
+- **Vendor staff:** give each support user the **Field Sales Vendor** role (plus System Manager for Desk) and no store. On the shared site that role, not System Manager alone, is what reaches every store: a System Manager with no store and no vendor role sees no store at all, and a store's own user must never hold either role. The check below lists both cases.
 
 Never set `field_sales_multi_store` on a site that already has a merchant's data. Never turn it off once there are several stores: code without a store context then raises `NoStoreContext`.
 

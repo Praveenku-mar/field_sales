@@ -139,6 +139,11 @@ class TestStore(IntegrationTestCase):
 class TestCreateFirstStorePatch(IntegrationTestCase):
 	def setUp(self):
 		clear_store_cache()
+		# The patch commits after each batch; here everything must stay rolled back (one test
+		# deletes every Store first).
+		commit = patch.object(frappe.db, "commit")
+		commit.start()
+		self.addCleanup(commit.stop)
 
 	def tearDown(self):
 		frappe.db.rollback()

@@ -69,17 +69,15 @@ def set_store_admin(email: str) -> dict:
 	store = _require_store_admin()
 	email = (email or "").strip().lower()
 	frappe.utils.validate_email_address(email, throw=True)
-	# Never Administrator, Guest, vendor staff or another store's user.
-	if not can_be_embedded_user(email, store):
-		frappe.throw(_("{0} cannot be this store's admin. Use another email.").format(email))
+	_check_admin_candidate(email, store)
 
-	previous_user = frappe.session.user
-	frappe.set_user("Administrator")
-	try:
-		_ensure_admin_user(email, store)
-		set_store_value("embedded_user", email, store)
-	finally:
-		frappe.set_user(previous_user)
+	# Saved with ignore_permissions, never by switching to Administrator: frappe.set_user would
+	# overwrite this signed-in request's session (sid, session data, form data).
+	previous_admin = store_admin_email(store)
+	_ensure_admin_user(email, store)
+	set_store_value("embedded_user", email, store)
+	if previous_admin and previous_admin != email:
+		_remove_store_admin_role(previous_admin, store)
 	send_admin_invite(email, store)
 	return {"email": email, "invited": True}
 
@@ -160,9 +158,44 @@ def _require_store_admin() -> str:
 	frappe.throw(_("Only the store's admin can set its admin email"), frappe.PermissionError)
 
 
+def _check_admin_candidate(email: str, store: str) -> None:
+	"""
+	``email`` may become ``store``'s admin: a new account, or one that is already this store's.
+
+	Never an existing account of no store: becoming the admin makes it the store's Shopify
+	sign-in (``embedded_user``), so the store's Shopify admins would act as that person (support
+	staff, a website user, a disabled account) without their password, and it would be moved into
+	this store for good. Never Administrator, Guest, vendor staff, another store's user, or a user
+	holding a site-wide role (``can_be_embedded_user``).
+	"""
+	refused = _("{0} cannot be this store's admin. Use another email.").format(email)
+	if email in ("administrator", "guest"):
+		frappe.throw(refused)
+	if not frappe.db.exists("User", email):
+		return
+	if user_store(email) != store or not can_be_embedded_user(email, store):
+		frappe.throw(refused)
+
+
+def _remove_store_admin_role(user: str, store: str) -> None:
+	"""
+	The admin was changed: the previous one stays a manager of the store (its Sales Rep is
+	unchanged) but is no longer its Store Admin. Only a user of this store is touched.
+	"""
+	if user_store(user) != store or not frappe.db.exists("User", user):
+		return
+	user_doc = frappe.get_doc("User", user)
+	kept = [row for row in user_doc.roles if row.role != STORE_ADMIN_ROLE]
+	if len(kept) == len(user_doc.roles):
+		return
+	user_doc.set("roles", kept)
+	user_doc.save(ignore_permissions=True)
+
+
 def _ensure_admin_user(email: str, store: str) -> None:
 	"""The user with Store Admin in ``store`` and a Sales Rep that is a manager and a rep."""
 	if frappe.db.exists("User", email):
+		# Already this store's user (_check_admin_candidate).
 		user = frappe.get_doc("User", email)
 		user.enabled = 1  # e.g. disabled by shop/redact, now the store is back
 		if STORE_ADMIN_ROLE not in {r.role for r in user.roles}:

@@ -21,6 +21,7 @@ def shared_site_checks() -> list[tuple[str, str, str]]:
 	checks = []
 	checks += _site_checks()
 	checks += _app_checks()
+	checks += _staff_checks()
 	checks += _store_checks()
 	return checks
 
@@ -97,6 +98,69 @@ def _app_checks() -> list:
 	)
 	if not frappe.conf.get("shopify_app_handle"):
 		checks.append((WARN, "Plan page link", "set shopify_app_handle so merchants can open the pricing page"))
+	return checks
+
+
+# ----------------------------------------------------------------------
+# Vendor staff
+# ----------------------------------------------------------------------
+
+
+def _staff_checks() -> list:
+	"""
+	Who sees every store: only users of no store holding ``VENDOR_ROLE`` (and Administrator).
+	A System Manager of no store without it reaches no store; a store's user holding a site-wide
+	role would act beyond its store in Desk.
+	"""
+	from field_sales.utils.store import SITE_WIDE_ROLES, VENDOR_ROLE, user_store
+
+	if not frappe.db.exists("Role", VENDOR_ROLE):
+		return [(FAIL, "Vendor role", f"role {VENDOR_ROLE} is missing: run bench migrate")]
+
+	holders: dict[str, set[str]] = {}
+	for row in frappe.get_all(
+		"Has Role",
+		filters={"parenttype": "User", "role": ("in", tuple(SITE_WIDE_ROLES))},
+		fields=["parent", "role"],
+	):
+		holders.setdefault(row.parent, set()).add(row.role)
+	enabled = set(
+		frappe.get_all(
+			"User",
+			filters={"name": ("in", list(holders) or [""]), "enabled": 1},
+			pluck="name",
+		)
+	)
+	vendors, roleless, in_store = [], [], []
+	for user in sorted(enabled - {"Administrator", "Guest"}):
+		if user_store(user):
+			in_store.append(user)
+		elif VENDOR_ROLE in holders[user]:
+			vendors.append(user)
+		else:
+			roleless.append(user)
+
+	checks = [
+		(OK, "Vendor staff", f"{len(vendors)}: {', '.join(vendors)}")
+		if vendors
+		else (WARN, "Vendor staff", f"nobody holds {VENDOR_ROLE}: only Administrator can support stores")
+	]
+	if roleless:
+		checks.append(
+			(
+				WARN,
+				"System Managers in no store",
+				f"{', '.join(roleless)} reach no store: give {VENDOR_ROLE} to vendor staff",
+			)
+		)
+	if in_store:
+		checks.append(
+			(
+				FAIL,
+				"Store users with site-wide roles",
+				f"{', '.join(in_store)}: remove System Manager / {VENDOR_ROLE} from a store's users",
+			)
+		)
 	return checks
 
 

@@ -147,7 +147,7 @@ def get_session() -> dict:
 	Vendor staff on the shared site get ``is_vendor``; until they pick a store (``switch_store``)
 	``store`` is empty and the app shows its store picker.
 
-	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled", "time_zone", "server_time_zone", "currency", "is_vendor"}``
+	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled", "time_zone", "server_time_zone", "currency", "is_vendor", "shared_site"}``
 	"""
 	_check_access()
 	user = frappe.session.user
@@ -191,6 +191,9 @@ def get_session() -> dict:
 		# The store's currency for new amounts (the mobile app formats with it, as the web app does).
 		"currency": store_currency() if in_store else None,
 		"is_vendor": is_multi_store() and is_vendor(user),
+		# The shared multi-store site: merchants never edit the connection, email accounts or
+		# Razorpay there (the mobile app hides those settings).
+		"shared_site": is_multi_store(),
 	}
 
 

@@ -27,6 +27,20 @@ function isAuthError(error) {
   return error?.status === 401 || ['AuthenticationError', 'SessionExpired'].includes(error?.exc_type)
 }
 
+/**
+ * The session's store values win over the page's boot values (www/fieldsales.py), which
+ * utils/format.js and the Settings forms read from `window`. Inside the Shopify admin the page
+ * itself loads without a sign-in, so its boot cannot know the store and falls back to the site's
+ * currency and zone (wrong on a shared site with several stores); the session API is signed in
+ * (session token or cookie) and answers for the user's store. Missing values keep the boot's.
+ */
+function applySessionStore(session) {
+  if (session.currency) window.currency = session.currency
+  if (session.time_zone) window.time_zone = session.time_zone
+  if (session.server_time_zone) window.server_time_zone = session.server_time_zone
+  if (session.store?.code) window.store = session.store.code
+}
+
 export const useSessionStore = defineStore('session', () => {
   const ready = ref(false)
   /** Why the app cannot start: { title, message, noAccess } — shown by App.vue instead of the shell. */
@@ -76,7 +90,10 @@ export const useSessionStore = defineStore('session', () => {
 
   /** Re-read the session after a setting it carries changes (e.g. commission turned on or off). */
   function reload() {
-    return resource.reload()
+    return resource.reload().then((result) => {
+      applySessionStore(data.value)
+      return result
+    })
   }
 
   /**
@@ -95,6 +112,7 @@ export const useSessionStore = defineStore('session', () => {
     }
     try {
       await resource.fetch()
+      applySessionStore(data.value)
       error.value = null
     } catch (e) {
       if (isAuthError(e) && !embedded) {

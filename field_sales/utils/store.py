@@ -52,6 +52,13 @@ class NoStoreContext(frappe.ValidationError):
 	"""Several stores exist and nothing said which one to use."""
 
 
+class StoreUninstalledError(frappe.AuthenticationError):
+	"""
+	The user's store removed the app from Shopify (shared site). Its own class so API clients
+	(the mobile app) can tell it from a bad password by ``exc_type`` rather than by message text.
+	"""
+
+
 def is_multi_store() -> bool:
 	"""True on the shared multi-merchant site (site_config ``field_sales_multi_store``)."""
 	return bool(frappe.conf.get("field_sales_multi_store"))
@@ -371,7 +378,7 @@ def refuse_uninstalled_store_user(login_manager=None) -> None:
 	if store and frappe.get_cached_value(STORE_DOCTYPE, store, "uninstalled_on"):
 		frappe.throw(
 			_("This store has removed the app from Shopify. Reinstall it from Shopify to sign in again."),
-			frappe.AuthenticationError,
+			StoreUninstalledError,
 		)
 
 

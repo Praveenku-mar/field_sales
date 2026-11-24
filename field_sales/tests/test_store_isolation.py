@@ -1166,12 +1166,13 @@ class TestStoreLifecycle(StoreIsolationCase):
 		return store_for_shop(shop)
 
 	def refused(self, user) -> bool:
-		from field_sales.utils.store import refuse_uninstalled_store_user
+		from field_sales.utils.store import StoreUninstalledError, refuse_uninstalled_store_user
 
 		reset_request_caches()
 		try:
 			refuse_uninstalled_store_user(frappe._dict(user=user))
-		except frappe.AuthenticationError:
+		except StoreUninstalledError:
+			# Its own class (still an AuthenticationError): API clients tell it apart by exc_type.
 			return True
 		return False
 
@@ -1362,11 +1363,19 @@ class TestVendorStoreSwitch(StoreIsolationCase):
 		frappe.db.rollback(save_point="vendor_switch")
 		super().tearDown()
 
+	def test_a_single_store_session_is_not_the_shared_site(self):
+		from field_sales.frontend_api import get_session
+
+		with patch.dict(frappe.conf, {"field_sales_multi_store": 0}):
+			self.as_user(self.a.admin)
+			self.assertFalse(get_session()["shared_site"])
+
 	def test_vendor_staff_start_without_a_store(self):
 		from field_sales.frontend_api import get_session
 
 		session = get_session()
 		self.assertTrue(session["is_vendor"])
+		self.assertTrue(session["shared_site"])
 		self.assertEqual(session["store"], {})
 		self.assertIsNone(session["currency"])
 

@@ -480,6 +480,12 @@ async function save() {
   try {
     await doc.save.submit()
     saved = true
+    try {
+      await session.reload()
+    } catch {
+      toast.error('Store Connection saved, but the status could not refresh. Reload the page to see the current status.')
+      return saved
+    }
     toast.success('Store Connection saved')
   } catch (error) {
     toast.error(error?.messages?.[0] || error?.message || 'Could not save Store Connection')

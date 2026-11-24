@@ -60,8 +60,8 @@ def get_dashboard(
 		to_d = getdate(to_date)
 		if from_d > to_d:
 			from_d, to_d = to_d, from_d
-		if date_diff(to_d, from_d) > 366:
-			frappe.throw(_("Date range cannot exceed 366 days"))
+		if date_diff(to_d, from_d) >= 365:
+			frappe.throw(_("Date range cannot exceed 365 days"))
 
 	in_period = ("between", [from_d, to_d])
 	submitted = {"docstatus": 1, "order_date": in_period}

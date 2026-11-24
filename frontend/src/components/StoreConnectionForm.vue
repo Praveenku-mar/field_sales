@@ -207,7 +207,11 @@
       <section class="border-t border-[#f1f2f4] p-6 sm:p-8">
         <h3 class="text-xs font-semibold uppercase tracking-wider text-polaris-secondary">Shop settings</h3>
         <p class="mt-1 text-sm text-polaris-secondary">
-          From your Shopify store. Amounts use its currency; "today" and times follow its time zone.
+          {{
+            multiStore
+              ? 'From your Shopify store. Amounts use its currency; "today" and times follow its time zone.'
+              : 'From your Shopify store. The site uses them only while "Match Store Currency and Timezone" is on.'
+          }}
         </p>
         <div class="mt-6 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
           <TextInput :model-value="d.shop_currency || NOT_SYNCED" label="Currency" disabled />
@@ -344,6 +348,9 @@ const ORDER_MODES = [
 const SYNC_FREQUENCIES = ['Every 30 minutes', 'Hourly', 'Daily'].map((v) => ({ label: v, value: v }))
 // Shown for a shop setting the store has not read from Shopify yet.
 const NOT_SYNCED = 'Not synced yet'
+// The shared multi-store site: amounts and clocks follow the store itself (utils/money.py ->
+// store_currency); a single-store site keeps the site's unless it copies the shop's.
+const multiStore = !!window.multi_store
 // Shopify ships a quarterly API version and supports about the last four.
 const API_VERSIONS = ['2025-04', '2025-07', '2025-10', '2026-01', '2026-04', '2026-07', '2026-10']
 

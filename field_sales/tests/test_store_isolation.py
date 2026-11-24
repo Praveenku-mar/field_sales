@@ -1363,6 +1363,13 @@ class TestVendorStoreSwitch(StoreIsolationCase):
 		frappe.db.rollback(save_point="vendor_switch")
 		super().tearDown()
 
+	def test_a_single_store_session_is_not_the_shared_site(self):
+		from field_sales.frontend_api import get_session
+
+		with patch.dict(frappe.conf, {"field_sales_multi_store": 0}):
+			self.as_user(self.a.admin)
+			self.assertFalse(get_session()["shared_site"])
+
 	def test_vendor_staff_start_without_a_store(self):
 		from field_sales.frontend_api import get_session
 

@@ -5,8 +5,8 @@
       <template #meta>
         <div class="hidden sm:flex items-center gap-2">
           <span class="inline-flex items-center gap-1.5 rounded-full bg-[#e4f6ed] px-2.5 py-0.5 text-xs font-semibold text-[#0d5936] border border-[#aee8cb]">
-            <span class="size-1.5 rounded-full bg-[#108043] animate-pulse" />
-            Live data
+            <span class="size-1.5 rounded-full bg-[#108043]" />
+            Refreshes every 60s
           </span>
           <span class="text-xs text-polaris-secondary">&middot; {{ greeting }}</span>
         </div>
@@ -47,7 +47,7 @@
             :loading="dash.loading"
             @click="applyCustomRange"
           />
-          <span v-if="customError" class="text-xs text-polaris-critical font-medium">{{ customError }}</span>
+          <span v-if="customError" role="alert" class="text-xs text-polaris-critical font-medium">{{ customError }}</span>
         </div>
         <div class="text-[11px] text-polaris-subdued">
           <span>Max 365 days</span>
@@ -259,7 +259,7 @@
 
       <!-- Charts for the selected period -->
       <div class="grid grid-cols-1 gap-5" :class="session.isManager && 'lg:grid-cols-2'">
-        <SectionCard title="Sales Over Time">
+        <SectionCard title="Orders Over Time">
           <template #actions>
             <Button label="View orders report" variant="ghost" :route="{ name: 'Orders' }" />
           </template>
@@ -488,7 +488,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Avatar, Button, ErrorMessage, FormControl, LoadingIndicator, TabButtons, createResource, dayjs } from 'frappe-ui'
 import { ListView } from 'frappe-ui/experimental'
 import { AreaChart, BarChart, DonutChart, LineChart } from 'frappe-ui/charts'
@@ -526,6 +526,8 @@ const session = useSessionStore()
 const period = ref('today')
 const customFrom = ref(dayjs().subtract(1, 'month').startOf('month').format('YYYY-MM-DD'))
 const customTo = ref(dayjs().subtract(1, 'month').endOf('month').format('YYYY-MM-DD'))
+const appliedCustomFrom = ref(customFrom.value)
+const appliedCustomTo = ref(customTo.value)
 const customError = ref('')
 
 // The selected period: top cards, the two bar charts, recent orders and active visits.
@@ -534,8 +536,8 @@ const dash = createResource({
   makeParams: () => {
     const params = { period: period.value }
     if (period.value === 'custom') {
-      params.from_date = customFrom.value
-      params.to_date = customTo.value
+      params.from_date = appliedCustomFrom.value
+      params.to_date = appliedCustomTo.value
     }
     return params
   },
@@ -562,7 +564,13 @@ function applyCustomRange() {
     customError.value = 'Start date cannot be after end date.'
     return
   }
+  if (dayjs(customTo.value).diff(dayjs(customFrom.value), 'day') >= 365) {
+    customError.value = 'Date range cannot exceed 365 days.'
+    return
+  }
   customError.value = ''
+  appliedCustomFrom.value = customFrom.value
+  appliedCustomTo.value = customTo.value
   dash.reload()
 }
 
@@ -571,9 +579,18 @@ function applyCustomRange() {
 const overview = createResource({ url: 'field_sales.frontend_api.get_dashboard', auto: true })
 
 function refresh() {
+  if (dash.loading || overview.loading) return
   dash.reload()
   overview.reload()
 }
+
+let refreshInterval
+onMounted(() => {
+  refreshInterval = window.setInterval(() => {
+    if (document.visibilityState === 'visible') refresh()
+  }, 60000)
+})
+onBeforeUnmount(() => window.clearInterval(refreshInterval))
 
 const data = computed(() => dash.data || {})
 const cards = computed(() => data.value.cards || {})

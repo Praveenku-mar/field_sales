@@ -25,9 +25,12 @@
         </span>
         <div class="flex items-center gap-2 text-xs">
           <span class="font-semibold text-polaris-text">{{ storeDomain }}</span>
-          <span class="inline-flex items-center gap-1 rounded-full bg-[#e4f6ed] px-2 py-0.5 text-[10px] font-semibold text-[#0d5936] border border-[#aee8cb]">
-            <span class="size-1.5 rounded-full bg-[#108043] animate-pulse" />
-            Live Sync
+          <span
+            v-if="session.store?.code"
+            class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+            :class="session.store.enabled ? 'bg-[#e4f6ed] text-[#0d5936] border-[#aee8cb]' : 'bg-[#fde8e8] text-[#9b1c1c] border-[#f5b8b8]'"
+          >
+            {{ session.store.enabled ? 'Store enabled' : 'Store disabled' }}
           </span>
         </div>
       </div>

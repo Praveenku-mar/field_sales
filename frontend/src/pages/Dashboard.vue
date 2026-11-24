@@ -580,8 +580,7 @@ const overview = createResource({ url: 'field_sales.frontend_api.get_dashboard',
 
 function refresh() {
   if (dash.loading || overview.loading) return
-  dash.reload()
-  overview.reload()
+  void Promise.allSettled([dash.reload(), overview.reload()])
 }
 
 let refreshInterval

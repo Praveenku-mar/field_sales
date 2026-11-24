@@ -28,6 +28,7 @@ from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync
 from field_sales.sync.notify import users_with_roles
 from field_sales.utils.anonymise import anonymise as _redact
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import is_multi_store, is_vendor, set_store_value
 
 RETAILER_EXPORT_FIELDS = [
 	"name", "retailer_name", "owner_name", "phone", "email", "gstin", "retailer_type", "status",
@@ -98,9 +99,9 @@ def process(privacy_request: str, payload: dict):
 
 def data_request(doc, payload: dict) -> dict:
 	"""Export the customer's data to a private JSON File on ``doc`` and email System Managers."""
-	retailers = _retailers_for(payload)
+	retailers = _retailers_for(payload, doc.store)
 	order_ids = _ids(payload.get("orders_requested"))
-	orders = _orders_for(retailers, order_ids)
+	orders = _orders_for(retailers, order_ids, doc.store)
 
 	export = {
 		"shop_domain": doc.shop_domain,
@@ -157,20 +158,24 @@ def customer_redact(doc, payload: dict) -> dict:
 	Anonymise the customer's Retailer(s) and the personal fields of their orders and visits, and
 	delete the export files of the customer's earlier data requests (they hold the same data).
 	"""
-	retailers = _retailers_for(payload)
-	orders = _orders_for(retailers, _ids(payload.get("orders_to_redact")))
+	retailers = _retailers_for(payload, doc.store)
+	orders = _orders_for(retailers, _ids(payload.get("orders_to_redact")), doc.store)
 	result = _redact(retailers, orders)
-	result["exports_deleted"] = _delete_customer_exports(doc.shopify_customer_id)
+	result["exports_deleted"] = _delete_customer_exports(doc.shopify_customer_id, doc.store)
 	return result
 
 
-def _delete_customer_exports(shopify_customer_id: str | None) -> int:
+def _delete_customer_exports(shopify_customer_id: str | None, store: str) -> int:
 	"""Delete the JSON exports attached to this customer's ``customers/data_request`` requests."""
 	if not shopify_customer_id:
 		return 0
 	requests = frappe.get_all(
 		"Privacy Request",
-		filters={"topic": "customers/data_request", "shopify_customer_id": shopify_customer_id},
+		filters={
+			"store": store,
+			"topic": "customers/data_request",
+			"shopify_customer_id": shopify_customer_id,
+		},
 		pluck="name",
 	)
 	if not requests:
@@ -186,34 +191,71 @@ def _delete_customer_exports(shopify_customer_id: str | None) -> int:
 
 
 def shop_redact(doc, payload: dict) -> dict:
-	"""The store left 48 hours ago: anonymise or delete everything that came from it."""
-	retailers = frappe.get_all("Retailer", pluck="name")
-	orders = frappe.get_all("Field Order", pluck="name")
+	"""
+	The store left 48 hours ago: anonymise or delete everything that came from it. Only the
+	request's own store (``doc.store``): on a shared site every other store stays as it is.
+	"""
+	store = doc.store
+	if not store:
+		frappe.throw(f"Privacy Request {doc.name} has no store")
+	in_store = {"store": store}
+	retailers = frappe.get_all("Retailer", filters=in_store, pluck="name")
+	orders = frappe.get_all("Field Order", filters=in_store, pluck="name")
 	result = _redact(retailers, orders)
 
-	result["platform_products"] = frappe.db.count("Platform Product")
-	result["product_stock"] = frappe.db.count("Product Stock")
-	frappe.db.delete("Product Stock")
-	frappe.db.delete("Platform Product")
+	result["platform_products"] = frappe.db.count("Platform Product", in_store)
+	result["product_stock"] = frappe.db.count("Product Stock", in_store)
+	frappe.db.delete("Product Stock", in_store)
+	frappe.db.delete("Platform Product", in_store)
 
 	sync_log = frappe.qb.DocType("Sync Log")
 	(
 		frappe.qb.update(sync_log)
 		.set(sync_log.request_payload, None)
 		.set(sync_log.response_payload, None)
+		.where(sync_log.store == store)
 		.run()
 	)
-	result["sync_log_bodies_cleared"] = frappe.db.count("Sync Log")
+	result["sync_log_bodies_cleared"] = frappe.db.count("Sync Log", in_store)
 
-	exports = frappe.get_all("File", filters={"attached_to_doctype": "Privacy Request"}, pluck="name")
+	requests = frappe.get_all("Privacy Request", filters=in_store, pluck="name")
+	exports = (
+		frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": "Privacy Request", "attached_to_name": ("in", requests)},
+			pluck="name",
+		)
+		if requests
+		else []
+	)
 	for name in exports:
 		frappe.delete_doc("File", name, ignore_permissions=True, force=True)
 	result["exports_deleted"] = len(exports)
 
-	clear_oauth_tokens()
-	frappe.db.set_single_value("Store Connection", {"enabled": 0, "shopify_scopes": None})
+	clear_oauth_tokens(store)
+	set_store_value({"enabled": 0, "shopify_scopes": None}, store=store)
 	result["tokens_cleared"] = True
+	# The shared site only: there a store's users exist for that shop alone.
+	result["users_disabled"] = _disable_store_users(store) if is_multi_store() else 0
 	return result
+
+
+def _disable_store_users(store: str) -> int:
+	"""
+	Disable the users of ``store`` (its User Permission), never vendor staff. A reinstall
+	re-enables only the store's embedded user (``embedded.get_embedded_user``).
+	"""
+	users = frappe.get_all(
+		"User Permission", filters={"allow": "Store", "for_value": store}, pluck="user", distinct=True
+	)
+	disabled = 0
+	for user in users:
+		if user in ("Administrator", "Guest") or is_vendor(user):
+			continue
+		if frappe.db.get_value("User", user, "enabled"):
+			frappe.db.set_value("User", user, "enabled", 0)
+			disabled += 1
+	return disabled
 
 
 # ----------------------------------------------------------------------
@@ -225,22 +267,32 @@ def _ids(values) -> list[str]:
 	return [str(v) for v in (values or []) if v not in (None, "")]
 
 
-def _retailers_for(payload: dict) -> list[str]:
-	"""Retailers linked to the payload's Shopify customer id."""
+def _retailers_for(payload: dict, store: str) -> list[str]:
+	"""``store``'s Retailers linked to the payload's Shopify customer id."""
 	customer_id = (payload.get("customer") or {}).get("id")
 	if not customer_id:
 		return []
-	return frappe.get_all("Retailer", filters={"external_customer_id": str(customer_id)}, pluck="name")
+	return frappe.get_all(
+		"Retailer", filters={"store": store, "external_customer_id": str(customer_id)}, pluck="name"
+	)
 
 
-def _orders_for(retailers: list[str], order_ids: list[str]) -> list[str]:
-	"""Field Orders of ``retailers`` plus those whose store order id is in ``order_ids``."""
+def _orders_for(retailers: list[str], order_ids: list[str], store: str) -> list[str]:
+	"""``store``'s Field Orders of ``retailers`` plus those whose store order id is in ``order_ids``."""
 	names = set()
 	if retailers:
-		names.update(frappe.get_all("Field Order", filters={"retailer": ("in", retailers)}, pluck="name"))
+		names.update(
+			frappe.get_all(
+				"Field Order", filters={"store": store, "retailer": ("in", retailers)}, pluck="name"
+			)
+		)
 	if order_ids:
 		names.update(
-			frappe.get_all("Field Order", filters={"external_order_id": ("in", order_ids)}, pluck="name")
+			frappe.get_all(
+				"Field Order",
+				filters={"store": store, "external_order_id": ("in", order_ids)},
+				pluck="name",
+			)
 		)
 	return sorted(names)
 
@@ -267,7 +319,9 @@ def _export_orders(orders: list[str]) -> list[dict]:
 
 def _email_system_managers(doc) -> None:
 	"""Tell System Managers a data export is ready to send to the store owner (link only, no data)."""
-	recipients = [u for u in users_with_roles(("System Manager",)) if u not in ("Administrator", "Guest")]
+	recipients = [
+		u for u in users_with_roles(("System Manager",), vendor=True) if u not in ("Administrator", "Guest")
+	]
 	if not recipients:
 		return
 	link = get_url_to_form("Privacy Request", doc.name)

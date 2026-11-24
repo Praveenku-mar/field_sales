@@ -20,6 +20,7 @@ from field_sales.api import (
 	mobile_login,
 )
 from field_sales.utils.geo import LOCATION_FILL_MAX_ACCURACY_M, MAX_ACCURACY_M
+from field_sales.utils.store import set_store_value
 from field_sales.utils.urls import public_url
 
 PASSWORD = "Fs-Low#2026-strong"
@@ -31,7 +32,7 @@ class TestSecurityLow(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# Everything rolls back after each test; no store pushes from these saves.
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": "Shopify"})
+		set_store_value({"enabled": 0, "platform": "Shopify"})
 		if not frappe.db.exists("Role", "Field Sales Retailer"):
 			frappe.get_doc({"doctype": "Role", "role_name": "Field Sales Retailer", "desk_access": 0}).insert(
 				ignore_permissions=True
@@ -121,7 +122,9 @@ class TestSecurityLow(IntegrationTestCase):
 		with patch.object(frappe.local, "request", request, create=True):
 			url = _retailer_login_url()
 		self.assertNotIn("evil", url)
-		self.assertEqual(url, frappe.utils.get_url("/login?redirect-to=%2Ffieldsales", allow_header_override=False))
+		self.assertEqual(
+			url, frappe.utils.get_url("/login?redirect-to=%2Ffieldsales", allow_header_override=False)
+		)
 
 	def test_invite_url_uses_a_configured_public_host(self):
 		request = MagicMock(
@@ -133,7 +136,9 @@ class TestSecurityLow(IntegrationTestCase):
 			patch.object(frappe.local, "request", request, create=True),
 			patch.dict(frappe.local.conf, {"field_sales_public_hosts": ["sales.example.com"]}),
 		):
-			self.assertEqual(_retailer_login_url(), "https://Sales.Example.com/login?redirect-to=%2Ffieldsales")
+			self.assertEqual(
+				_retailer_login_url(), "https://Sales.Example.com/login?redirect-to=%2Ffieldsales"
+			)
 
 	def test_request_host_matching_the_site_is_used(self):
 		request = MagicMock(host=f"{frappe.local.site}:8000", scheme="http", headers={})

@@ -11,6 +11,7 @@ from frappe.utils import nowdate
 
 from field_sales.sync import confirmation
 from field_sales.sync.confirmation import resend_order_confirmation, send_order_confirmation
+from field_sales.utils.store import set_store_value
 
 SHOP = "test-shop.myshopify.com"
 PRINT_FORMAT = "Field Sales Invoice"
@@ -19,8 +20,7 @@ PRINT_FORMAT = "Field Sales Invoice"
 class TestOrderConfirmation(IntegrationTestCase):
 	def setUp(self):
 		# set_single_value does not validate; everything rolls back after each test.
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
@@ -30,7 +30,7 @@ class TestOrderConfirmation(IntegrationTestCase):
 				"company_address": "1 Mill Road\nCoimbatore",
 				"company_state": "Tamil Nadu",
 				"company_gstin": "33AAAAA0000A1Z5",
-			},
+			}
 		)
 		self.make_outgoing_account()
 		self.users = 0
@@ -88,13 +88,18 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.users += 1
 		email = f"confirm.rep{self.users}@example.com"
 		user = frappe.get_doc(
-			{"doctype": "User", "email": email, "first_name": f"ConfirmRep{self.users}", "send_welcome_email": 0}
+			{
+				"doctype": "User",
+				"email": email,
+				"first_name": f"ConfirmRep{self.users}",
+				"send_welcome_email": 0,
+			}
 		)
 		user.insert(ignore_permissions=True)
 		user.add_roles(role)
-		return frappe.get_doc(
-			{"doctype": "Sales Rep", "user": email, "reports_to": reports_to}
-		).insert(ignore_permissions=True)
+		return frappe.get_doc({"doctype": "Sales Rep", "user": email, "reports_to": reports_to}).insert(
+			ignore_permissions=True
+		)
 
 	def make_retailer(self, email="buyer@example.com", state="Tamil Nadu"):
 		return frappe.get_doc(
@@ -153,7 +158,9 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIsNotNone(values.confirmation_sent_on)
 		self.assertEqual(values.confirmation_status, "Sent to buyer@example.com")
 
-		recipients = frappe.get_all("Email Queue Recipient", filters={"parent": queued[0].name}, pluck="recipient")
+		recipients = frappe.get_all(
+			"Email Queue Recipient", filters={"parent": queued[0].name}, pluck="recipient"
+		)
 		self.assertEqual(recipients, ["buyer@example.com"])
 		message = queued[0].message
 		self.assertIn(f"{values.invoice_no}.pdf", message)
@@ -177,9 +184,9 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIn("https://rzp.io/i/plink_test", message)
 		self.assertIn("Pay Now", message)
 
-	def test_amounts_use_the_site_currency(self):
-		with patch.object(confirmation, "site_currency", return_value="USD"):
-			send_order_confirmation(self.order.name)
+	def test_amounts_use_the_orders_currency(self):
+		frappe.db.set_value("Field Order", self.order.name, "currency", "USD")
+		send_order_confirmation(self.order.name)
 		self.assertIn("$", self.queued()[0].message)
 
 	def test_status_says_when_the_payment_link_failed(self):
@@ -222,12 +229,16 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertTrue(
 			frappe.db.exists(
 				"Comment",
-				{"reference_doctype": "Field Order", "reference_name": self.order.name, "comment_type": "Comment"},
+				{
+					"reference_doctype": "Field Order",
+					"reference_name": self.order.name,
+					"comment_type": "Comment",
+				},
 			)
 		)
 
 	def test_skipped_when_turned_off(self):
-		frappe.db.set_single_value("Store Connection", "send_order_confirmation", 0)
+		set_store_value("send_order_confirmation", 0)
 
 		send_order_confirmation(self.order.name)
 
@@ -249,14 +260,19 @@ class TestOrderConfirmation(IntegrationTestCase):
 	def test_resend_is_queued_not_sent_inline(self):
 		send_order_confirmation(self.order.name)
 
-		with patch("field_sales.sync.confirmation.frappe.enqueue") as enqueue, patch.object(frappe.db, "commit"):
+		with (
+			patch("field_sales.sync.confirmation.frappe.enqueue") as enqueue,
+			patch.object(frappe.db, "commit"),
+		):
 			result = resend_order_confirmation(self.order.name)
 
 		self.assertEqual(result, {"status": "Sending…", "queued": True})
 		self.assertEqual(self.values("confirmation_status").confirmation_status, "Sending…")
 		self.assertEqual(len(self.queued()), 1)
 		args, kwargs = enqueue.call_args
-		self.assertEqual(args, ("field_sales.sync.confirmation.send_order_confirmation",))
+		self.assertEqual(args, ("field_sales.utils.store.run_in_store",))
+		self.assertEqual(kwargs["store_method"], "field_sales.sync.confirmation.send_order_confirmation")
+		self.assertEqual(kwargs["store_name"], self.order.store)
 		self.assertEqual(kwargs["field_order"], self.order.name)
 		self.assertTrue(kwargs["resend"])
 		self.assertTrue(kwargs["deduplicate"])
@@ -281,7 +297,10 @@ class TestOrderConfirmation(IntegrationTestCase):
 			time.sleep(4)
 			return b"%PDF"
 
-		with patch("frappe.utils.pdf.get_pdf", side_effect=slow), patch.object(confirmation, "PDF_TIMEOUT", 1):
+		with (
+			patch("frappe.utils.pdf.get_pdf", side_effect=slow),
+			patch.object(confirmation, "PDF_TIMEOUT", 1),
+		):
 			start = time.monotonic()
 			send_order_confirmation(self.order.name)
 			elapsed = time.monotonic() - start
@@ -301,8 +320,9 @@ class TestOrderConfirmation(IntegrationTestCase):
 		frappe.clear_cache()
 		for user in (self.rep.user, manager.user):
 			frappe.set_user(user)
-			with patch("field_sales.sync.confirmation.frappe.enqueue") as enqueue, patch.object(
-				frappe.db, "commit"
+			with (
+				patch("field_sales.sync.confirmation.frappe.enqueue") as enqueue,
+				patch.object(frappe.db, "commit"),
 			):
 				result = resend_order_confirmation(self.order.name)
 			self.assertEqual(result, {"status": "Sending…", "queued": True})
@@ -341,7 +361,7 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertIn("INR One Hundred And Eighty Nine only.", html)  # grand total 189 in words
 
 	def test_state_match_ignores_case_and_spaces(self):
-		frappe.db.set_single_value("Store Connection", "company_state", "  tamil nadu ")
+		set_store_value("company_state", "  tamil nadu ")
 
 		self.assertIn("CGST", self.html())
 
@@ -354,8 +374,7 @@ class TestOrderConfirmation(IntegrationTestCase):
 		self.assertNotIn("CGST", html)
 
 	def test_invoice_without_company_details_still_renders(self):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"company_name": "", "company_address": "", "company_state": "", "company_gstin": ""},
 		)
 
@@ -371,7 +390,9 @@ class TestOrderConfirmation(IntegrationTestCase):
 		with socket.socket() as probe:
 			probe.settimeout(1)
 			if probe.connect_ex(("127.0.0.1", port)):
-				self.skipTest(f"wkhtmltopdf fetches the print CSS from the web server (port {port}), which is not running")
+				self.skipTest(
+					f"wkhtmltopdf fetches the print CSS from the web server (port {port}), which is not running"
+				)
 		# The test site has no host_name, so the stylesheet links would point at port 80.
 		frappe.local.conf.host_name = f"http://{frappe.local.site}:{port}"
 

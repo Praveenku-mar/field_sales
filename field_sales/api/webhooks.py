@@ -7,6 +7,7 @@ import frappe
 
 from field_sales.connectors import get_connector
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
+from field_sales.utils.store import enqueue_in_store, set_current_store, shop_store
 
 DEDUP_TTL_SECONDS = 48 * 60 * 60  # stores may redeliver for up to 48 hours
 INVALID_LOG_INTERVAL_SECONDS = 60
@@ -19,14 +20,21 @@ def receive():
 
 	Answers quickly and writes nothing to the database (apart from one
 	throttled log for a bad signature): 401 if the signature is wrong,
-	otherwise 200, also when the connection is disabled or the event is a
-	duplicate, so the store does not keep retrying.
+	otherwise 200, also when the connection is disabled, the shop is not one of this site's
+	stores, or the event is a duplicate, so the store does not keep retrying.
+
+	The event is checked with, and queued for, the Store it came from (``_webhook_store``).
 	"""
 	# Read before anything touches the form data; the signature covers these exact bytes.
 	raw_body = frappe.request.get_data()
 
+	store = _webhook_store()
+	if not store:
+		return _respond(200, "ignored")
+	# Logs and the queued job belong to the shop's Store.
+	set_current_store(store)
 	try:
-		conn = get_connector(require_enabled=False)
+		conn = get_connector(store=store, require_enabled=False)
 	except frappe.ValidationError:
 		# Unsupported platform or misconfigured (e.g. no store URL): nothing to verify against.
 		return _respond(200, "ignored")
@@ -48,8 +56,9 @@ def receive():
 	try:
 		# The job argument is named webhook, not event: Frappe's enqueue has its own event
 		# parameter (a job-clearing label) that would swallow it before it reached the job.
-		frappe.enqueue(
+		enqueue_in_store(
 			"field_sales.sync.webhooks.process_event",
+			store=store,
 			queue="short",
 			platform=conn.platform,
 			webhook=event,
@@ -60,6 +69,15 @@ def receive():
 			frappe.cache.delete(key)
 		raise
 	return _respond(200, "ok")
+
+
+def _webhook_store() -> str | None:
+	"""
+	The Store a delivery is for (``shop_store`` of ``X-Shopify-Shop-Domain``; platforms that send
+	no shop header use the site's Store). The header is not trusted on its own: the signature is
+	then checked with that Store's keys.
+	"""
+	return shop_store(frappe.request.headers.get("X-Shopify-Shop-Domain"))
 
 
 def _respond(status: int, message: str) -> dict:

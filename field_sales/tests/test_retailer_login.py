@@ -20,6 +20,7 @@ from field_sales.api import (
 from field_sales.frontend_api import get_session
 from field_sales.permissions import get_own_retailer, is_retailer_user
 from field_sales.utils.anonymise import anonymise
+from field_sales.utils.store import set_store_value
 from field_sales.www.fieldsales import get_context, has_app_access
 
 PRICE = 100
@@ -54,18 +55,17 @@ class TestRetailerLogin(IntegrationTestCase):
 			)
 
 	def test_invite_login_url_falls_back_for_malformed_request_host(self):
-		request = MagicMock(
-			host="evil.com/path?x=<script>", scheme="https", headers={}
-		)
+		request = MagicMock(host="evil.com/path?x=<script>", scheme="https", headers={})
 		with patch.object(frappe.local, "request", request, create=True):
 			self.assertEqual(
-				_retailer_login_url(), frappe.utils.get_url("/login?redirect-to=%2Ffieldsales", allow_header_override=False)
+				_retailer_login_url(),
+				frappe.utils.get_url("/login?redirect-to=%2Ffieldsales", allow_header_override=False),
 			)
 
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# No store pushes or emails from these tests; everything rolls back after each test.
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": "Shopify"})
+		set_store_value({"enabled": 0, "platform": "Shopify"})
 		self.ensure_retailer_role()
 
 		self.product = frappe.get_doc(
@@ -241,15 +241,23 @@ class TestRetailerLogin(IntegrationTestCase):
 
 	def test_create_login_new_user(self):
 		result = self.as_user(
-			self.manager_user, create_retailer_login, self.retailer_b, "buyer@otherstores.example", send_invite=0
+			self.manager_user,
+			create_retailer_login,
+			self.retailer_b,
+			"buyer@otherstores.example",
+			send_invite=0,
 		)
 		self.assertTrue(result["user_created"])
 		user = frappe.get_doc("User", "buyer@otherstores.example")
 		self.assertEqual(user.user_type, "Website User")
 		self.assertEqual({row.role for row in user.roles}, {"Field Sales Retailer"})
-		self.assertEqual(frappe.db.get_value("Retailer", self.retailer_b, "user"), "buyer@otherstores.example")
+		self.assertEqual(
+			frappe.db.get_value("Retailer", self.retailer_b, "user"), "buyer@otherstores.example"
+		)
 		# The login email doubles as the contact email when the retailer had none.
-		self.assertEqual(frappe.db.get_value("Retailer", self.retailer_b, "email"), "buyer@otherstores.example")
+		self.assertEqual(
+			frappe.db.get_value("Retailer", self.retailer_b, "email"), "buyer@otherstores.example"
+		)
 
 	def test_create_login_requires_outgoing_email_for_invite(self):
 		# Remove any default outgoing account (the test rollback brings it back).
@@ -266,9 +274,7 @@ class TestRetailerLogin(IntegrationTestCase):
 	def test_invite_email_welcomes_to_the_store(self):
 		"""The invite says "Welcome to <store>", not Frappe's own "Welcome to Frappe" mail."""
 		self.ensure_outgoing_email()
-		frappe.db.set_single_value(
-			"Store Connection", {"company_name": None, "shop_name": "Sunrise Stores", "store_url": ""}
-		)
+		set_store_value({"company_name": None, "shop_name": "Sunrise Stores", "store_url": ""})
 		self.as_user(self.manager_user, create_retailer_login, self.retailer_b, "buyer@otherstores.example")
 		# Email Queue keeps everything in `message` (the raw email); find ours by recipient.
 		name = frappe.get_all(

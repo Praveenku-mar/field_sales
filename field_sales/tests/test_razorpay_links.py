@@ -17,6 +17,7 @@ from field_sales.payments.razorpay import (
 	indian_phone,
 	link_for_confirmation,
 )
+from field_sales.utils.store import set_store_value
 
 
 class FakeRazorpay:
@@ -83,9 +84,7 @@ class TestRazorpayLinks(IntegrationTestCase):
 		)
 		set_encrypted_password("Razorpay Settings", "Razorpay Settings", "s3cret", "key_secret")
 		# Links exist on direct installs; OAuth mode (the App Store) has them disabled.
-		frappe.db.set_single_value(
-			"Store Connection", {"platform": "Shopify", "enabled": 0, "shopify_auth_mode": "Client Credentials"}
-		)
+		set_store_value({"platform": "Shopify", "enabled": 0, "shopify_auth_mode": "Client Credentials"})
 
 		product = frappe.get_doc(
 			{
@@ -372,7 +371,11 @@ class TestRazorpayLinks(IntegrationTestCase):
 		self.assertEqual(doc.flags.payment_link_error, "The amount is invalid")
 		comments = frappe.get_all(
 			"Comment",
-			filters={"reference_doctype": "Field Order", "reference_name": self.order.name, "comment_type": "Comment"},
+			filters={
+				"reference_doctype": "Field Order",
+				"reference_name": self.order.name,
+				"comment_type": "Comment",
+			},
 			pluck="content",
 		)
 		self.assertTrue(any("without a payment link" in c and "The amount is invalid" in c for c in comments))
@@ -438,25 +441,26 @@ class TestRazorpayLinks(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-
 	def test_manual_cash_payment_records_full_amount(self):
 		from field_sales.payments.manual import mark_order_paid
 
-		with patch("field_sales.payments.manual.enqueue_mark_store_paid"), patch(
-			"field_sales.payments.razorpay.notify_users"
-		) as notify:
+		with (
+			patch("field_sales.payments.manual.enqueue_mark_store_paid"),
+			patch("field_sales.payments.razorpay.notify_users") as notify,
+		):
 			result = mark_order_paid(self.order.name, "Cash")
 		self.assertIn(self.rep_user, notify.call_args.args[0])
-		self.assertEqual(
-			notify.call_args.args[1:4], ("payment_received", "Field Order", self.order.name)
-		)
+		self.assertEqual(notify.call_args.args[1:4], ("payment_received", "Field Order", self.order.name))
 		values = frappe.db.get_value(
-			"Field Order", self.order.name,
+			"Field Order",
+			self.order.name,
 			["payment_status", "amount_paid", "manual_payment_method", "manual_payment_reference", "paid_on"],
 			as_dict=True,
 		)
 		self.assertEqual(result["payment_status"], "Paid")
-		self.assertEqual(values.amount_paid, frappe.db.get_value("Field Order", self.order.name, "grand_total"))
+		self.assertEqual(
+			values.amount_paid, frappe.db.get_value("Field Order", self.order.name, "grand_total")
+		)
 		self.assertEqual(values.manual_payment_method, "Cash")
 		self.assertIsNone(values.manual_payment_reference)
 		self.assertIsNotNone(values.paid_on)
@@ -472,7 +476,9 @@ class TestRazorpayLinks(IntegrationTestCase):
 		with patch("field_sales.payments.manual.enqueue_mark_store_paid"):
 			mark_order_paid(self.order.name, "Bank Transfer / UPI", " UTR-123 ")
 		self.assertEqual(self.fake.links["plink_1"]["status"], "cancelled")
-		self.assertEqual(frappe.db.get_value("Field Order", self.order.name, "manual_payment_reference"), "UTR-123")
+		self.assertEqual(
+			frappe.db.get_value("Field Order", self.order.name, "manual_payment_reference"), "UTR-123"
+		)
 
 	def test_manual_payment_refuses_link_that_has_already_received_money(self):
 		from field_sales.payments.manual import mark_order_paid
@@ -496,11 +502,11 @@ class TestRazorpayLinks(IntegrationTestCase):
 
 
 class TestPaymentLinkGate(IntegrationTestCase):
-	"""The App Store edition (Store Connection in OAuth mode) offers no payment links."""
+	"""The App Store edition (the Store in OAuth mode) offers no payment links."""
 
 	def setUp(self):
 		TestRazorpayLinks.setUp(self)  # direct-install fixtures, client credentials mode
-		frappe.db.set_single_value("Store Connection", "shopify_auth_mode", "OAuth")
+		set_store_value("shopify_auth_mode", "OAuth")
 
 	def _user(self, email, role):
 		user = frappe.get_doc({"doctype": "User", "email": email, "first_name": "T", "send_welcome_email": 0})
@@ -522,7 +528,7 @@ class TestPaymentLinkGate(IntegrationTestCase):
 
 	def test_config_reports_them_unavailable(self):
 		self.assertFalse(get_payment_config()["available"])
-		frappe.db.set_single_value("Store Connection", "shopify_auth_mode", "Client Credentials")
+		set_store_value("shopify_auth_mode", "Client Credentials")
 		self.assertTrue(get_payment_config()["available"])
 
 
@@ -544,7 +550,16 @@ class TestPaymentHistory(LinkFixture, IntegrationTestCase):
 		return frappe.get_all(
 			"Payment Transaction",
 			filters={"reference_order": self.order.name},
-			fields=["transaction_type", "status", "source", "razorpay_payment_link_id", "razorpay_payment_id", "amount", "method", "reference"],
+			fields=[
+				"transaction_type",
+				"status",
+				"source",
+				"razorpay_payment_link_id",
+				"razorpay_payment_id",
+				"amount",
+				"method",
+				"reference",
+			],
 			order_by="creation asc",
 		)
 
@@ -553,20 +568,35 @@ class TestPaymentHistory(LinkFixture, IntegrationTestCase):
 		create_link_for_order(self.order.name, replace=True)
 		rows = self.rows()
 		self.assertEqual(
-			[(r.razorpay_payment_link_id, r.status) for r in rows], [("plink_1", "Cancelled"), ("plink_2", "Created")]
+			[(r.razorpay_payment_link_id, r.status) for r in rows],
+			[("plink_1", "Cancelled"), ("plink_2", "Created")],
 		)
-		self.assertTrue(all(r.transaction_type == "Payment Link" and r.source == "Payment Link" for r in rows))
+		self.assertTrue(
+			all(r.transaction_type == "Payment Link" and r.source == "Payment Link" for r in rows)
+		)
 
 	def test_paid_link_records_the_payment_once(self):
 		create_link_for_order(self.order.name)
 		doc = frappe.get_doc("Field Order", self.order.name)
 		paid = {"id": "plink_1", "status": "paid", "amount": 246900, "amount_paid": 246900, "currency": "INR"}
-		payment = {"id": "pay_1", "status": "captured", "amount": 246900, "currency": "INR", "method": "upi", "created_at": int(time.time())}
+		payment = {
+			"id": "pay_1",
+			"status": "captured",
+			"amount": 246900,
+			"currency": "INR",
+			"method": "upi",
+			"created_at": int(time.time()),
+		}
 		with patch("field_sales.sync.orders.enqueue_mark_store_paid"), patch.object(razorpay, "notify_users"):
 			razorpay._apply_link_state(doc, paid, payment)
-			razorpay._apply_link_state(frappe.get_doc("Field Order", self.order.name), paid, payment)  # repeat
+			razorpay._apply_link_state(
+				frappe.get_doc("Field Order", self.order.name), paid, payment
+			)  # repeat
 		rows = self.rows()
-		self.assertEqual([(r.transaction_type, r.status) for r in rows], [("Payment Link", "Paid"), ("Payment", "Captured")])
+		self.assertEqual(
+			[(r.transaction_type, r.status) for r in rows],
+			[("Payment Link", "Paid"), ("Payment", "Captured")],
+		)
 		self.assertEqual(rows[1].razorpay_payment_id, "pay_1")
 		self.assertEqual(rows[1].method, "upi")
 		self.assertEqual(rows[1].amount, 2469)
@@ -574,20 +604,31 @@ class TestPaymentHistory(LinkFixture, IntegrationTestCase):
 	def test_final_state_is_not_undone_by_a_late_event(self):
 		from field_sales.payments.transactions import record
 
-		record("payment:pay_x", transaction_type="Payment", status="Captured", reference_order=self.order.name)
+		record(
+			"payment:pay_x", transaction_type="Payment", status="Captured", reference_order=self.order.name
+		)
 		record("payment:pay_x", transaction_type="Payment", status="Failed", error="late")
-		self.assertEqual(frappe.db.get_value("Payment Transaction", {"transaction_key": "payment:pay_x"}, "status"), "Captured")
+		self.assertEqual(
+			frappe.db.get_value("Payment Transaction", {"transaction_key": "payment:pay_x"}, "status"),
+			"Captured",
+		)
 
 	def test_manual_payment_and_payment_info_history(self):
 		from field_sales.frontend_api import get_order_payment_info
 		from field_sales.payments.manual import mark_order_paid
 
-		with patch("field_sales.payments.manual.enqueue_mark_store_paid"), patch.object(razorpay, "notify_users"):
+		with (
+			patch("field_sales.payments.manual.enqueue_mark_store_paid"),
+			patch.object(razorpay, "notify_users"),
+		):
 			mark_order_paid(self.order.name, "Bank Transfer / UPI", "UTR-9")
 		info = get_order_payment_info(self.order.name)
 		self.assertEqual(len(info["transactions"]), 1)
 		row = info["transactions"][0]
-		self.assertEqual((row.source, row.method, row.reference, row.status), ("Manual", "Bank Transfer / UPI", "UTR-9", "Captured"))
+		self.assertEqual(
+			(row.source, row.method, row.reference, row.status),
+			("Manual", "Bank Transfer / UPI", "UTR-9", "Captured"),
+		)
 
 
 class TestRefundedOrdersGetNoNewLink(LinkFixture, IntegrationTestCase):

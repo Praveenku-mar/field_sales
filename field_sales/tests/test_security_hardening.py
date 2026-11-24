@@ -30,6 +30,7 @@ from field_sales.commission.api import approve_statement, create_adjustment
 from field_sales.commission.statements import build_statement, mark_paid, regenerate_statement
 from field_sales.payments import razorpay
 from field_sales.utils.search import escape_like
+from field_sales.utils.store import set_store_value
 
 PASSWORD = "Fs-Harden#2026-strong"
 NEW_PASSWORD = "Fs-Harden#2026-newer"
@@ -40,10 +41,8 @@ class TestSecurityHardening(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# Everything rolls back after each test; no store pushes from these saves.
-		frappe.db.set_single_value(
-			"Store Connection", {"enabled": 0, "platform": "Shopify", "enable_commission": 1}
-		)
-		frappe.db.delete("Store Location", {"parenttype": "Store Connection"})
+		set_store_value({"enabled": 0, "platform": "Shopify", "enable_commission": 1})
+		frappe.db.delete("Store Location", {"parenttype": "Store"})
 		# Commission adjustments need a site currency; don't depend on what the test site has.
 		# Always written: the defaults cache can still claim one after an earlier rollback.
 		frappe.db.set_default("currency", "INR")
@@ -57,7 +56,9 @@ class TestSecurityHardening(IntegrationTestCase):
 		self.rep_user = self.make_user("harden.rep@example.com", ["Field Sales Rep"])
 		self.rep = self.make_rep(self.rep_user, reports_to=self.manager_rep)
 		# Another team.
-		self.other_manager_user = self.make_user("harden.other@example.com", ["Field Sales Rep", "Sales Manager"])
+		self.other_manager_user = self.make_user(
+			"harden.other@example.com", ["Field Sales Rep", "Sales Manager"]
+		)
 		self.other_rep = self.make_rep(self.other_manager_user)
 		self.nobody_user = self.make_user("harden.nobody@example.com", [])
 
@@ -185,7 +186,9 @@ class TestSecurityHardening(IntegrationTestCase):
 	def system_settings(self, **values):
 		"""Overlay System Settings values for ``frappe.get_system_settings``."""
 		real = frappe.get_system_settings
-		return patch("frappe.get_system_settings", side_effect=lambda key: values[key] if key in values else real(key))
+		return patch(
+			"frappe.get_system_settings", side_effect=lambda key: values[key] if key in values else real(key)
+		)
 
 	def two_factor_for_reps(self):
 		"""2FA on (OTP App, set up already) for Field Sales Rep; Frappe commits the OTP secret, so commit is patched."""
@@ -208,7 +211,9 @@ class TestSecurityHardening(IntegrationTestCase):
 			self.assertNotIn("api_secret", first)
 			self.assertFalse(frappe.db.get_value("User", self.rep_user, "api_key"))
 
-			done = self.as_user("Guest", mobile_login, otp=self.otp_for(first["tmp_id"]), tmp_id=first["tmp_id"])
+			done = self.as_user(
+				"Guest", mobile_login, otp=self.otp_for(first["tmp_id"]), tmp_id=first["tmp_id"]
+			)
 			self.assertEqual(done["user"], self.rep_user)
 			self.assertTrue(done["api_key"] and done["api_secret"])
 
@@ -254,7 +259,12 @@ class TestSecurityHardening(IntegrationTestCase):
 	def test_own_password_change_returns_new_keys(self):
 		old = self.as_user("Guest", mobile_login, self.rep_user, PASSWORD)
 		result = self.as_user(
-			self.rep_user, set_sales_rep_password, self.rep, NEW_PASSWORD, logout_all_sessions=0, old_password=PASSWORD
+			self.rep_user,
+			set_sales_rep_password,
+			self.rep,
+			NEW_PASSWORD,
+			logout_all_sessions=0,
+			old_password=PASSWORD,
 		)
 		self.assertEqual(result["api_key"], old["api_key"])
 		self.assertNotEqual(result["api_secret"], old["api_secret"])
@@ -264,7 +274,13 @@ class TestSecurityHardening(IntegrationTestCase):
 
 	def test_manager_cannot_adjust_own_commission(self):
 		self.assertRaises(
-			frappe.PermissionError, self.as_user, self.manager_user, create_adjustment, self.manager_rep, 50, "Me"
+			frappe.PermissionError,
+			self.as_user,
+			self.manager_user,
+			create_adjustment,
+			self.manager_rep,
+			50,
+			"Me",
 		)
 		# Their team is fine.
 		entry = self.as_user(self.manager_user, create_adjustment, self.rep, 50, "Team bonus")
@@ -288,7 +304,9 @@ class TestSecurityHardening(IntegrationTestCase):
 
 	def test_manager_cannot_approve_regenerate_or_pay_own_statement(self):
 		statement = self.statement(self.manager_rep)
-		self.assertRaises(frappe.PermissionError, self.as_user, self.manager_user, approve_statement, statement.name)
+		self.assertRaises(
+			frappe.PermissionError, self.as_user, self.manager_user, approve_statement, statement.name
+		)
 		self.assertRaises(
 			frappe.PermissionError, self.as_user, self.manager_user, regenerate_statement, statement.name
 		)
@@ -330,7 +348,9 @@ class TestSecurityHardening(IntegrationTestCase):
 		doc = frappe.get_doc("Commission Statement", statement.name)
 		doc.status, doc.paid_on, doc.payment_reference = "Paid", nowdate(), "FAKE"
 		self.as_user(self.manager_user, doc.save)  # Update after submit
-		saved = frappe.db.get_value("Commission Statement", statement.name, ["status", "paid_on"], as_dict=True)
+		saved = frappe.db.get_value(
+			"Commission Statement", statement.name, ["status", "paid_on"], as_dict=True
+		)
 		self.assertEqual((saved.status, saved.paid_on), ("Approved", None))
 
 	# -- own terms on the Sales Rep record ---------------------------------------
@@ -391,7 +411,11 @@ class TestSecurityHardening(IntegrationTestCase):
 		login = self.make_user("harden.buyer@example.com", ["Field Sales Retailer"])
 		frappe.db.set_value("Retailer", self.other_retailer, "user", login)
 		self.assertRaises(
-			frappe.PermissionError, self.as_user, self.manager_user, send_retailer_password_reset, self.other_retailer
+			frappe.PermissionError,
+			self.as_user,
+			self.manager_user,
+			send_retailer_password_reset,
+			self.other_retailer,
 		)
 
 	def test_revoking_a_retailer_login_rotates_its_api_secret(self):
@@ -434,7 +458,9 @@ class TestSecurityHardening(IntegrationTestCase):
 
 	def test_rep_cannot_reassign_retailer(self):
 		# Even to a rep the row permissions would allow (one reporting to them).
-		below = self.make_rep(self.make_user("harden.below@example.com", ["Field Sales Rep"]), reports_to=self.rep)
+		below = self.make_rep(
+			self.make_user("harden.below@example.com", ["Field Sales Rep"]), reports_to=self.rep
+		)
 		doc = frappe.get_doc("Retailer", self.retailer)
 		doc.sales_rep = below
 		self.assertRaisesRegex(
@@ -489,9 +515,13 @@ class TestSecurityHardening(IntegrationTestCase):
 		self.assertEqual(found, {"name": order.name, "docstatus": 0})
 		# Out of scope and unknown ids are both "not found".
 		self.assertIsNone(
-			self.as_user(self.other_manager_user, mobile.find_order_by_client_temp_id, "offline-order-abc-123")
+			self.as_user(
+				self.other_manager_user, mobile.find_order_by_client_temp_id, "offline-order-abc-123"
+			)
 		)
-		self.assertIsNone(self.as_user(self.rep_user, mobile.find_order_by_client_temp_id, "offline-order-none"))
+		self.assertIsNone(
+			self.as_user(self.rep_user, mobile.find_order_by_client_temp_id, "offline-order-none")
+		)
 		# A second insert with the same id is a duplicate, not a second order.
 		again = self.order_doc(client_temp_id="offline-order-abc-123")
 		self.assertRaises(frappe.DuplicateEntryError, self.as_user, self.rep_user, again.insert)
@@ -499,7 +529,9 @@ class TestSecurityHardening(IntegrationTestCase):
 		order.reload()
 		order.client_temp_id = "something-else"
 		order.save()
-		self.assertEqual(frappe.db.get_value("Field Order", order.name, "client_temp_id"), "offline-order-abc-123")
+		self.assertEqual(
+			frappe.db.get_value("Field Order", order.name, "client_temp_id"), "offline-order-abc-123"
+		)
 
 	# -- search and lists ------------------------------------------------------
 
@@ -546,7 +578,9 @@ class TestSecurityHardening(IntegrationTestCase):
 		order.db_set("docstatus", 1)
 		mine = self.as_user(self.manager_user, mobile.get_customer_detail_records, self.other_retailer)
 		self.assertEqual(mine["customer"]["outstanding_balance"], 0)
-		theirs = self.as_user(self.other_manager_user, mobile.get_customer_detail_records, self.other_retailer)
+		theirs = self.as_user(
+			self.other_manager_user, mobile.get_customer_detail_records, self.other_retailer
+		)
 		self.assertEqual(theirs["customer"]["outstanding_balance"], order.grand_total)
 
 	def test_team_list_pages_through_reps_without_a_name(self):

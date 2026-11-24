@@ -19,6 +19,7 @@ from frappe.utils import cint, flt, getdate
 from field_sales.commission import commission_enabled
 from field_sales.frontend_api import _check_access, get_attention_presets, get_card_presets
 from field_sales.permissions import (
+	MANAGER_ROLES,
 	commission_statement_query,
 	field_order_query,
 	get_allowed_reps,
@@ -31,6 +32,7 @@ from field_sales.permissions import (
 )
 from field_sales.push.events import LOW_STOCK_QTY
 from field_sales.utils.search import escape_like
+from field_sales.utils.store import store_filters, store_scope
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
@@ -162,6 +164,14 @@ def _execute_keyset_query(
 	"""
 	limit = clamp_limit(limit)
 	fetch_count = limit + 1
+
+	# Every list is inside the user's store, whatever filters the caller built.
+	scope = store_scope()
+	if scope == "":
+		where_clauses.append("1=0")
+	elif scope is not None and frappe.get_meta(doctype).has_field("store"):
+		params["_fs_store"] = scope
+		where_clauses.append(f"`tab{doctype}`.`store` = %(_fs_store)s")
 
 	if cursor_dict:
 		keyset_sql = _build_keyset_condition(order_by, cursor_dict, params, nullable=nullable)
@@ -301,7 +311,9 @@ def get_orders_list(
 
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
-		where.append("(`tabField Order`.`name` LIKE %(f_search)s OR `tabField Order`.`retailer_name` LIKE %(f_search)s)")
+		where.append(
+			"(`tabField Order`.`name` LIKE %(f_search)s OR `tabField Order`.`retailer_name` LIKE %(f_search)s)"
+		)
 		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("order_date", "modified", "name"))
@@ -398,7 +410,9 @@ def get_visits_list(
 
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
-		where.append("(`tabVisit`.`name` LIKE %(f_search)s OR `tabVisit`.`retailer_name` LIKE %(f_search)s OR `tabVisit`.`city` LIKE %(f_search)s)")
+		where.append(
+			"(`tabVisit`.`name` LIKE %(f_search)s OR `tabVisit`.`retailer_name` LIKE %(f_search)s OR `tabVisit`.`city` LIKE %(f_search)s)"
+		)
 		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("visit_date", "modified", "name"))
@@ -686,7 +700,9 @@ def get_team_list(
 
 	if search and len(search.strip()) >= MIN_SEARCH_LENGTH:
 		term = search.strip()
-		where.append("(`tabSales Rep`.`name` LIKE %(f_search)s OR `tabSales Rep`.`full_name` LIKE %(f_search)s)")
+		where.append(
+			"(`tabSales Rep`.`name` LIKE %(f_search)s OR `tabSales Rep`.`full_name` LIKE %(f_search)s)"
+		)
 		params["f_search"] = f"{escape_like(term)}%"
 
 	decoded_cursor = decode_cursor(cursor, ("full_name", "name"))
@@ -867,12 +883,54 @@ def get_order_detail(order_id: str) -> dict:
 		frappe.throw(_("Order ID is required"), frappe.ValidationError)
 
 	frappe.has_permission("Field Order", "read", order_id, throw=True)
-	doc = frappe.db.get_value("Field Order", order_id, ["name", "order_date", "retailer", "retailer_name", "sales_rep", "grand_total", "net_total", "tax_percent", "discount_percent", "tax_amount", "discount_amount", "docstatus", "sync_status", "sync_error", "store_order_name", "store_checkout_url", "payment_status", "manual_payment_method", "manual_payment_reference", "razorpay_payment_id", "amount_paid", "amount_refunded", "location_id", "visit", "remarks", "modified"], as_dict=True)
+	doc = frappe.db.get_value(
+		"Field Order",
+		order_id,
+		[
+			"name",
+			"order_date",
+			"retailer",
+			"retailer_name",
+			"sales_rep",
+			"grand_total",
+			"net_total",
+			"tax_percent",
+			"discount_percent",
+			"tax_amount",
+			"discount_amount",
+			"docstatus",
+			"sync_status",
+			"sync_error",
+			"store_order_name",
+			"store_checkout_url",
+			"payment_status",
+			"manual_payment_method",
+			"manual_payment_reference",
+			"razorpay_payment_id",
+			"amount_paid",
+			"amount_refunded",
+			"location_id",
+			"visit",
+			"remarks",
+			"modified",
+		],
+		as_dict=True,
+	)
 	order_items = frappe.get_list(
 		"Field Order Item",
 		parent_doctype="Field Order",
 		filters={"parent": order_id, "parenttype": "Field Order"},
-		fields=["name", "product", "product_title", "variant_title", "sku", "qty", "rate", "amount", "available_qty"],
+		fields=[
+			"name",
+			"product",
+			"product_title",
+			"variant_title",
+			"sku",
+			"qty",
+			"rate",
+			"amount",
+			"available_qty",
+		],
 		order_by="idx asc",
 		limit_page_length=0,
 	)
@@ -985,7 +1043,9 @@ def get_customer_detail_records(customer_id: str) -> dict:
 	outstanding = _outstanding_balance(customer_id)
 
 	recent_orders = get_orders_list(retailer=customer_id, limit=5)
-	recent_visits = get_visits_list(retailer=customer_id, limit=5) if not is_retailer_user() else {"items": []}
+	recent_visits = (
+		get_visits_list(retailer=customer_id, limit=5) if not is_retailer_user() else {"items": []}
+	)
 
 	return {
 		"customer": {
@@ -1021,7 +1081,34 @@ def get_visit_detail(visit_id: str) -> dict:
 		frappe.throw(_("Visit ID is required"), frappe.ValidationError)
 
 	frappe.has_permission("Visit", "read", visit_id, throw=True)
-	doc = frappe.db.get_value("Visit", visit_id, ["name", "visit_date", "retailer", "retailer_name", "sales_rep", "sales_rep_name", "status", "check_in_time", "check_out_time", "time_on_site_min", "latitude", "longitude", "location_accuracy_m", "retailer_latitude", "retailer_longitude", "distance_from_retailer_m", "within_geofence", "notes", "no_order_reason", "no_order_remarks", "order_taken"], as_dict=True)
+	doc = frappe.db.get_value(
+		"Visit",
+		visit_id,
+		[
+			"name",
+			"visit_date",
+			"retailer",
+			"retailer_name",
+			"sales_rep",
+			"sales_rep_name",
+			"status",
+			"check_in_time",
+			"check_out_time",
+			"time_on_site_min",
+			"latitude",
+			"longitude",
+			"location_accuracy_m",
+			"retailer_latitude",
+			"retailer_longitude",
+			"distance_from_retailer_m",
+			"within_geofence",
+			"notes",
+			"no_order_reason",
+			"no_order_remarks",
+			"order_taken",
+		],
+		as_dict=True,
+	)
 
 	return {
 		"name": doc.name,
@@ -1092,14 +1179,15 @@ def get_product_sync_status() -> dict:
 	Returns the latest product sync execution status and details for managers/admins.
 	"""
 	_check_access()
-	frappe.only_for(["System Manager", "Sales Manager"])
+	frappe.only_for(list(MANAGER_ROLES))
 
 	from frappe.utils.background_jobs import is_job_enqueued
-	from field_sales.sync.products import JOB_ID
+
+	from field_sales.sync.products import sync_job_id
 
 	is_running = False
 	try:
-		is_running = bool(is_job_enqueued(JOB_ID))
+		is_running = bool(is_job_enqueued(sync_job_id()))
 	except Exception:
 		# Redis unreachable: report "not running" rather than fail the status card. Not logged:
 		# the screen polls this, so a Redis outage would flood the Error Log.
@@ -1107,7 +1195,7 @@ def get_product_sync_status() -> dict:
 
 	log = frappe.db.get_value(
 		"Sync Log",
-		{"operation": "Product Sync"},
+		{"operation": "Product Sync", **store_filters()},
 		["name", "status", "creation", "duration_ms", "error_message", "response_payload"],
 		order_by="creation desc",
 		as_dict=True,
@@ -1129,7 +1217,9 @@ def get_product_sync_status() -> dict:
 			"duration_ms": log.get("duration_ms") if log else 0,
 			"error_message": log.get("error_message") if log else None,
 			"summary": summary,
-		} if log else None,
+		}
+		if log
+		else None,
 	}
 
 
@@ -1249,10 +1339,13 @@ def _search_rows(
 	"""
 	from pypika import Order
 
-	from field_sales.permissions import NO_ROWS, scope_criterion
+	from field_sales.permissions import NO_ROWS, scope_criterion, store_criterion_for
 
 	table = frappe.qb.DocType(doctype)
-	scope = scope_criterion(doctype, table, user) if doctype in SEARCH_SCOPED else None
+	if doctype in SEARCH_SCOPED:
+		scope = scope_criterion(doctype, table, user)
+	else:
+		scope = store_criterion_for(table, user)
 	if scope is NO_ROWS or limit <= 0:
 		return []
 	match = None
@@ -1490,7 +1583,6 @@ def register_device(token: str, platform: str, app_version: str | None = None) -
 		and whether the site has push switched on at all.
 	"""
 	from field_sales.push import devices
-
 	from field_sales.push.fcm import push_enabled
 
 	result = devices.register(_require_staff_user(), token, platform, app_version)
@@ -1515,4 +1607,8 @@ def set_device_push_enabled(token: str, enabled: bool | int | str) -> dict:
 	"""Turn pushes to this phone on or off (Profile switch). :return: ``{"enabled": bool}``"""
 	from field_sales.push import devices
 
-	return {"enabled": devices.set_enabled(_require_staff_user(), token, str(enabled).strip().lower() in ("1", "true", "yes", "on"))}
+	return {
+		"enabled": devices.set_enabled(
+			_require_staff_user(), token, str(enabled).strip().lower() in ("1", "true", "yes", "on")
+		)
+	}

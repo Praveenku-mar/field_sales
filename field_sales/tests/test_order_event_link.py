@@ -16,14 +16,14 @@ from frappe.utils import now_datetime, nowdate
 from field_sales.connectors import get_connector
 from field_sales.sync import orders as sync_orders
 from field_sales.sync import webhooks as sync_webhooks
+from field_sales.utils.store import set_store_value
 
 SHOP = "test-shop.myshopify.com"
 
 
 class TestOrderNoteHint(IntegrationTestCase):
 	def setUp(self):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_api_version": "2026-10"},
 		)
 
@@ -43,9 +43,14 @@ class TestOrderNoteHint(IntegrationTestCase):
 class TestOrderEventLink(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 1, "platform": "Shopify"})
+		set_store_value({"enabled": 1, "platform": "Shopify"})
 		user = frappe.get_doc(
-			{"doctype": "User", "email": "eventlink.rep@example.com", "first_name": "Event", "send_welcome_email": 0}
+			{
+				"doctype": "User",
+				"email": "eventlink.rep@example.com",
+				"first_name": "Event",
+				"send_welcome_email": 0,
+			}
 		).insert(ignore_permissions=True)
 		user.add_roles("Field Sales Rep")
 		rep = frappe.get_doc({"doctype": "Sales Rep", "user": user.name}).insert(ignore_permissions=True).name
@@ -196,8 +201,7 @@ class TestOrderEventLink(IntegrationTestCase):
 
 class TestOrderCreatedTopic(IntegrationTestCase):
 	def setUp(self):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_api_version": "2026-10"},
 		)
 
@@ -227,8 +231,7 @@ class TestWebhookJobUser(IntegrationTestCase):
 	def test_a_store_event_is_processed_as_the_system_not_guest(self):
 		# The delivery is accepted as Guest; jobs it queues (the order confirmation prints the
 		# invoice) run as the user who queued them, and Guest may not print a Field Order.
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"platform": "Shopify", "enabled": 1, "store_url": SHOP, "shopify_api_version": "2026-10"},
 		)
 		seen = {}

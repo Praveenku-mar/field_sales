@@ -33,7 +33,9 @@
   "external_inventory_id",
   "col_break_platform",
   "last_synced",
-  "sync_hash"
+  "sync_hash",
+  "store",
+  "currency"
  ],
  "fields": [
   {
@@ -114,12 +116,14 @@
    "fieldname": "price",
    "fieldtype": "Currency",
    "label": "Price",
-   "in_list_view": 1
+   "in_list_view": 1,
+   "options": "currency"
   },
   {
    "fieldname": "compare_at_price",
    "fieldtype": "Currency",
-   "label": "Compare At Price"
+   "label": "Compare At Price",
+   "options": "currency"
   },
   {
    "fieldname": "col_break_price",
@@ -177,7 +181,6 @@
    "fieldtype": "Data",
    "label": "External Variant ID",
    "reqd": 1,
-   "unique": 1,
    "description": "Shopify ProductVariant GID / Woo variation ID / Odoo product.product ID"
   },
   {
@@ -202,13 +205,32 @@
    "label": "Sync Hash",
    "hidden": 1,
    "description": "to skip unchanged rows on resync"
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "The store's currency when the record was made; every amount on it is in this currency."
   }
  ],
  "index_web_pages_for_search": 0,
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-18 17:49:47.524751",
+ "modified": "2026-11-24 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Platform Product",
@@ -249,6 +271,18 @@
    "role": "Field Sales Rep",
    "share": 0,
    "write": 0
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Store Admin",
+   "share": 0,
+   "write": 1
   }
  ],
  "search_fields": "sku,product_title,variant_title",

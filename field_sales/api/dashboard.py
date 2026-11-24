@@ -9,13 +9,14 @@ visits and orders, a manager sees their team's."""
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, date_diff, flt, get_first_day, get_first_day_of_week, getdate, nowdate
+from frappe.utils import add_days, date_diff, flt, get_first_day, get_first_day_of_week, getdate
 
 from field_sales.frontend_api import get_attention_presets
+from field_sales.permissions import MANAGER_ROLES
 from field_sales.www.fieldsales import has_app_access
+from field_sales.utils.store import store_today
 
 PERIODS = ("today", "week", "month", "last_month", "custom")
-MANAGER_ROLES = {"System Manager", "Sales Manager"}
 TOP_REPS = 10
 RECENT_ORDERS = 10
 
@@ -39,7 +40,7 @@ def get_dashboard(
 	if period not in PERIODS:
 		frappe.throw(_("Period must be one of: {0}").format(", ".join(PERIODS)))
 
-	today = getdate(nowdate())
+	today = store_today()
 	if period == "today":
 		from_d = to_d = today
 	elif period == "week":
@@ -80,13 +81,16 @@ def get_dashboard(
 		"to_date": str(to_d),
 		"cards": {
 			# Visits that happened: checked in (in progress or completed), not merely planned.
-			"visits_count": _count("Visit", {"visit_date": in_period, "status": ("in", ["In Progress", "Completed"])}),
+			"visits_count": _count(
+				"Visit", {"visit_date": in_period, "status": ("in", ["In Progress", "Completed"])}
+			),
 			"orders_count": totals.orders or 0,
 			"order_value": flt(totals.value, 2),
 			"pending_sync_count": _count("Field Order", {"docstatus": 1, "sync_status": "Pending"}),
 			# Same records as the Sync Failures page: failed orders and failed retailers.
 			"failed_sync_count": sum(
-				_count(presets[key]["doctype"], presets[key]["filters"]) for key in ("failed_orders", "failed_retailers")
+				_count(presets[key]["doctype"], presets[key]["filters"])
+				for key in ("failed_orders", "failed_retailers")
 			),
 		},
 		"orders_by_rep": _orders_by_rep(submitted),
@@ -99,7 +103,11 @@ def get_dashboard(
 		),
 		"active_visits": frappe.get_list(
 			"Visit",
-			filters={"check_in_time": ("is", "set"), "check_out_time": ("is", "not set"), "status": ("!=", "Cancelled")},
+			filters={
+				"check_in_time": ("is", "set"),
+				"check_out_time": ("is", "not set"),
+				"status": ("!=", "Cancelled"),
+			},
 			fields=["name", "sales_rep", "sales_rep_name as rep_name", "retailer_name", "check_in_time"],
 			order_by="check_in_time asc",
 			limit_page_length=50,
@@ -122,7 +130,11 @@ def _orders_by_rep(filters: dict) -> list[dict]:
 	)
 	reps = [r.sales_rep for r in rows if r.sales_rep]
 	names = (
-		dict(frappe.get_list("Sales Rep", filters={"name": ("in", reps)}, fields=["name", "full_name"], as_list=True))
+		dict(
+			frappe.get_list(
+				"Sales Rep", filters={"name": ("in", reps)}, fields=["name", "full_name"], as_list=True
+			)
+		)
 		if reps
 		else {}
 	)
@@ -150,7 +162,11 @@ def _orders_by_day(filters: dict, from_date, to_date) -> list[dict]:
 	}
 	days = [str(add_days(from_date, i)) for i in range(date_diff(to_date, from_date) + 1)]
 	return [
-		{"date": day, "orders": rows[day].orders if day in rows else 0, "value": flt(rows[day].value, 2) if day in rows else 0.0}
+		{
+			"date": day,
+			"orders": rows[day].orders if day in rows else 0,
+			"value": flt(rows[day].value, 2) if day in rows else 0.0,
+		}
 		for day in days
 	]
 

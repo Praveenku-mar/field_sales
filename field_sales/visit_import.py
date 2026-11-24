@@ -18,12 +18,13 @@ import frappe
 import xlsxwriter
 from frappe import _
 from frappe.desk.utils import provide_binary_file
-from frappe.utils import getdate, nowdate
+from frappe.utils import getdate
 from frappe.utils.csvutils import read_csv_content
 from frappe.utils.xlsxutils import make_xlsx
 from openpyxl import load_workbook
 
-from field_sales.permissions import get_allowed_reps, is_admin
+from field_sales.permissions import MANAGER_ROLES, get_allowed_reps, is_admin
+from field_sales.utils.store import store_today
 
 MAX_ROWS = 500
 DEFAULT_PURPOSE = "Order Taking"
@@ -39,7 +40,7 @@ COLUMNS = {
 }
 REQUIRED_COLUMNS = ("sales_rep", "customer", "visit_date")
 # Bulk planning is a manager task; reps create visits one at a time.
-IMPORT_ROLES = {"System Manager", "Sales Manager"}
+IMPORT_ROLES = MANAGER_ROLES
 
 
 def _check_import_access() -> None:
@@ -64,8 +65,13 @@ def _get_reps(active_only: bool = True) -> list[dict]:
 		if not allowed:
 			return []
 		filters["name"] = ("in", allowed)
-	return frappe.get_all(
-		"Sales Rep", filters=filters, fields=["name", "full_name", "active"], order_by="full_name asc", limit_page_length=0
+	# get_list: the Sales Rep permission hooks keep it inside the user's store.
+	return frappe.get_list(
+		"Sales Rep",
+		filters=filters,
+		fields=["name", "full_name", "active"],
+		order_by="full_name asc",
+		limit_page_length=0,
 	)
 
 
@@ -93,7 +99,7 @@ def download_visit_template() -> None:
 	example = [
 		reps[0]["name"] if reps else "",
 		customers[0]["name"] if customers else "",
-		nowdate(),
+		str(store_today()),
 		DEFAULT_PURPOSE,
 		"Example row: replace or delete it",
 	]
@@ -160,7 +166,9 @@ def _read_rows(file_doc) -> list[list]:
 			return read_csv_content(file_doc.get_content(), use_sniffer=True)
 	except Exception:
 		frappe.log_error("Visit import: unreadable file")
-		frappe.throw(_("Could not read the file. Use the template (.xlsx) or a CSV."), title=_("Invalid File"))
+		frappe.throw(
+			_("Could not read the file. Use the template (.xlsx) or a CSV."), title=_("Invalid File")
+		)
 	frappe.throw(_("Only .xlsx and .csv files can be imported."), title=_("Invalid File"))
 
 
@@ -235,7 +243,9 @@ def _validate_file(file_url: str) -> list[dict]:
 			title=_("Too Many Rows"),
 		)
 	if not frappe.has_permission("Visit", "create"):
-		frappe.throw(_("You are not allowed to create Visits."), title=_("Not Permitted"), exc=frappe.PermissionError)
+		frappe.throw(
+			_("You are not allowed to create Visits."), title=_("Not Permitted"), exc=frappe.PermissionError
+		)
 
 	reps_by_name, reps_by_full = {}, {}
 	for rep in _get_reps(active_only=False):
@@ -306,11 +316,17 @@ def _check_row(result, date_cell, purpose, reps, customers, valid_purposes, seen
 		matches = customers_by_name.get(customer_text.lower(), [])
 		if len(matches) > 1:
 			options = ", ".join(f"{c.city or _('no city')}: {c.name}" for c in matches)
-			return _("Several customers are named '{0}' ({1}). Use the Customer ID.").format(customer_text, options)
+			return _("Several customers are named '{0}' ({1}). Use the Customer ID.").format(
+				customer_text, options
+			)
 		customer = matches[0] if matches else None
 	if not customer:
 		return _("Customer '{0}' not found").format(customer_text)
-	result["retailer"], result["retailer_name"], result["city"] = customer.name, customer.retailer_name, customer.city
+	result["retailer"], result["retailer_name"], result["city"] = (
+		customer.name,
+		customer.retailer_name,
+		customer.city,
+	)
 
 	visit_date = _parse_date(date_cell)
 	if not visit_date:
@@ -333,7 +349,12 @@ def _check_row(result, date_cell, purpose, reps, customers, valid_purposes, seen
 		return _("Duplicate of row {0} in this file").format(seen[key])
 	existing = frappe.db.get_value(
 		"Visit",
-		{"sales_rep": rep.name, "retailer": customer.name, "visit_date": visit_date, "status": ("!=", "Cancelled")},
+		{
+			"sales_rep": rep.name,
+			"retailer": customer.name,
+			"visit_date": visit_date,
+			"status": ("!=", "Cancelled"),
+		},
 	)
 	if existing:
 		return _("Visit {0} already exists for this rep, customer and date").format(existing)
@@ -389,7 +410,12 @@ def create_visits_from_import(file_url: str) -> dict:
 			).insert()
 		except Exception as e:
 			frappe.db.rollback(save_point="visit_import_row")
-			skipped.append({"row": row["row"], "error": frappe.utils.strip_html(str(e)) or _("Could not create the visit")})
+			skipped.append(
+				{
+					"row": row["row"],
+					"error": frappe.utils.strip_html(str(e)) or _("Could not create the visit"),
+				}
+			)
 			continue
 		created.append(
 			{

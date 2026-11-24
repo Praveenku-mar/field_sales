@@ -21,7 +21,6 @@ import frappe
 from frappe import _
 from frappe.query_builder import CustomFunction
 from frappe.query_builder.functions import Count, IfNull, Max, Min, Sum
-from pypika.terms import PseudoColumn
 from frappe.utils import (
 	add_days,
 	add_months,
@@ -32,10 +31,11 @@ from frappe.utils import (
 	get_first_day,
 	get_last_day,
 	getdate,
-	nowdate,
-)
+	)
+from pypika.terms import PseudoColumn
 
 from field_sales.permissions import get_allowed_reps, is_admin
+from field_sales.utils.store import report_store, store_today
 
 DATE_GROUPS = ("Day", "Week", "Month")
 NOT_SET = "(Not Set)"
@@ -48,10 +48,30 @@ DATE_FORMAT = CustomFunction("DATE_FORMAT", ["date", "format"])
 
 # Parts that roll up by addition; everything shown is derived from these.
 ADDITIVE = (
-	"planned", "completed", "missed", "checked_in", "inside", "dist_sum", "dist_cnt",
-	"time_sum", "time_cnt", "orders", "value", "units", "failed", "not_visited",
-	"net", "discount", "discounted", "cmp_discount",
-	"monthly_target", "target", "cmp_planned", "cmp_completed", "cmp_orders", "cmp_value",
+	"planned",
+	"completed",
+	"missed",
+	"checked_in",
+	"inside",
+	"dist_sum",
+	"dist_cnt",
+	"time_sum",
+	"time_cnt",
+	"orders",
+	"value",
+	"units",
+	"failed",
+	"not_visited",
+	"net",
+	"discount",
+	"discounted",
+	"cmp_discount",
+	"monthly_target",
+	"target",
+	"cmp_planned",
+	"cmp_completed",
+	"cmp_orders",
+	"cmp_value",
 )
 
 
@@ -89,7 +109,7 @@ def _build_context(filters) -> frappe._dict:
 	ctx = frappe._dict(
 		from_date=from_date,
 		to_date=to_date,
-		today=getdate(nowdate()),
+		today=store_today(),
 		group_by=group_by,
 		compare=compare,
 		city=filters.city,
@@ -114,6 +134,11 @@ def get_reps_in_scope(filters, user: str | None = None) -> dict:
 	filters = frappe._dict(filters or {})
 	user = user or frappe.session.user
 
+	# Only the user's store (an admin's too: Store Admin is an admin inside one store); vendor
+	# staff pick one with the Store filter (required on the shared site: report_store).
+	scope = report_store(filters, user)
+	if scope == "":
+		return {}
 	allowed = None if is_admin(user) else set(get_allowed_reps(user))
 	if allowed is not None and not allowed:
 		return {}
@@ -126,7 +151,7 @@ def get_reps_in_scope(filters, user: str | None = None) -> dict:
 		if not allowed:
 			return {}
 
-	rep_filters = {}
+	rep_filters = {} if scope is None else {"store": scope}
 	if allowed is not None:
 		rep_filters["name"] = ("in", list(allowed))
 	if filters.get("territory"):
@@ -267,7 +292,17 @@ def _collect(ctx) -> dict:
 	for row in _visit_rows(ctx, ctx.from_date, ctx.to_date, reps):
 		comp = comps[_group_key(ctx, row.sales_rep, row.dim)]
 		comp["reps"].add(row.sales_rep)
-		for key in ("planned", "completed", "missed", "checked_in", "inside", "dist_sum", "dist_cnt", "time_sum", "time_cnt"):
+		for key in (
+			"planned",
+			"completed",
+			"missed",
+			"checked_in",
+			"inside",
+			"dist_sum",
+			"dist_cnt",
+			"time_sum",
+			"time_cnt",
+		):
 			comp[key] += flt(row[key])
 
 	for row in _order_rows(ctx, ctx.from_date, ctx.to_date, reps):
@@ -531,20 +566,63 @@ def get_columns(ctx=None):
 		{"label": _("Completed Visits"), "fieldname": "completed_visits", "fieldtype": "Int", "width": 125},
 		{"label": _("Missed Visits"), "fieldname": "missed_visits", "fieldtype": "Int", "width": 105},
 		{"label": _("Completion %"), "fieldname": "completion_pct", "fieldtype": "Percent", "width": 115},
-		{"label": _("Inside Geofence %"), "fieldname": "inside_geofence_pct", "fieldtype": "Percent", "width": 135},
-		{"label": _("Avg Distance (m)"), "fieldname": "avg_distance_m", "fieldtype": "Float", "precision": 0, "width": 125},
-		{"label": _("Avg Time on Site (min)"), "fieldname": "avg_time_on_site", "fieldtype": "Float", "precision": 1, "width": 160},
+		{
+			"label": _("Inside Geofence %"),
+			"fieldname": "inside_geofence_pct",
+			"fieldtype": "Percent",
+			"width": 135,
+		},
+		{
+			"label": _("Avg Distance (m)"),
+			"fieldname": "avg_distance_m",
+			"fieldtype": "Float",
+			"precision": 0,
+			"width": 125,
+		},
+		{
+			"label": _("Avg Time on Site (min)"),
+			"fieldname": "avg_time_on_site",
+			"fieldtype": "Float",
+			"precision": 1,
+			"width": 160,
+		},
 		{"label": _("Orders"), "fieldname": "orders", "fieldtype": "Int", "width": 85},
 		{"label": _("Order Value"), "fieldname": "order_value", "fieldtype": "Currency", "width": 130},
-		{"label": _("Avg Order Value"), "fieldname": "avg_order_value", "fieldtype": "Currency", "width": 130},
+		{
+			"label": _("Avg Order Value"),
+			"fieldname": "avg_order_value",
+			"fieldtype": "Currency",
+			"width": 130,
+		},
 		{"label": _("Discount Given"), "fieldname": "discount_given", "fieldtype": "Currency", "width": 125},
 		{"label": _("Avg Discount %"), "fieldname": "avg_discount_pct", "fieldtype": "Percent", "width": 120},
-		{"label": _("Orders with Discount"), "fieldname": "discounted_orders", "fieldtype": "Int", "width": 150},
-		{"label": _("Units Sold"), "fieldname": "units_sold", "fieldtype": "Float", "precision": 0, "width": 100},
+		{
+			"label": _("Orders with Discount"),
+			"fieldname": "discounted_orders",
+			"fieldtype": "Int",
+			"width": 150,
+		},
+		{
+			"label": _("Units Sold"),
+			"fieldname": "units_sold",
+			"fieldtype": "Float",
+			"precision": 0,
+			"width": 100,
+		},
 		{"label": _("Conversion %"), "fieldname": "conversion_pct", "fieldtype": "Percent", "width": 115},
-		{"label": _("Active Retailers Visited"), "fieldname": "retailers_visited", "fieldtype": "Int", "width": 170},
+		{
+			"label": _("Active Retailers Visited"),
+			"fieldname": "retailers_visited",
+			"fieldtype": "Int",
+			"width": 170,
+		},
 		{"label": _("New Retailers"), "fieldname": "new_retailers", "fieldtype": "Int", "width": 115},
-		{"label": _("Not Visited in 30 Days"), "fieldname": "retailers_not_visited", "fieldtype": "Int", "width": 165},
+		{
+			"label": _("Not Visited in 30 Days"),
+			"fieldname": "retailers_not_visited",
+			"fieldtype": "Int",
+			"width": 165,
+		},
 		{"label": _("Top Product"), "fieldname": "top_product", "fieldtype": "Data", "width": 180},
 		{"label": _("Unique SKUs Sold"), "fieldname": "unique_skus", "fieldtype": "Int", "width": 130},
 		{"label": _("Failed Syncs"), "fieldname": "failed_syncs", "fieldtype": "Int", "width": 105},
@@ -660,7 +738,9 @@ def _tree_rows(ctx, comps) -> list[dict]:
 
 		team_key = f"team::{rep}"
 		rows.append(
-			_row(ctx, team_key, _("{0} (Team)").format(name), team_comp(rep, set(seen) | {rep}), indent, parent)
+			_row(
+				ctx, team_key, _("{0} (Team)").format(name), team_comp(rep, set(seen) | {rep}), indent, parent
+			)
 			| {"is_team": 1}
 		)
 		rows.append(_row(ctx, rep, name, own(rep), indent + 1, team_key) | {"sales_rep": rep})
@@ -672,11 +752,15 @@ def _tree_rows(ctx, comps) -> list[dict]:
 		emit(root.name, 0, None, {root.name})
 
 	# Reps in a reporting loop (A -> B -> A) have no root above them: show them at the top.
-	shown = {r["group_key"] for r in rows} | {r["group_key"][len("team::"):] for r in rows if r.get("is_team")}
+	shown = {r["group_key"] for r in rows} | {
+		r["group_key"][len("team::") :] for r in rows if r.get("is_team")
+	}
 	for rep in sorted(set(ctx.reps) - shown):
 		if rep not in shown:
 			emit(rep, 0, None, {rep})
-			shown |= {r["group_key"] for r in rows} | {r["group_key"][len("team::"):] for r in rows if r.get("is_team")}
+			shown |= {r["group_key"] for r in rows} | {
+				r["group_key"][len("team::") :] for r in rows if r.get("is_team")
+			}
 	return rows
 
 
@@ -839,7 +923,9 @@ def _get_summary(ctx, comps) -> list[dict]:
 				suffix = f" · {arrow} {abs(flt(change, 1))}{unit}"
 				better = change < 0 if lower_is_better else change > 0
 				indicator = "Blue" if not change else "Green" if better else "Red"
-		summary.append({"label": label + suffix, "value": flt(value, 2), "datatype": datatype, "indicator": indicator})
+		summary.append(
+			{"label": label + suffix, "value": flt(value, 2), "datatype": datatype, "indicator": indicator}
+		)
 	return summary
 
 
@@ -855,7 +941,7 @@ def get_rep_stats(from_date, to_date, reps: dict) -> list[dict]:
 	ctx = frappe._dict(
 		from_date=getdate(from_date),
 		to_date=getdate(to_date),
-		today=getdate(nowdate()),
+		today=store_today(),
 		group_by="Sales Rep",
 		compare=None,
 		reps=reps,
@@ -868,6 +954,11 @@ def get_rep_stats(from_date, to_date, reps: dict) -> list[dict]:
 		if not (info.active or comp["planned"] or comp["orders"]):
 			continue
 		rows.append(
-			{"sales_rep": rep, "sales_rep_name": info.full_name, "territory": info.territory, **_metrics(ctx, comp)}
+			{
+				"sales_rep": rep,
+				"sales_rep_name": info.full_name,
+				"territory": info.territory,
+				**_metrics(ctx, comp),
+			}
 		)
 	return sorted(rows, key=lambda r: (-r["order_value"], r["sales_rep"]))

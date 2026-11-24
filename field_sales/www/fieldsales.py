@@ -13,7 +13,7 @@ from field_sales.utils.db import safe_commit
 
 no_cache = 1
 
-APP_ROLES = ("System Manager", "Sales Manager", "Field Sales Rep", "Field Sales Retailer")
+APP_ROLES = ("System Manager", "Store Admin", "Sales Manager", "Field Sales Rep", "Field Sales Retailer")
 
 
 def get_context(context):
@@ -47,6 +47,33 @@ def has_app_access(user: str | None = None) -> bool:
 	return user == "Administrator" or bool(set(APP_ROLES) & set(frappe.get_roles(user)))
 
 
+def _boot_store() -> str | None:
+	from field_sales.utils.store import NoStoreContext, get_store_name
+
+	try:
+		return get_store_name()
+	except NoStoreContext:
+		return None
+
+
+def _boot_multi_store() -> bool:
+	from field_sales.utils.store import is_multi_store
+
+	return is_multi_store()
+
+
+def _boot_currency() -> str:
+	from field_sales.utils.money import store_currency
+
+	return store_currency()
+
+
+def _boot_time_zone() -> str:
+	from field_sales.utils.store import store_timezone
+
+	return store_timezone()
+
+
 def get_boot(embedded: dict | None = None) -> dict:
 	"""
 	Values the SPA reads from `window` before it mounts (see frontend/src/main.js).
@@ -60,10 +87,18 @@ def get_boot(embedded: dict | None = None) -> dict:
 			"site_name": frappe.local.site,
 			"default_route": _app_base(),
 			"sysdefaults": frappe.defaults.get_defaults(),
-			# The site's time zone (System Settings; the store's when its settings are matched):
-			# server dates and times are in it, so "today" and expiry checks use it, not the
-			# browser's (utils/format.js). Read directly: the defaults copy can lag behind.
-			"time_zone": frappe.utils.get_system_timezone(),
+			# Two zones (utils/format.js). server_time_zone: the site's (System Settings), in which
+			# every stored datetime is written, so expiry checks compare against it. time_zone: the
+			# store's (utils/store.py -> store_timezone), for "today" and for showing times. The
+			# same zone on single-store sites. Read directly: the defaults copy can lag behind.
+			"server_time_zone": frappe.utils.get_system_timezone(),
+			"time_zone": _boot_time_zone(),
+			# The store's currency (utils/money.py -> store_currency): new amounts and totals are in
+			# it. A record's own amounts carry their own currency where the page has it.
+			"currency": _boot_currency(),
+			"multi_store": _boot_multi_store(),
+			# The Store this user works in (Settings forms edit it); None before one is connected.
+			"store": _boot_store(),
 			# Realtime socket (composables/useRealtime.js): its own port under bench start.
 			"socketio_port": frappe.conf.socketio_port,
 			"dev_server": frappe._dev_server,

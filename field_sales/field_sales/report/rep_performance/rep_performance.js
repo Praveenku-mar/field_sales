@@ -4,6 +4,13 @@
 frappe.query_reports["Rep Performance"] = {
 	filters: [
 		{
+			// Vendor staff pick one store (required on the shared site); a store's users only see theirs.
+			fieldname: "store",
+			label: __("Store"),
+			fieldtype: "Link",
+			options: "Store",
+		},
+		{
 			fieldname: "from_date",
 			label: __("From Date"),
 			fieldtype: "Date",

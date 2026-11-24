@@ -5,19 +5,39 @@
 frappe.get_list, so the Sales Rep hierarchy rules apply as they do in the desk."""
 
 from contextlib import suppress
+
 import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
-from frappe.utils import add_days, cint, flt, get_first_day, nowdate, strip_html
+from frappe.utils import add_days, cint, flt, get_first_day, strip_html
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.connectors.shopify import is_oauth
-from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason
-from field_sales.permissions import hierarchy_filters, is_manager_or_admin, is_retailer_user
+from field_sales.payments.razorpay import PAYMENT_FIELDS, payment_links_disabled_reason, razorpay_enabled
+from field_sales.permissions import (
+	ADMIN_ROLES,
+	MANAGER_ROLES,
+	hierarchy_filters,
+	is_manager_or_admin,
+	is_retailer_user,
+)
+from field_sales.shopify.store_admin import needs_admin_setup, store_admin_email
 from field_sales.sync.orders import MAX_AUTO_ATTEMPTS, store_payments_off
+from field_sales.utils.money import store_currency
 from field_sales.utils.phone import whatsapp_digits
 from field_sales.utils.search import escape_like
+from field_sales.utils.store import (
+	NoStoreContext,
+	get_store_name,
+	get_store_value,
+	in_store_of,
+	is_multi_store,
+	is_vendor,
+	set_vendor_store,
+	store_timezone,
+	store_today,
+)
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
 
 SEARCH_LIMIT = 6
@@ -33,7 +53,7 @@ def get_attention_presets(today: str | None = None) -> dict[str, dict]:
 	same ones (via ``get_list_preset``), so a card and the list it opens always
 	agree. Each preset is one doctype; "Failed Syncs" is two presets on one page.
 	"""
-	today = today or nowdate()
+	today = today or str(store_today())
 	# Every retailer is visible to a rep; these lists are the ones they act on.
 	mine = hierarchy_filters("Retailer")
 	return {
@@ -90,7 +110,7 @@ def get_card_presets(today: str | None = None) -> dict[str, dict]:
 
 	``get_list_preset`` serves these exactly like the attention presets.
 	"""
-	today = today or nowdate()
+	today = today or str(store_today())
 	return {
 		"orders_today": {
 			"doctype": "Field Order",
@@ -124,11 +144,15 @@ def get_session() -> dict:
 	also gets ``is_retailer`` and its ``retailer``; an inactive or unlinked one
 	is refused here, so My Orders never loads for it.
 
-	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled"}``
+	Vendor staff on the shared site get ``is_vendor``; until they pick a store (``switch_store``)
+	``store`` is empty and the app shows its store picker.
+
+	:return: ``{"user", "full_name", "user_image", "roles", "is_admin", "is_manager", "is_retailer", "retailer", "sales_rep", "store", "commission_enabled", "time_zone", "server_time_zone", "currency", "is_vendor"}``
 	"""
 	_check_access()
 	user = frappe.session.user
 	roles = [r for r in frappe.get_roles(user) if r in APP_ROLES]
+	in_store = _session_store() is not None
 	if user == "Administrator" and "System Manager" not in roles:
 		roles.append("System Manager")
 
@@ -151,15 +175,22 @@ def get_session() -> dict:
 		"full_name": info.get("full_name") or user,
 		"user_image": info.get("user_image"),
 		"roles": roles,
-		"is_admin": "System Manager" in roles,
-		"is_manager": bool({"System Manager", "Sales Manager"} & set(roles)),
+		"is_admin": bool(ADMIN_ROLES & set(roles)),
+		"is_manager": bool(MANAGER_ROLES & set(roles)),
 		"is_retailer": bool(retailer),
 		"retailer": retailer,
 		"sales_rep": frappe.db.get_value(
 			"Sales Rep", {"user": user}, ["name", "full_name", "territory", "reports_to"], as_dict=True
 		),
-		"store": _store_info(),
-		"commission_enabled": commission_enabled(),
+		"store": _store_info() if in_store else {},
+		"commission_enabled": commission_enabled() if in_store else False,
+		# The mobile app needs both, as the web app does (www/fieldsales.py boot): stored times are
+		# in server_time_zone; "today" and shown times are in time_zone (the store's).
+		"time_zone": store_timezone(),
+		"server_time_zone": frappe.utils.get_system_timezone(),
+		# The store's currency for new amounts (the mobile app formats with it, as the web app does).
+		"currency": store_currency() if in_store else None,
+		"is_vendor": is_multi_store() and is_vendor(user),
 	}
 
 
@@ -210,7 +241,12 @@ def search(txt: str) -> dict:
 	like = f"%{escape_like(txt)}%"
 	retailers = frappe.get_list(
 		"Retailer",
-		or_filters={"name": ("like", like), "retailer_name": ("like", like), "city": ("like", like), "phone": ("like", like)},
+		or_filters={
+			"name": ("like", like),
+			"retailer_name": ("like", like),
+			"city": ("like", like),
+			"phone": ("like", like),
+		},
 		fields=["name", "retailer_name", "city", "sync_status"],
 		order_by="modified desc",
 		limit_page_length=SEARCH_LIMIT,
@@ -234,12 +270,21 @@ def get_dashboard() -> dict:
 	"""
 	frappe.has_permission("Field Order", "read", throw=True)
 	_check_access()
-	today = nowdate()
+	today = str(store_today())
 
 	visits_today = frappe.get_list(
 		"Visit",
 		filters={"visit_date": today, "status": ("!=", "Cancelled")},
-		fields=["name", "retailer", "retailer_name", "city", "sales_rep_name", "status", "check_in_time", "time_on_site_min"],
+		fields=[
+			"name",
+			"retailer",
+			"retailer_name",
+			"city",
+			"sales_rep_name",
+			"status",
+			"check_in_time",
+			"time_on_site_min",
+		],
 		order_by="status desc, modified desc",
 		limit_page_length=50,
 	)
@@ -256,7 +301,7 @@ def get_dashboard() -> dict:
 		counts[visit.status] = counts.get(visit.status, 0) + 1
 
 	return {
-		"currency": frappe.db.get_default("currency"),
+		"currency": store_currency(),
 		"today": {
 			"visits_planned": len(visits_today),
 			"visits_completed": counts["Completed"],
@@ -286,6 +331,7 @@ def get_dashboard() -> dict:
 
 
 @frappe.whitelist()
+@in_store_of("Platform Product", "product")
 def get_product_activity(product: str) -> dict:
 	"""
 	A product's last 30 days of sales, its recent orders and its sibling variants.
@@ -295,12 +341,20 @@ def get_product_activity(product: str) -> dict:
 	"""
 	_check_access()
 	frappe.has_permission("Platform Product", "read", product, throw=True)
-	since = add_days(nowdate(), -30)
+	since = add_days(str(store_today()), -30)
 
 	recent = frappe.get_list(
 		"Field Order",
 		filters=[["Field Order Item", "product", "=", product], ["Field Order", "docstatus", "!=", 2]],
-		fields=["name", "retailer_name", "order_date", "docstatus", "sync_status", "`tabField Order Item`.qty as qty", "`tabField Order Item`.amount as amount"],
+		fields=[
+			"name",
+			"retailer_name",
+			"order_date",
+			"docstatus",
+			"sync_status",
+			"`tabField Order Item`.qty as qty",
+			"`tabField Order Item`.amount as amount",
+		],
 		order_by="`tabField Order`.order_date desc",
 		limit_page_length=10,
 	)
@@ -359,6 +413,7 @@ def _product_sales(product: str, since) -> dict:
 
 
 @frappe.whitelist()
+@in_store_of("Field Order", "field_order")
 def get_order_sync_info(field_order: str) -> dict:
 	"""
 	What the order page's sync panel shows beyond the order's own fields.
@@ -376,8 +431,8 @@ def get_order_sync_info(field_order: str) -> dict:
 		as_dict=True,
 	)
 
-	location_id, location_name, order_mode = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["default_location_id", "default_location_name", "order_mode"]
+	location_id, location_name, order_mode = get_store_value(
+		["default_location_id", "default_location_name", "order_mode"]
 	) or (None, None, None)
 	order_url = draft_url = None
 	if doc.external_order_id or doc.external_draft_id:
@@ -400,6 +455,7 @@ def get_order_sync_info(field_order: str) -> dict:
 
 
 @frappe.whitelist()
+@in_store_of("Sales Rep", "sales_rep")
 def get_rep_month_stats(sales_rep: str | None = None) -> dict:
 	"""
 	Month-to-date numbers per Sales Rep the user can see (one rep with ``sales_rep``),
@@ -414,7 +470,7 @@ def get_rep_month_stats(sales_rep: str | None = None) -> dict:
 		get_reps_in_scope,
 	)
 
-	today = nowdate()
+	today = str(store_today())
 	reps = get_reps_in_scope({"sales_rep": sales_rep} if sales_rep else {})
 	keys = (
 		"planned_visits",
@@ -482,18 +538,28 @@ def _charts(today: str) -> dict:
 		fields=["sales_rep", {"COUNT": "*", "as": "orders"}, {"SUM": "grand_total", "as": "value"}],
 		group_by="sales_rep",
 	)
-	names = dict(
-		frappe.get_all(
-			"Sales Rep", filters={"name": ("in", [r.sales_rep for r in by_rep])}, fields=["name", "full_name"], as_list=True
+	names = (
+		dict(
+			frappe.get_all(
+				"Sales Rep",
+				filters={"name": ("in", [r.sales_rep for r in by_rep])},
+				fields=["name", "full_name"],
+				as_list=True,
+			)
 		)
-	) if by_rep else {}
+		if by_rep
+		else {}
+	)
 
 	return {
 		"visits_30d": [{"date": str(d), "visits": visits.get(str(d), 0)} for d in days],
 		"order_value_30d": [{"date": str(d), "value": flt(value.get(str(d), 0.0), 2)} for d in days],
 		"visits_by_status": [{"status": r.status, "count": r.count} for r in by_status],
 		"orders_by_rep_7d": sorted(
-			[{"rep": names.get(r.sales_rep) or r.sales_rep, "orders": r.orders, "value": flt(r.value, 2)} for r in by_rep],
+			[
+				{"rep": names.get(r.sales_rep) or r.sales_rep, "orders": r.orders, "value": flt(r.value, 2)}
+				for r in by_rep
+			],
 			key=lambda r: -r["value"],
 		),
 	}
@@ -522,7 +588,7 @@ def _failures() -> list[dict]:
 
 def _team_this_month(today: str) -> list[dict]:
 	"""Month-to-date per rep for managers (same numbers as Rep Performance); empty for reps."""
-	if not ({"System Manager", "Sales Manager"} & set(frappe.get_roles())):
+	if not (MANAGER_ROLES & set(frappe.get_roles())):
 		return []
 
 	from field_sales.field_sales.report.rep_performance.rep_performance import (
@@ -531,11 +597,21 @@ def _team_this_month(today: str) -> list[dict]:
 	)
 
 	rows = get_rep_stats(get_first_day(today), today, get_reps_in_scope({}))
-	keys = ("sales_rep", "sales_rep_name", "territory", "completed_visits", "orders", "order_value", "achievement_pct", "conversion_pct")
+	keys = (
+		"sales_rep",
+		"sales_rep_name",
+		"territory",
+		"completed_visits",
+		"orders",
+		"order_value",
+		"achievement_pct",
+		"conversion_pct",
+	)
 	return [{k: row.get(k) for k in keys} for row in rows[:10]]
 
 
 @frappe.whitelist(methods=["GET"])
+@in_store_of("Field Order", "field_order")
 def get_order_payment_info(field_order: str) -> dict:
 	"""
 	Order Detail's Payment card: the order's payment fields, whether Razorpay is enabled,
@@ -558,7 +634,7 @@ def get_order_payment_info(field_order: str) -> dict:
 		"order_label": doc.store_order_name or doc.name,
 		"store_checkout_url": doc.store_checkout_url,
 		"retailer_name": doc.retailer_name,
-		"razorpay_enabled": bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled"))),
+		"razorpay_enabled": razorpay_enabled(),
 		"payment_links_available": payment_links_disabled_reason() is None,
 		"can_create_link": bool(doc.has_permission("write")),
 		"can_mark_paid": bool(
@@ -620,7 +696,7 @@ def _refund_info(doc) -> dict:
 		refundable > 0
 		and bool(set(frappe.get_roles()) & set(REFUND_ROLES))
 		and doc.has_permission("write")
-		and bool(cint(frappe.db.get_single_value("Razorpay Settings", "enabled")))
+		and razorpay_enabled()
 	)
 	return {"refundable_amount": refundable, "can_refund": bool(can)}
 
@@ -630,6 +706,43 @@ def payment_history(doc) -> list[dict]:
 	from field_sales.payments.transactions import history
 
 	return history(field_order=doc.name, store_order_id=doc.external_order_id)
+
+
+@frappe.whitelist(methods=["GET"])
+def get_vendor_stores() -> list[dict]:
+	"""Vendor staff on the shared site: every Store, for the app's store picker."""
+	_require_vendor()
+	return frappe.get_all(
+		"Store",
+		fields=["name", "shop_name", "store_url", "enabled", "uninstalled_on"],
+		order_by="shop_name asc, name asc",
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+def switch_store(store: str | None = None) -> dict:
+	"""
+	Vendor staff on the shared site: work in ``store`` for the rest of this session (lists, forms
+	and reports then show that store only), or with no ``store`` go back to the picker. Each
+	switch is recorded on the Store (design Q2).
+	"""
+	_require_vendor()
+	if store:
+		if not frappe.db.exists("Store", store):
+			frappe.throw(_("Store {0} not found").format(store), frappe.DoesNotExistError)
+		frappe.get_doc("Store", store).add_comment(
+			"Info",
+			_("{0} opened this store in Agamsale (vendor support) from {1}.").format(
+				frappe.session.user, getattr(frappe.local, "request_ip", None) or _("an unknown address")
+			),
+		)
+	set_vendor_store(store or None)
+	return {"store": store or None}
+
+
+def _require_vendor() -> None:
+	if not (is_multi_store() and is_vendor()):
+		frappe.throw(_("Only vendor staff on the shared site can switch stores"), frappe.PermissionError)
 
 
 def _check_access():
@@ -647,14 +760,33 @@ def _count(doctype: str, filters: dict | list) -> int:
 	return rows[0].count if rows else 0
 
 
+def _session_store() -> str | None:
+	"""The store this session works in, or ``None`` (vendor staff who have not picked one yet)."""
+	try:
+		return get_store_name()
+	except NoStoreContext:
+		return None
+
+
 def _store_info() -> dict:
 	"""Store name for the sidebar header: the shop's domain without scheme or path."""
-	values = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["platform", "enabled", "store_url", "shopify_auth_mode"], as_dict=True
-	) or {}
+	values = (
+		get_store_value(
+			["name", "platform", "enabled", "store_url", "shopify_auth_mode", "shop_name", "tax_mode"],
+			as_dict=True,
+		)
+		or {}
+	)
 	url = (values.get("store_url") or "").strip().lower()
 	host = url.split("://", 1)[-1].split("/", 1)[0]
 	return {
+		"code": values.get("name"),
+		"title": values.get("shop_name") or values.get("name"),
+		# "None": the store charges no GST (orders show no GST line; invoices no GSTIN).
+		"tax_mode": values.get("tax_mode") or "GST",
+		# Shared site, right after install: the app asks for the merchant's admin email first.
+		"needs_admin_setup": needs_admin_setup(values.get("name")),
+		"admin_email": store_admin_email(values.get("name")),
 		"name": host.removesuffix(".myshopify.com") or None,
 		"platform": values.get("platform"),
 		"enabled": bool(values.get("enabled")),

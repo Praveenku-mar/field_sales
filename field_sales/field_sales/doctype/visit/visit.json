@@ -46,7 +46,8 @@
   "no_order_reason",
   "no_order_remarks",
   "client_temp_id",
-  "client_temp_key"
+  "client_temp_key",
+  "store"
  ],
  "fields": [
   {
@@ -120,7 +121,6 @@
    "fieldtype": "Date",
    "label": "Visit Date",
    "reqd": 1,
-   "default": "Today",
    "in_standard_filter": 1,
    "search_index": 1,
    "in_list_view": 1
@@ -315,6 +315,16 @@
    "no_copy": 1,
    "read_only": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Store",
+   "options": "Store",
+   "reqd": 1,
+   "set_only_once": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
   }
  ],
  "in_create": 0,
@@ -326,7 +336,7 @@
    "group": "Orders"
   }
  ],
- "modified": "2026-11-12 12:00:00.000000",
+ "modified": "2026-11-23 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Visit",
@@ -367,6 +377,18 @@
    "report": 0,
    "role": "Field Sales Rep",
    "share": 0,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Store Admin",
+   "share": 1,
    "write": 1
   }
  ],

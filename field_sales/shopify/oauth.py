@@ -9,7 +9,7 @@ Shopify App Store install: the OAuth authorization code grant with an expiring o
    and redirects to the shop's ``/admin/oauth/authorize``.
 3. The merchant approves; Shopify redirects to ``callback`` with ``code``, ``state``, ``hmac``.
 4. ``callback`` checks everything again, swaps the code for tokens (``expiring=1``), saves
-   them on Store Connection (OAuth mode, enabled), queues webhook registration and
+   them on the Store (OAuth mode, enabled), queues webhook registration and
    redirects to the app.
 
 Neither endpoint needs a Frappe login (``allow_guest``) or a browser cookie: state lives in
@@ -32,13 +32,24 @@ from werkzeug.wrappers import Response
 
 from field_sales.connectors.shopify import (
 	REQUEST_TIMEOUT,
+	TokenLockTimeout,
 	clear_oauth_tokens,
 	normalize_shop_domain,
 	save_oauth_tokens,
+	shop_token_lock,
 )
-from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable
+from field_sales.field_sales.doctype.sync_log.sync_log import log_sync_durable, log_sync_or_error
 from field_sales.shopify import config
 from field_sales.utils.db import safe_commit
+from field_sales.utils.store import (
+	STORE_DOCTYPE,
+	enqueue_in_store,
+	get_store,
+	make_store_code,
+	set_current_store,
+	set_store_value,
+	shop_store,
+)
 
 STATE_TTL_SECONDS = 10 * 60
 STATE_KEY = "field_sales:shopify_oauth_state:{}"
@@ -99,9 +110,14 @@ def callback(
 			raise InstallError("Unknown or expired install request; start the install again.")
 		if not code:
 			raise InstallError("Missing authorization code.")
-		check_shop_allowed(shop)
-		body = _exchange_code(shop, code)
-		missing = save_installation(shop, body)
+		# One install / token exchange of a shop at a time: two would both create its Store.
+		with shop_token_lock(shop):
+			check_shop_allowed(shop)
+			body = _exchange_code(shop, code)
+			missing = save_installation(shop, body)
+			safe_commit()  # the next holder of the lock must see this shop's Store
+	except TokenLockTimeout:
+		return _fail("Another install of this shop is in progress; open the app again.", shop)
 	except InstallError as e:
 		return _fail(str(e), shop)
 
@@ -147,9 +163,13 @@ def check_shop_allowed(shop: str) -> None:
 	any shop can replay their own signed install link here. Refusing only while the connection
 	is enabled would let another shop take over a disabled or uninstalled site and receive its
 	retailers and orders. A different shop is allowed only after a System Manager clears the
-	connection (``reset_connection``). A first install (no ``store_url``) is allowed.
+	connection (``reset_connection``). A first install (no ``store_url``) is allowed, and so is a
+	new shop on the shared multi-store site, which gets its own Store (``shop_store``).
 	"""
-	settings = frappe.get_single("Store Connection")
+	store = shop_store(shop)
+	if not store:
+		return
+	settings = get_store(store)
 	if settings.platform != "Shopify" or not settings.store_url:
 		return
 	if normalize_shop_domain(settings.store_url) != shop:
@@ -167,11 +187,12 @@ def reset_connection() -> dict:
 	mandatory on the form and locked in OAuth mode. Synced records are left as they are.
 	"""
 	frappe.only_for("System Manager")
-	settings = frappe.get_single("Store Connection")
+	settings = get_store()
+	if settings.is_new():
+		return {"reset": True, "previous_shop": None}
 	previous = settings.store_url
-	clear_oauth_tokens()
-	frappe.db.set_single_value(
-		"Store Connection",
+	clear_oauth_tokens(settings.name)
+	set_store_value(
 		{
 			"enabled": 0,
 			"store_url": None,
@@ -180,7 +201,7 @@ def reset_connection() -> dict:
 			"uninstalled_on": None,
 			"last_test_status": "Connection reset",
 			"last_tested_on": now_datetime(),
-		},
+		}
 	)
 	log_sync_durable(
 		platform="Shopify",
@@ -239,15 +260,18 @@ def _exchange_code(shop: str, code: str) -> dict:
 
 def save_installation(shop: str, body: dict) -> list[str]:
 	"""
-	Point Store Connection at ``shop`` in OAuth mode with the new tokens, then queue
-	webhook registration. Saved as Administrator (the request is a guest's).
+	Point the shop's Store at ``shop`` in OAuth mode with the new tokens, then queue webhook
+	registration and store setup for it. The Store is created on a site with none, and for a new
+	shop on the shared multi-store site. Saved as Administrator (the request is a guest's); the
+	Store becomes the request's current store.
 
 	:return: Requested scopes the merchant did not grant.
 	"""
 	previous_user = frappe.session.user
 	frappe.set_user("Administrator")
 	try:
-		settings = frappe.get_single("Store Connection")
+		store = shop_store(shop)
+		settings = get_store(store) if store else frappe.new_doc(STORE_DOCTYPE)
 		settings.update(
 			{
 				"platform": "Shopify",
@@ -260,26 +284,31 @@ def save_installation(shop: str, body: dict) -> list[str]:
 				"last_tested_on": now_datetime(),
 			}
 		)
+		if settings.is_new():
+			settings.store_code = make_store_code(shop)
 		settings.flags.from_store_install = True
 		settings.save(ignore_permissions=True)
 		# After the save: validate() may clear tokens of the previous shop or mode.
-		save_oauth_tokens(body)
+		save_oauth_tokens(body, settings.name)
 	finally:
 		frappe.set_user(previous_user)
 
-	frappe.enqueue(
+	set_current_store(settings.name)
+	enqueue_in_store(
 		"field_sales.shopify.webhooks.register_webhooks",
+		store=settings.name,
 		queue="short",
 		enqueue_after_commit=True,
-		job_id="field_sales_shopify_register_webhooks",
+		job_id=f"field_sales:register_webhooks:{settings.name}",
 		deduplicate=True,
 	)
 	# A fresh install has no default location: pick one so products start syncing.
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.shopify.merchant_settings.setup_new_store",
+		store=settings.name,
 		queue="short",
 		enqueue_after_commit=True,
-		job_id="field_sales_shopify_setup_new_store",
+		job_id=f"field_sales:setup_new_store:{settings.name}",
 		deduplicate=True,
 	)
 	return config.missing_scopes(body.get("scope"))
@@ -291,7 +320,7 @@ def _fail(message: str, shop: str | None) -> Response:
 	throttle = frappe.cache.make_key(f"field_sales:shopify_install_failed:{message}")
 	if not frappe.cache.set(throttle, 1, nx=True, ex=FAIL_LOG_INTERVAL_SECONDS):
 		return Response(message, status=400, mimetype="text/plain")
-	log_sync_durable(
+	log_sync_or_error(
 		platform="Shopify",
 		operation="Install",
 		status="Failed",

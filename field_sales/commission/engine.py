@@ -26,7 +26,7 @@ from collections import defaultdict
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, get_first_day, get_last_day, nowdate
+from frappe.utils import cint, flt, get_first_day, get_last_day
 
 from field_sales.commission import commission_enabled
 from field_sales.connectors import get_connector
@@ -35,6 +35,14 @@ from field_sales.field_sales.doctype.commission_entry.commission_entry import (
 	make_dedupe_key,
 )
 from field_sales.field_sales.doctype.sync_log.sync_log import log_sync
+from field_sales.utils.money import record_currency
+from field_sales.utils.store import (
+	enqueue_in_store,
+	get_store_value,
+	record_store,
+	store_filters,
+	store_today,
+)
 
 ENTRY_FIELDS = [
 	"name",
@@ -68,8 +76,9 @@ def enqueue_create_entries(field_order: str):
 	"""
 	if not commission_enabled():
 		return
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.commission.engine.create_entries",
+		store=record_store("Field Order", field_order),
 		field_order=field_order,
 		job_id=f"field_sales:create_entries:{field_order}",
 		deduplicate=True,
@@ -98,8 +107,11 @@ def reconcile_order(external_order_id: str) -> dict:
 		return {"note": "Ignored: commission is turned off"}
 	external_order_id = str(external_order_id or "")
 	# Cancelled Field Orders too: their store order's cancel / refund must still reverse the entries.
+	# Only the current store's: an event of one shop never reaches another store's order.
 	name = frappe.db.get_value(
-		"Field Order", {"external_order_id": external_order_id, "docstatus": ("in", (1, 2))}, "name"
+		"Field Order",
+		{**store_filters(), "external_order_id": external_order_id, "docstatus": ("in", (1, 2))},
+		"name",
 	)
 	if not name:
 		return {"note": "Ignored: not a Field Sales order"}
@@ -122,7 +134,7 @@ def reconcile_order(external_order_id: str) -> dict:
 	result = {"field_order": name, "created": created, "updated": updated, "adjusted": adjusted}
 	if created or updated or adjusted:
 		log_sync(
-			platform=field_order.platform or frappe.db.get_single_value("Store Connection", "platform"),
+			platform=field_order.platform or get_store_value("platform"),
 			operation="Commission",
 			reference_doctype="Field Order",
 			reference_name=name,
@@ -141,8 +153,8 @@ class _Context:
 		self.field_order = field_order
 		self.order = order
 		self.external_id = str(order.get("external_order_id") or field_order.external_order_id)
-		self.currency = order.get("currency") or frappe.db.get_default("currency")
-		self.today = nowdate()
+		self.currency = order.get("currency") or record_currency(field_order)
+		self.today = str(store_today())
 		self.precision = cint(frappe.get_precision("Commission Entry", "amount"))
 		self._plans: dict[str, object] = {}
 		self.pairs = self._map_lines()
@@ -203,7 +215,9 @@ class _Context:
 		if not name:
 			return None
 		if name not in self._plans:
-			self._plans[name] = frappe.get_doc("Commission Plan", name) if frappe.db.exists("Commission Plan", name) else None
+			self._plans[name] = (
+				frappe.get_doc("Commission Plan", name) if frappe.db.exists("Commission Plan", name) else None
+			)
 		return self._plans[name]
 
 	# ------------------------------------------------------------------
@@ -219,7 +233,13 @@ class _Context:
 			as_dict=True,
 		)
 		plan = self.plan(rep.commission_plan) if rep else None
-		if not rep or not cint(rep.commission_active) or not plan or not cint(plan.is_active) or not self.pairs:
+		if (
+			not rep
+			or not cint(rep.commission_active)
+			or not plan
+			or not cint(plan.is_active)
+			or not self.pairs
+		):
 			return 0
 
 		existing = set(
@@ -249,7 +269,9 @@ class _Context:
 			running_base += base
 
 			for manager, manager_plan in managers:
-				created += self._insert(self._override_entry(manager, manager_plan, item, line, base, discount_pct), existing)
+				created += self._insert(
+					self._override_entry(manager, manager_plan, item, line, base, discount_pct), existing
+				)
 		return created
 
 	def _order_discount_pct(self) -> float:
@@ -310,7 +332,9 @@ class _Context:
 			"currency": self.currency,
 		}
 
-	def _rep_entry(self, rep, plan, item, line: dict, base: float, discount_pct: float, running_base: float) -> dict:
+	def _rep_entry(
+		self, rep, plan, item, line: dict, base: float, discount_pct: float, running_base: float
+	) -> dict:
 		"""Values of the rep's own entry: rate from the plan, reduced for discount given."""
 		multiplier = penalty_multiplier(discount_pct, rep.max_discount_pct, plan.penalty_factor)
 		values = {
@@ -333,7 +357,9 @@ class _Context:
 			)
 			return values
 
-		base_rate = resolve_rate(plan, item.product, self._collection(item.product), line, running_base + base)
+		base_rate = resolve_rate(
+			plan, item.product, self._collection(item.product), line, running_base + base
+		)
 		effective_rate = flt(base_rate * multiplier, 4)
 		amount = self.money(base * effective_rate / 100)
 		rate_text = f"{flt(base_rate, 4):g}%"
@@ -347,7 +373,9 @@ class _Context:
 		)
 		return values
 
-	def _override_entry(self, manager: str, manager_plan, item, line: dict, base: float, discount_pct: float) -> dict:
+	def _override_entry(
+		self, manager: str, manager_plan, item, line: dict, base: float, discount_pct: float
+	) -> dict:
 		"""A manager's override on a rep's line: the manager plan's override % of the line base, no discount penalty."""
 		pct = flt(manager_plan.override_pct)
 		amount = self.money(base * pct / 100)
@@ -371,7 +399,10 @@ class _Context:
 	def _insert(self, values: dict, existing: set) -> int:
 		"""Insert an entry unless its key exists (or a concurrent run just made it); 1 if created."""
 		key = make_dedupe_key(
-			values["field_order_item"], values["sales_rep"], values["beneficiary_type"], values["platform_order"]
+			values["field_order_item"],
+			values["sales_rep"],
+			values["beneficiary_type"],
+			values["platform_order"],
 		)
 		if key in existing:
 			return 0
@@ -416,18 +447,26 @@ class _Context:
 		# What each approved statement paid for its entries (amount, reversed), frozen at approval: losses
 		# after that are measured against it, not against the entry, which may have been changed in
 		# place while the statement was still a Draft (review finding F8).
-		frozen = {
-			row.commission_entry: row
-			for row in frappe.get_all(
-				"Commission Statement Entry",
-				filters={"parent": ("in", list(locked_statements)), "parenttype": "Commission Statement"},
-				fields=["commission_entry", "amount", "reversed_amount"],
-			)
-		} if locked_statements else {}
+		frozen = (
+			{
+				row.commission_entry: row
+				for row in frappe.get_all(
+					"Commission Statement Entry",
+					filters={"parent": ("in", list(locked_statements)), "parenttype": "Commission Statement"},
+					fields=["commission_entry", "amount", "reversed_amount"],
+				)
+			}
+			if locked_statements
+			else {}
+		)
 		adjusted_so_far = defaultdict(float)
 		for adj in frappe.get_all(
 			"Commission Entry",
-			filters={"source_order": self.field_order.name, "entry_type": "Adjustment", "status": ("!=", "Cancelled")},
+			filters={
+				"source_order": self.field_order.name,
+				"entry_type": "Adjustment",
+				"status": ("!=", "Cancelled"),
+			},
 			fields=["adjusts_entry", "amount"],
 		):
 			adjusted_so_far[adj.adjusts_entry] += flt(adj.amount)
@@ -510,7 +549,9 @@ class _Context:
 			reason = _("Order {0} was cancelled on the store.").format(self.external_id)
 		else:
 			lost = self.money(amount * fraction)
-			reason = _("Refund on order {0}: {1}% of the line returned.").format(self.external_id, flt(fraction * 100, 2))
+			reason = _("Refund on order {0}: {1}% of the line returned.").format(
+				self.external_id, flt(fraction * 100, 2)
+			)
 
 		# The reversal already deducted on the statement.
 		deducted = flt(paid.reversed_amount if paid else entry.reversed_amount)
@@ -549,7 +590,6 @@ class _Context:
 # ----------------------------------------------------------------------
 
 
-
 def load_plans(names) -> dict:
 	"""
 	Commission Plans by name, each with its ``rates`` and ``slabs`` rows, read in three queries
@@ -565,7 +605,9 @@ def load_plans(names) -> dict:
 		for df in frappe.get_meta("Commission Plan").fields
 		if df.fieldtype not in no_value_fields and df.fieldtype not in table_fields
 	]
-	plans = {p.name: p for p in frappe.get_all("Commission Plan", filters={"name": ("in", names)}, fields=fields)}
+	plans = {
+		p.name: p for p in frappe.get_all("Commission Plan", filters={"name": ("in", names)}, fields=fields)
+	}
 	for plan in plans.values():
 		plan.rates, plan.slabs = [], []
 	for child, key in (("Commission Plan Rate", "rates"), ("Commission Plan Slab", "slabs")):
@@ -579,7 +621,9 @@ def load_plans(names) -> dict:
 	return plans
 
 
-def resolve_rate(plan, product: str | None, collection: str | None, line: dict, month_to_date_base: float = 0) -> float:
+def resolve_rate(
+	plan, product: str | None, collection: str | None, line: dict, month_to_date_base: float = 0
+) -> float:
 	"""
 	Base commission rate (%) of one line under ``plan``, before the discount penalty.
 
@@ -600,7 +644,10 @@ def resolve_rate(plan, product: str | None, collection: str | None, line: dict, 
 
 		categories = {c.strip().lower() for c in (collection, line.get("product_type")) if c}
 		for row in plan.rates:
-			if row.match_type == "Collection/Product Type" and (row.match_value or "").strip().lower() in categories:
+			if (
+				row.match_type == "Collection/Product Type"
+				and (row.match_value or "").strip().lower() in categories
+			):
 				return flt(row.rate)
 
 		tags = {str(t).strip().lower() for t in line.get("tags") or []}
@@ -622,7 +669,9 @@ def slab_rate(plan, total: float) -> float:
 	return rate
 
 
-def penalty_multiplier(discount_pct: float, max_discount_pct: float | None, penalty_factor: float | None) -> float:
+def penalty_multiplier(
+	discount_pct: float, max_discount_pct: float | None, penalty_factor: float | None
+) -> float:
 	"""
 	Share of the rate kept after the discount penalty: 1 - (discount / max discount) × factor, within 0..1.
 

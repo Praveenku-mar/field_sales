@@ -4,9 +4,9 @@
 """
 Connector factory. The entry point core code uses to reach a store::
 
-	from field_sales.connectors import get_connector
+        from field_sales.connectors import get_connector
 
-	result = get_connector().test_connection()
+        result = get_connector().test_connection()
 """
 
 from __future__ import annotations
@@ -16,24 +16,24 @@ from frappe import _
 
 from field_sales.connectors.base import BaseConnector, ConnectorError
 from field_sales.connectors.shopify import ShopifyConnector
+from field_sales.utils.store import get_store
 
 CONNECTORS: dict[str, type[BaseConnector]] = {
 	"Shopify": ShopifyConnector,
 }
 
-__all__ = ["BaseConnector", "ConnectorError", "CONNECTORS", "get_connector"]
+__all__ = ["CONNECTORS", "BaseConnector", "ConnectorError", "get_connector"]
 
 
-def get_connector(require_enabled: bool = True) -> ShopifyConnector:
+def get_connector(require_enabled: bool = True, store: str | None = None) -> ShopifyConnector:
 	"""
-	Return the Shopify connector configured on Store Connection.
+	Return the connector for a Store (default: the current store, or the site's only one).
 
-	Raises a ``frappe.ValidationError`` if the connection is disabled or the
-	platform is not Shopify.
+	Raises a ``frappe.ValidationError`` if the store is disabled or its platform is not supported.
 	"""
-	settings = frappe.get_single("Store Connection")
+	settings = get_store(store)
 	if require_enabled and not settings.enabled:
-		frappe.throw(_("Store Connection is disabled"))
+		frappe.throw(_("The store connection is disabled"))
 
 	connector_cls = CONNECTORS.get(settings.platform)
 	if not connector_cls:

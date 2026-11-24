@@ -4,16 +4,24 @@
 
 import contextvars
 import threading
-
 from contextlib import suppress
+
 import frappe
 from frappe import _
 from frappe.model.naming import make_autoname
-from frappe.utils import fmt_money, format_datetime, now_datetime, today
+from frappe.utils import fmt_money, format_datetime, now_datetime
 
 from field_sales.payments.razorpay import link_for_confirmation
-from field_sales.utils.money import site_currency
 from field_sales.utils.db import safe_commit
+from field_sales.utils.money import record_currency
+from field_sales.utils.store import (
+	enqueue_in_store,
+	get_store_value,
+	invoice_series,
+	record_store,
+	store_mail_args,
+	store_today,
+)
 
 SENDING_STATUS = "Sending…"
 INVOICE_SERIES = "INV-.YYYY.-.#####"
@@ -37,8 +45,9 @@ def enqueue_order_confirmation(field_order: str):
 
 	Deduplicated per order, so the push and the draft linker cannot queue it twice at once.
 	"""
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.confirmation.send_order_confirmation",
+		store=record_store("Field Order", field_order),
 		field_order=field_order,
 		job_id=f"field_sales:order_confirmation:{field_order}",
 		deduplicate=True,
@@ -47,21 +56,24 @@ def enqueue_order_confirmation(field_order: str):
 
 
 def send_order_confirmation(field_order: str, resend: bool = False) -> str:
-
 	doc = frappe.get_doc("Field Order", field_order, for_update=True)
 	if doc.docstatus != 1 or not doc.external_order_id:
 		return doc.confirmation_status or ""
 	if doc.confirmation_sent_on and not resend:
 		return doc.confirmation_status or ""
 
-	if not frappe.db.get_single_value("Store Connection", "send_order_confirmation"):
+	if not get_store_value("send_order_confirmation"):
 		return _set_status(doc, "Skipped: order confirmation emails are turned off")
 
 	# Before the savepoint: a link created on Razorpay must stay stored even if the email fails.
 	pay_link = None
 	if frappe.db.get_value("Retailer", doc.retailer, "email"):
 		pay_link = link_for_confirmation(doc)
-		if not pay_link and doc.store_checkout_url and doc.payment_status not in ("Paid", "Partially Paid", "Partially Refunded", "Refunded"):
+		if (
+			not pay_link
+			and doc.store_checkout_url
+			and doc.payment_status not in ("Paid", "Partially Paid", "Partially Refunded", "Refunded")
+		):
 			# The store's own checkout: a payment link every install may use.
 			pay_link = {"url": doc.store_checkout_url, "expires_on": None}
 
@@ -70,7 +82,10 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 	try:
 		if not doc.invoice_no:
 			doc.db_set(
-				{"invoice_no": make_autoname(INVOICE_SERIES), "invoice_date": today()},
+				{
+					"invoice_no": make_autoname(invoice_series(doc.store, INVOICE_SERIES)),
+					"invoice_date": store_today(doc.store),
+				},
 				update_modified=False,
 			)
 
@@ -97,10 +112,9 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 
 @frappe.whitelist(methods=["POST"])
 def resend_order_confirmation(name: str) -> dict:
-
 	# Sends an email to the retailer: for the order's rep and their managers, not read-only users.
 	frappe.has_permission("Field Order", "write", name, throw=True)
-	doc = frappe.db.get_value("Field Order", name, ["docstatus", "external_order_id"], as_dict=True)
+	doc = frappe.db.get_value("Field Order", name, ["docstatus", "external_order_id", "store"], as_dict=True)
 	if doc.docstatus != 1 or not doc.external_order_id:
 		frappe.throw(_("The confirmation can only be sent once the store has confirmed the order"))
 
@@ -109,8 +123,9 @@ def resend_order_confirmation(name: str) -> dict:
 
 	# A job id of its own: the automatic job's id may still be on the queue (or finished) and
 	# deduplicate would drop this one. Two quick clicks share this id, so only one job runs.
-	frappe.enqueue(
+	enqueue_in_store(
 		"field_sales.sync.confirmation.send_order_confirmation",
+		store=doc.store,
 		field_order=name,
 		resend=True,
 		job_id=f"field_sales:order_confirmation_resend:{name}",
@@ -179,17 +194,16 @@ def _kill_wkhtmltopdf(keep: set):
 
 def _send(doc, retailer, pay_link: dict | None = None):
 	"""Queue the email to the customer with the invoice PDF attached (and a Pay Now button when there is a link)."""
-	settings = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["company_name", "shop_name"], as_dict=True
-	)
+	settings = get_store_value(["company_name", "shop_name"], as_dict=True)
 	rep_name = frappe.db.get_value("Sales Rep", doc.sales_rep, "full_name") or doc.sales_rep
-	currency = site_currency()
+	currency = record_currency(doc)
 	order_no = doc.store_order_name or doc.name
 
 	# Built before anything is queued, so a timeout leaves nothing behind.
 	pdf_bytes = _build_pdf(doc)
 
 	frappe.sendmail(
+		**store_mail_args(doc.store),
 		recipients=[retailer.email],
 		subject=_("Order confirmed: {0} — Invoice {1}").format(order_no, doc.invoice_no),
 		template="order_confirmation",
@@ -220,7 +234,7 @@ def _send(doc, retailer, pay_link: dict | None = None):
 		attachments=[{"fname": f"{doc.invoice_no}.pdf", "fcontent": pdf_bytes}],
 		reference_doctype="Field Order",
 		reference_name=doc.name,
-		now=True
+		now=True,
 	)
 
 

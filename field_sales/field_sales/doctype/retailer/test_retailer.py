@@ -6,18 +6,28 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from field_sales.utils.store import set_store_value
+
 APP = __name__.split(".", 1)[0]
-PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[APP]
+PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[
+	APP
+]
 
 
 class TestRetailer(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": PLATFORM})
+		set_store_value({"enabled": 0, "platform": PLATFORM})
 		self.rep_user = self.user("retailer.rep@example.com", "Field Sales Rep")
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user}).insert(ignore_permissions=True).name
+		self.rep = (
+			frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user})
+			.insert(ignore_permissions=True)
+			.name
+		)
 		other_user = self.user("retailer.other@example.com", "Field Sales Rep")
-		self.other_rep = frappe.get_doc({"doctype": "Sales Rep", "user": other_user}).insert(ignore_permissions=True).name
+		self.other_rep = (
+			frappe.get_doc({"doctype": "Sales Rep", "user": other_user}).insert(ignore_permissions=True).name
+		)
 
 	def tearDown(self):
 		frappe.set_user("Administrator")

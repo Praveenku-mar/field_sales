@@ -20,7 +20,7 @@ hooks = importlib.import_module(f"{APP}.hooks")
 # Every edition runs these. Paths are relative to the app package.
 SHARED_JOBS = {
 	f"{APP}.doctype.sync_log.sync_log.clear_old_logs",
-	"sync.shop_settings.scheduled_sync",
+	"sync.shop_settings.daily_sync",
 	"utils.anonymise.anonymise_inactive_retailers",
 	"payments.razorpay.reconcile_open_links",
 	"sync.orders.retry_store_payments",

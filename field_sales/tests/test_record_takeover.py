@@ -14,22 +14,32 @@ import frappe.client
 from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 
+from field_sales.utils.store import set_store_value
+
 APP = __name__.split(".", 1)[0]
-PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[APP]
+PLATFORM = {"field_sales": "Shopify", "field_sales_woocommerce": "WooCommerce", "field_sales_odoo": "Odoo"}[
+	APP
+]
 
 
 class TestRecordTakeover(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
 		# Everything rolls back after each test; no store pushes from these saves.
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "platform": PLATFORM})
+		set_store_value({"enabled": 0, "platform": PLATFORM})
 
 		# Team A: manager A with rep A. Team B: manager B with rep B.
 		self.manager_a = self.make_rep("takeover.mgr.a@example.com", ["Field Sales Rep", "Sales Manager"])
-		self.rep_a = self.make_rep("takeover.rep.a@example.com", ["Field Sales Rep"], reports_to=self.manager_a)
-		self.rep_a2 = self.make_rep("takeover.rep.a2@example.com", ["Field Sales Rep"], reports_to=self.manager_a)
+		self.rep_a = self.make_rep(
+			"takeover.rep.a@example.com", ["Field Sales Rep"], reports_to=self.manager_a
+		)
+		self.rep_a2 = self.make_rep(
+			"takeover.rep.a2@example.com", ["Field Sales Rep"], reports_to=self.manager_a
+		)
 		self.manager_b = self.make_rep("takeover.mgr.b@example.com", ["Field Sales Rep", "Sales Manager"])
-		self.rep_b = self.make_rep("takeover.rep.b@example.com", ["Field Sales Rep"], reports_to=self.manager_b)
+		self.rep_b = self.make_rep(
+			"takeover.rep.b@example.com", ["Field Sales Rep"], reports_to=self.manager_b
+		)
 
 		self.product = frappe.get_doc(
 			{
@@ -81,7 +91,12 @@ class TestRecordTakeover(IntegrationTestCase):
 	def make_visit(self, sales_rep):
 		return (
 			frappe.get_doc(
-				{"doctype": "Visit", "sales_rep": sales_rep, "retailer": self.retailer, "visit_date": nowdate()}
+				{
+					"doctype": "Visit",
+					"sales_rep": sales_rep,
+					"retailer": self.retailer,
+					"visit_date": nowdate(),
+				}
 			)
 			.insert(ignore_permissions=True)
 			.name

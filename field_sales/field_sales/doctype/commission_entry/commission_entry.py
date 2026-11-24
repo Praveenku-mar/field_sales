@@ -8,9 +8,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
-from field_sales.permissions import get_own_rep, is_admin
+from field_sales.permissions import MANAGER_ROLES, get_own_rep, is_admin
 
-MANAGER_ROLES = {"Sales Manager", "System Manager"}
 LOCKED_STATEMENT_STATUSES = ("Approved", "Paid")
 # What a commission line pays and to whom; changed by hand only as set out in _validate_manual_edit.
 MONEY_FIELDS = ("amount", "status", "sales_rep", "beneficiary_type", "entry_type", "reversed_amount")
@@ -49,7 +48,9 @@ class CommissionEntry(Document):
 		if not (self.adjustment_reason or "").strip():
 			frappe.throw(_("Adjustment Reason is required for an Adjustment."))
 		if not self.flags.from_engine and not self._is_manager():
-			frappe.throw(_("Only a Sales Manager or System Manager can create an Adjustment."), frappe.PermissionError)
+			frappe.throw(
+				_("Only a Sales Manager or System Manager can create an Adjustment."), frappe.PermissionError
+			)
 
 	def _validate_manual_edit(self):
 		"""
@@ -70,8 +71,13 @@ class CommissionEntry(Document):
 		if not before:
 			return
 		changed = [
-			f for f in MONEY_FIELDS
-			if (flt(before.get(f)) != flt(self.get(f)) if f in ("amount", "reversed_amount") else before.get(f) != self.get(f))
+			f
+			for f in MONEY_FIELDS
+			if (
+				flt(before.get(f)) != flt(self.get(f))
+				if f in ("amount", "reversed_amount")
+				else before.get(f) != self.get(f)
+			)
 		]
 		if not changed:
 			return
@@ -99,9 +105,14 @@ class CommissionEntry(Document):
 			return
 		before = self.get_doc_before_save()
 		statement = before.commission_statement if before else None
-		if statement and frappe.db.get_value("Commission Statement", statement, "status") in LOCKED_STATEMENT_STATUSES:
+		if (
+			statement
+			and frappe.db.get_value("Commission Statement", statement, "status") in LOCKED_STATEMENT_STATUSES
+		):
 			frappe.throw(
-				_("{0} is in the {1} Commission Statement {2} and cannot be changed. Add an Adjustment instead.").format(
+				_(
+					"{0} is in the {1} Commission Statement {2} and cannot be changed. Add an Adjustment instead."
+				).format(
 					self.name, frappe.db.get_value("Commission Statement", statement, "status"), statement
 				)
 			)
@@ -116,7 +127,9 @@ class CommissionEntry(Document):
 			self.dedupe_key = None
 
 
-def make_dedupe_key(field_order_item: str, sales_rep: str | None, beneficiary_type: str | None, platform_order: str | None) -> str:
+def make_dedupe_key(
+	field_order_item: str, sales_rep: str | None, beneficiary_type: str | None, platform_order: str | None
+) -> str:
 	"""
 	Unique key of an Order entry: one per (order line, beneficiary, kind, platform order).
 

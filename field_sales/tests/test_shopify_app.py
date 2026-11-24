@@ -21,6 +21,7 @@ from field_sales.connectors import get_connector
 from field_sales.connectors.base import ConnectorError
 from field_sales.connectors.shopify import ShopifyConnector
 from field_sales.shopify import oauth, privacy, webhooks
+from field_sales.utils.store import get_store, get_store_name, set_store_value
 
 SHOP = "dev-shop.myshopify.com"
 APP_ID = "app-client-id"
@@ -56,8 +57,7 @@ def _token_body(token="shpat_new", refresh="shprt_new"):
 class ShopifyAppTestCase(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 0,
@@ -70,10 +70,10 @@ class ShopifyAppTestCase(IntegrationTestCase):
 				"token_expiry": None,
 				"refresh_token_expiry": None,
 				"match_shop_settings": 0,
-			},
+			}
 		)
 		for field in ("access_token", "refresh_token", "shopify_client_secret"):
-			frappe.db.delete("__Auth", {"doctype": "Store Connection", "fieldname": field})
+			frappe.db.delete("__Auth", {"doctype": "Store", "fieldname": field})
 
 		for target in (
 			patch.dict(frappe.local.conf, APP_CONF),
@@ -95,8 +95,7 @@ class ShopifyAppTestCase(IntegrationTestCase):
 	def connect_oauth(
 		self, enabled=1, token="shpat_old", expiry_minutes=60, refresh="shprt_old", refresh_days=90
 	):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"enabled": enabled,
 				"store_url": SHOP,
@@ -106,18 +105,18 @@ class ShopifyAppTestCase(IntegrationTestCase):
 				"token_expiry": add_to_date(now_datetime(), minutes=expiry_minutes) if token else None,
 				"refresh_token": "*****" if refresh else None,
 				"refresh_token_expiry": add_to_date(now_datetime(), days=refresh_days) if refresh else None,
-			},
+			}
 		)
 		if token:
-			set_encrypted_password("Store Connection", "Store Connection", token, "access_token")
+			set_encrypted_password("Store", get_store_name(), token, "access_token")
 		if refresh:
-			set_encrypted_password("Store Connection", "Store Connection", refresh, "refresh_token")
+			set_encrypted_password("Store", get_store_name(), refresh, "refresh_token")
 
 	def settings(self):
-		return frappe.get_single("Store Connection")
+		return get_store()
 
 	def password(self, field):
-		return get_decrypted_password("Store Connection", "Store Connection", field, raise_exception=False)
+		return get_decrypted_password("Store", get_store_name(), field, raise_exception=False)
 
 
 # ----------------------------------------------------------------------
@@ -178,7 +177,7 @@ class TestOAuthInstall(ShopifyAppTestCase):
 
 	def test_install_refuses_another_shop_while_connected(self):
 		self.connect_oauth()
-		frappe.db.set_single_value("Store Connection", "store_url", "other.myshopify.com")
+		set_store_value("store_url", "other.myshopify.com")
 		response = self.install()
 		self.assertEqual(response.status_code, 400)
 
@@ -208,14 +207,14 @@ class TestOAuthInstall(ShopifyAppTestCase):
 		self.assertTrue(settings.installed_on and settings.token_expiry and settings.refresh_token_expiry)
 		self.assertFalse(settings.uninstalled_on)
 		self.assertGreater(get_datetime(settings.refresh_token_expiry), add_to_date(now_datetime(), days=89))
-		queued = [c.args[0] for c in enqueue.call_args_list]
+		queued = [c.kwargs.get("store_method") for c in enqueue.call_args_list]
 		self.assertIn("field_sales.shopify.webhooks.register_webhooks", queued)
 		self.assertIn("field_sales.shopify.merchant_settings.setup_new_store", queued)
 		self.assertEqual(frappe.session.user, "Administrator")  # restored
 
 	def test_reinstall_overwrites_old_tokens(self):
 		self.connect_oauth(enabled=0)
-		frappe.db.set_single_value("Store Connection", "uninstalled_on", now_datetime())
+		set_store_value("uninstalled_on", now_datetime())
 		state, _query = self.state_from(self.install())
 		self.callback(state)
 		self.assertEqual(self.password("access_token"), "shpat_new")
@@ -225,7 +224,7 @@ class TestOAuthInstall(ShopifyAppTestCase):
 	def test_disabled_site_refuses_a_different_shop(self):
 		# Uninstalled / disabled: the old shop is still on file, so another shop cannot take over.
 		self.connect_oauth(enabled=0)
-		frappe.db.set_single_value("Store Connection", "uninstalled_on", now_datetime())
+		set_store_value("uninstalled_on", now_datetime())
 		other = "intruder-shop.myshopify.com"
 		response = self.install(shop=other)
 		self.assertEqual(response.status_code, 400)
@@ -239,7 +238,7 @@ class TestOAuthInstall(ShopifyAppTestCase):
 		self.assertEqual(self.settings().store_url, SHOP)
 
 	def test_client_credentials_shop_on_file_also_blocks_another_shop(self):
-		frappe.db.set_single_value("Store Connection", {"store_url": f"https://{SHOP}/admin", "enabled": 0})
+		set_store_value({"store_url": f"https://{SHOP}/admin", "enabled": 0})
 		self.assertEqual(self.install(shop="intruder-shop.myshopify.com").status_code, 400)
 		self.assertEqual(self.install().status_code, 302)
 
@@ -325,8 +324,8 @@ class TestTokens(ShopifyAppTestCase):
 		self.connect_oauth(expiry_minutes=1)
 		conn = get_connector()
 		# Another worker refreshed after this instance read the old token.
-		set_encrypted_password("Store Connection", "Store Connection", "shpat_other", "access_token")
-		frappe.db.set_single_value("Store Connection", "token_expiry", add_to_date(now_datetime(), hours=1))
+		set_encrypted_password("Store", get_store_name(), "shpat_other", "access_token")
+		set_store_value("token_expiry", add_to_date(now_datetime(), hours=1))
 		with patch("field_sales.connectors.shopify.requests.post") as post:
 			self.assertEqual(conn._refresh_oauth_token(stale_token="shpat_old"), "shpat_other")
 		post.assert_not_called()
@@ -375,11 +374,10 @@ class TestTokens(ShopifyAppTestCase):
 		self.assertEqual(post.call_args_list[1].kwargs["data"]["grant_type"], "refresh_token")
 
 	def test_client_credentials_mode_unchanged(self):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"enabled": 1, "store_url": SHOP, "shopify_client_id": "cc-id", "shopify_client_secret": "*****"},
 		)
-		set_encrypted_password("Store Connection", "Store Connection", CC_SECRET, "shopify_client_secret")
+		set_encrypted_password("Store", get_store_name(), CC_SECRET, "shopify_client_secret")
 		with patch(
 			"field_sales.connectors.shopify.requests.post",
 			return_value=_response(200, {"access_token": "shpat_cc", "expires_in": 86399}),
@@ -453,7 +451,7 @@ class TestAppWebhooks(ShopifyAppTestCase):
 	def test_valid_signature_is_accepted_and_queued(self):
 		status, result = self.post("app/uninstalled", {"id": 1, "domain": SHOP})
 		self.assertEqual((status, result["message"]), (200, "ok"))
-		self.assertEqual(self.enqueue.call_args.args[0], "field_sales.shopify.webhooks.handle_uninstalled")
+		self.assertEqual(self.enqueue.call_args.kwargs["store_method"], "field_sales.shopify.webhooks.handle_uninstalled")
 		self.assertEqual(self.enqueue.call_args.kwargs["queue"], "short")
 
 	def test_invalid_signature_is_401(self):
@@ -462,7 +460,7 @@ class TestAppWebhooks(ShopifyAppTestCase):
 		self.enqueue.assert_not_called()
 
 	def test_client_credentials_secret_is_accepted(self):
-		set_encrypted_password("Store Connection", "Store Connection", CC_SECRET, "shopify_client_secret")
+		set_encrypted_password("Store", get_store_name(), CC_SECRET, "shopify_client_secret")
 		self.assertEqual(self.post("app/uninstalled", {}, secret=CC_SECRET)[0], 200)
 
 	def test_other_shop_is_ignored_with_200(self):
@@ -530,7 +528,9 @@ class TestAppWebhooks(ShopifyAppTestCase):
 			topic = variables["topics"][0]
 			return {
 				"webhookSubscriptions": {
-					"nodes": [{"id": "1", "topic": topic, "uri": uri if topic == "APP_UNINSTALLED" else store_uri}]
+					"nodes": [
+						{"id": "1", "topic": topic, "uri": uri if topic == "APP_UNINSTALLED" else store_uri}
+					]
 				}
 			}
 
@@ -684,16 +684,20 @@ class TestPrivacy(ShopifyAppTestCase):
 	def test_customer_redact_deletes_the_customers_earlier_exports(self):
 		def export_for(customer_id):
 			request = self.request("customers/data_request", customer_id=customer_id)
-			return frappe.get_doc(
-				{
-					"doctype": "File",
-					"file_name": f"privacy-export-{request.name}.json",
-					"attached_to_doctype": "Privacy Request",
-					"attached_to_name": request.name,
-					"is_private": 1,
-					"content": '{"retailers": [{"email": "asha@example.com"}]}',
-				}
-			).insert(ignore_permissions=True).name
+			return (
+				frappe.get_doc(
+					{
+						"doctype": "File",
+						"file_name": f"privacy-export-{request.name}.json",
+						"attached_to_doctype": "Privacy Request",
+						"attached_to_name": request.name,
+						"is_private": 1,
+						"content": '{"retailers": [{"email": "asha@example.com"}]}',
+					}
+				)
+				.insert(ignore_permissions=True)
+				.name
+			)
 
 		mine, someone_elses = export_for("777"), export_for("888")
 		redact = self.request("customers/redact")
@@ -701,7 +705,12 @@ class TestPrivacy(ShopifyAppTestCase):
 
 		self.assertFalse(frappe.db.exists("File", mine))
 		self.assertTrue(frappe.db.exists("File", someone_elses))
-		self.assertEqual(frappe.parse_json(frappe.db.get_value("Privacy Request", redact.name, "details"))["exports_deleted"], 1)
+		self.assertEqual(
+			frappe.parse_json(frappe.db.get_value("Privacy Request", redact.name, "details"))[
+				"exports_deleted"
+			],
+			1,
+		)
 
 	def test_shop_redact_removes_store_data(self):
 		self.connect_oauth()

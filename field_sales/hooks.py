@@ -1,7 +1,7 @@
 app_name = "field_sales"
 app_title = "Agamsale"
 app_publisher = "Agamnxt Technologies"
-app_description = "Agamsale is a Frappe app that lets a brand’s sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
+app_description = "Agamsale is a Frappe app that lets a brand's sales reps check in at retail shops with GPS, take orders against live Shopify stock, and sync those orders to Shopify automatically. Managers can track visits, orders and sync status from one dashboard."
 app_email = "praveenkumar@agamnxt.com"
 app_license = "mit"
 
@@ -182,6 +182,13 @@ permission_query_conditions = {
 	"Commission Entry": "field_sales.permissions.commission_entry_query",
 	"Commission Statement": "field_sales.permissions.commission_statement_query",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_query",
+	"Platform Product": "field_sales.permissions.platform_product_query",
+	"Product Stock": "field_sales.permissions.product_stock_query",
+	"Sync Log": "field_sales.permissions.sync_log_query",
+	"Commission Plan": "field_sales.permissions.commission_plan_query",
+	"Privacy Request": "field_sales.permissions.privacy_request_query",
+	# The Store record itself: vendor staff all, a store's users their own, others none.
+	"Store": "field_sales.permissions.store_query",
 }
 
 has_permission = {
@@ -192,19 +199,60 @@ has_permission = {
 	"Commission Entry": "field_sales.permissions.commission_entry_has_permission",
 	"Commission Statement": "field_sales.permissions.commission_statement_has_permission",
 	"Payment Transaction": "field_sales.permissions.payment_transaction_has_permission",
+	"Store": "field_sales.permissions.store_has_permission",
+	**{
+		doctype: "field_sales.permissions.store_only_has_permission"
+		for doctype in ("Platform Product", "Product Stock", "Sync Log", "Commission Plan", "Privacy Request")
+	},
 }
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
+# Business doctypes that belong to one Store (required ``store`` link, set on insert).
+# Read elsewhere with utils/store.py -> store_doctypes().
+field_sales_store_doctypes = [
+	"Retailer",
+	"Field Order",
+	"Visit",
+	"Platform Product",
+	"Product Stock",
+	"Sales Rep",
+	"Commission Plan",
+	"Commission Entry",
+	"Commission Statement",
+	"Payment Transaction",
+	"Sync Log",
+	"Privacy Request",
+]
+# No moving another team's record to your own rep (permissions.check_owner_change).
+_OWNER_CHECKED = ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+# Their date field is the merchant's local date: filled from the store's clock when left empty
+# (utils/store.py -> fill_store_dates; STORE_DATE_FIELDS there).
+_STORE_DATED = ("Field Order", "Visit", "Commission Entry")
+# Their amounts are in the store's currency, recorded on insert (utils/money.py -> fill_currency).
+_PRICED = ("Field Order", "Platform Product")
+
 doc_events = {
 	# Push bell notifications made by push.notify.notify_users to the mobile app.
 	"Notification Log": {"after_insert": "field_sales.push.notify.on_notification_log_insert"},
-	# No moving another team's record to your own rep (permissions.check_owner_change).
+	# A new record belongs to the current store (utils/store.py -> stamp_store).
 	**{
-		doctype: {"validate": "field_sales.permissions.check_owner_change"}
-		for doctype in ("Visit", "Field Order", "Retailer", "Commission Entry", "Commission Statement")
+		doctype: {
+			"before_insert": [
+				"field_sales.utils.store.stamp_store",
+				*(["field_sales.utils.store.fill_store_dates"] if doctype in _STORE_DATED else []),
+				*(["field_sales.utils.money.fill_currency"] if doctype in _PRICED else []),
+			],
+			# Links into another store are refused (utils/store.py -> check_store_links).
+			"validate": [
+				"field_sales.utils.store.check_store_links",
+				*(["field_sales.utils.money.keep_currency"] if doctype in _PRICED else []),
+				*(["field_sales.permissions.check_owner_change"] if doctype in _OWNER_CHECKED else []),
+			],
+		}
+		for doctype in field_sales_store_doctypes
 	},
 }
 
@@ -216,8 +264,8 @@ scheduler_events = {
 	"daily": [
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 		# Keep the site's currency and time zone the same as the store's.
-		"field_sales.sync.shop_settings.scheduled_sync",
-		# Store Connection retailer_inactive_anonymise_days (0 = off).
+		"field_sales.sync.shop_settings.daily_sync",
+		# Store retailer_inactive_anonymise_days (0 = off).
 		"field_sales.utils.anonymise.anonymise_inactive_retailers",
 	],
 	# Razorpay payment links whose webhook never arrived (Link Sent, last 7 days, 50 a run).
@@ -226,7 +274,7 @@ scheduler_events = {
 		# Confirmed store orders paid on Razorpay that the store does not show as paid yet.
 		"field_sales.sync.orders.retry_store_payments",
 	],
-	# Ticks every 30 minutes; scheduled_sync itself honours Store Connection's sync frequency.
+	# Ticks every 30 minutes; scheduled_sync itself honours the Store's sync frequency.
 	"cron": {
 		"*/30 * * * *": [
 			"field_sales.sync.products.scheduled_sync",
@@ -237,12 +285,13 @@ scheduler_events = {
 		"*/15 * * * *": [
 			"field_sales.sync.orders.retry_failed_orders",
 		],
-		# Daily team summary to each manager, in the system timezone.
-		"0 20 * * *": [
+		# Daily team summary to each manager: hourly, sent at 20:00 on each store's clock.
+		"0 * * * *": [
 			"field_sales.daily_summary.send_daily_summary",
 		],
-		# Draft Commission Statements for last month, on the 1st.
-		"0 2 1 * *": [
+		# Draft Commission Statements for last month: hourly on the 1st and 2nd (site clock), made
+		# for each store once its own month has ended (a store west of the site is a day behind).
+		"0 * 1,2 * *": [
 			"field_sales.commission.statements.generate_monthly_statements",
 		],
 	},
@@ -264,9 +313,11 @@ scheduler_events = {
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "field_sales.event.get_events"
-# }
+# A store's user who sets a password from an invitation or reset link is sent to the login page
+# (shopify/store_admin.py -> update_password; everyone else gets Frappe's own result).
+override_whitelisted_methods = {
+	"frappe.core.doctype.user.user.update_password": "field_sales.shopify.store_admin.update_password",
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
@@ -325,8 +376,14 @@ after_request = ["field_sales.shopify.embedded.after_request"]
 # --------------------------------
 
 # Shopify admin (embedded app): requests with an App Bridge session token sign in as
-# Store Connection's embedded user. A no-op for every other request.
-auth_hooks = ["field_sales.shopify.session_token.authenticate"]
+# the Store's embedded user. A no-op for every other request.
+# Shopify session-token sign-in first; then, for every signed-in request, users of a store that
+# removed the app are refused (shared site; utils/store.py -> refuse_uninstalled_store_user).
+auth_hooks = [
+	"field_sales.shopify.session_token.authenticate",
+	"field_sales.utils.store.refuse_uninstalled_store_user",
+]
+on_session_creation = ["field_sales.utils.store.refuse_uninstalled_store_user"]
 
 # Automatically update python controller files with type annotations for this app.
 export_python_type_annotations = True

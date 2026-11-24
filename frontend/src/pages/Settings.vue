@@ -56,7 +56,7 @@
         <EmptyState
           :icon="NOT_ADMIN[tab].icon"
           :title="NOT_ADMIN[tab].title"
-          :description="`Only a ${NOT_ADMIN[tab].who || 'System Manager'} can change ${NOT_ADMIN[tab].what}.`"
+          :description="`Only a ${NOT_ADMIN[tab].who || 'Store Admin'} can change ${NOT_ADMIN[tab].what}.`"
         >
         </EmptyState>
       </div>
@@ -107,7 +107,13 @@ const NOT_ADMIN = {
 }
 // A Shopify App Store install shows no outside payment provider settings (Shopify rule 1.1.7):
 // payment links are off there and the store's own checkout takes payment.
-const tabs = computed(() => TABS.filter((t) => !(t.value === 'razorpay' && session.store.app_store)))
+// No Email tab on the shared site: its Email Accounts serve every merchant (mail goes out in the
+// store's name from the vendor's account instead).
+const tabs = computed(() =>
+  TABS.filter(
+    (t) => !(t.value === 'razorpay' && session.store.app_store) && !(t.value === 'email' && window.multi_store),
+  ),
+)
 // The form whose Save / Discard the header shows (the Email tab saves in its own dialog).
 const FORMS = { store: storeForm, invoice: invoiceForm, commission: commissionForm, razorpay: razorpayForm, 'mobile-push': mobilePushForm }
 const activeForm = computed(() => FORMS[tab.value]?.value || null)

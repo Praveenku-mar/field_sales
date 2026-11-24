@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Your Company and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on("Store Connection", {
+frappe.ui.form.on("Store", {
 	refresh(frm) {
 		frm.add_custom_button(__("Test Connection"), () =>
 			save_if_dirty(frm).then(() => test_connection(frm))
@@ -21,6 +21,8 @@ function test_connection(frm) {
 	frappe
 		.call({
 			method: "field_sales.api.test_connection",
+			// This Store: vendor staff on the shared site have no store of their own.
+			args: { store: frm.doc.name },
 			freeze: true,
 			freeze_message: __("Testing connection..."),
 		})
@@ -63,6 +65,7 @@ function fetch_locations(frm) {
 		.call({
 			method: "field_sales.api.get_locations",
 			type: "GET",
+			args: { store: frm.doc.name },
 			freeze: true,
 			freeze_message: __("Fetching locations..."),
 		})

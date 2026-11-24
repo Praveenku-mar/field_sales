@@ -7,6 +7,9 @@ store's country (the default country for new Retailers).
 
 The store is the source of truth: product prices come from it and order prices go back to it
 without conversion, so the site must use the store's currency.
+
+On the shared multi-store site (``is_multi_store()``) the site's currency and time zone are never
+changed: they belong to every merchant. Each store's values are only saved on its Store.
 """
 
 from zoneinfo import available_timezones
@@ -15,11 +18,20 @@ import frappe
 from frappe import _
 
 from field_sales.connectors import get_connector
+from field_sales.utils.money import fill_store_currency
+from field_sales.utils.store import (
+	for_each_store,
+	get_store_name,
+	get_store_value,
+	is_multi_store,
+	set_store_value,
+	use_store_timezone_for_users,
+)
 
 
 def sync_shop_settings(shop: dict | None = None) -> dict:
 	"""
-	Save the store's currency and time zone on Store Connection and, when Match Store Currency
+	Save the store's currency and time zone on the Store and, when Match Store Currency
 	and Timezone is on, apply them to the site.
 
 	:param shop: ``{"currency", "timezone", "country"}`` already fetched (e.g. by Test Connection); fetched
@@ -40,11 +52,24 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		values["shop_timezone"] = timezone
 	if country:
 		values["shop_country"] = country
+	zone_changed = bool(timezone) and timezone != get_store_value("shop_timezone")
+	locked = _locked_currency(currency)
+	if locked:
+		values.pop("shop_currency")
 	if values:
-		frappe.db.set_single_value("Store Connection", values)
+		set_store_value(values)
+	if zone_changed and is_multi_store():
+		use_store_timezone_for_users(get_store_name())
+	if values.get("shop_currency") and is_multi_store():
+		fill_store_currency(get_store_name(), values["shop_currency"])
 
 	changes = []
-	if frappe.db.get_single_value("Store Connection", "match_shop_settings"):
+	tax_mode = _tax_mode_for_country(country)
+	if tax_mode:
+		set_store_value("tax_mode", tax_mode)
+		changes.append(_("Tax mode set to {0}").format(_(tax_mode)))
+	# Never on the shared site: one store's sync would change every other store's currency and dates.
+	if get_store_value("match_shop_settings") and not is_multi_store():
 		if currency and _apply_currency(currency):
 			changes.append(_("Currency set to {0}").format(currency))
 		if timezone and _apply_timezone(timezone):
@@ -52,7 +77,35 @@ def sync_shop_settings(shop: dict | None = None) -> dict:
 		if changes:
 			frappe.clear_cache()
 
-	return {"changes": changes, "mismatch": get_mismatch(currency, timezone)}
+	return {"changes": changes, "mismatch": get_mismatch(currency, timezone, locked)}
+
+
+def _tax_mode_for_country(country: str) -> str | None:
+	"""
+	On the shared site, a new store's tax mode from its shop's country: GST in India, else none.
+	Only until someone chose a tax mode (``tax_mode_chosen``, set by ``Store`` when it changes
+	there) and while the store has no order; ``None`` when nothing changes.
+	"""
+	if not country or not is_multi_store() or get_store_value("tax_mode_chosen"):
+		return None
+	if frappe.db.exists("Field Order", {"store": get_store_name()}):
+		return None
+	wanted = "GST" if country == "IN" else "None"
+	return wanted if get_store_value("tax_mode") != wanted else None
+
+
+def _locked_currency(currency: str) -> str | None:
+	"""
+	On the shared site a store's currency is fixed once it has orders (their amounts are in it):
+	the saved one when the shop now reports another, else ``None``. The order push then refuses
+	(``CURRENCY_MISMATCH``) until vendor staff resolve it.
+	"""
+	if not currency or not is_multi_store():
+		return None
+	saved = get_store_value("shop_currency")
+	if saved and saved != currency and frappe.db.exists("Field Order", {"store": get_store_name()}):
+		return saved
+	return None
 
 
 def _apply_currency(code: str) -> bool:
@@ -118,20 +171,28 @@ def _clear_system_settings_cache():
 	clear_system_settings_cache()
 
 
-def get_mismatch(currency: str | None = None, timezone: str | None = None) -> list[str]:
+def get_mismatch(
+	currency: str | None = None, timezone: str | None = None, locked_currency: str | None = None
+) -> list[str]:
 	"""
 	Differences between the store's settings and the site's, as readable lines.
 
-	:param currency: The store's currency; defaults to the one saved on Store Connection.
-	:param timezone: The store's time zone; defaults to the one saved on Store Connection.
+	On the shared site the site never follows a store, so only a shop currency that changed after
+	the store had orders is a mismatch (``locked_currency``: the currency its orders are in).
+
+	:param currency: The store's currency; defaults to the one saved on the Store.
+	:param timezone: The store's time zone; defaults to the one saved on the Store.
 	"""
-	if currency is None or timezone is None:
-		saved = (
-			frappe.db.get_value(
-				"Store Connection", "Store Connection", ["shop_currency", "shop_timezone"], as_dict=True
+	if is_multi_store():
+		if not locked_currency:
+			return []
+		return [
+			_("The shop now uses {0} but this store's orders are in {1}: new orders are stopped until support moves the store.").format(
+				currency, locked_currency
 			)
-			or {}
-		)
+		]
+	if currency is None or timezone is None:
+		saved = get_store_value(["shop_currency", "shop_timezone"], as_dict=True) or {}
 		currency = saved.get("shop_currency") if currency is None else currency
 		timezone = saved.get("shop_timezone") if timezone is None else timezone
 
@@ -149,16 +210,21 @@ def get_mismatch(currency: str | None = None, timezone: str | None = None) -> li
 	return mismatch
 
 
+def daily_sync():
+	"""Daily scheduler entry: ``scheduled_sync`` for each enabled Store."""
+	for_each_store(scheduled_sync, title="shop_settings_sync")
+
+
 def scheduled_sync(notify_user: str | None = None):
 	"""
-	Daily job, and queued after Store Connection is saved: re-check the store's settings.
+	Re-check the current store's settings: daily (``daily_sync``), and queued after the Store is saved.
 
-	:param notify_user: User who saved Store Connection; told in a popup if something changed.
+	:param notify_user: User who saved the Store; told in a popup if something changed.
 	"""
-	settings = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["enabled", "match_shop_settings"], as_dict=True
-	)
-	if not settings or not settings.enabled or not settings.match_shop_settings:
+	settings = get_store_value(["enabled", "match_shop_settings"], as_dict=True)
+	# Match Store Currency and Timezone means "copy them into the site": a single-store choice.
+	# The shared site never copies, but each store must still learn its own (Phase 5 uses them).
+	if not settings or not settings.enabled or not (settings.match_shop_settings or is_multi_store()):
 		return
 
 	try:

@@ -1,9 +1,9 @@
 # Copyright (c) 2026, Your Company and contributors
 # For license information, please see license.txt
 
-"""Whitelisted endpoints used by the Store Connection, Retailer, Visit and Field Order forms and the Platform Product view."""
+"""Whitelisted endpoints used by the Store, Retailer, Visit and Field Order forms and the Platform Product view."""
 
-
+from contextlib import nullcontext
 from typing import NoReturn
 from urllib.parse import urlsplit
 
@@ -14,14 +14,16 @@ from frappe.email.doctype.email_account.email_account import EmailAccount
 from frappe.query_builder.functions import Count, Sum
 from frappe.rate_limiter import rate_limit
 from frappe.sessions import clear_sessions
-from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime, nowdate
+from frappe.utils import flt, formatdate, get_link_to_form, getdate, now_datetime
 from frappe.utils.password import check_password
 
-from field_sales.api import mobile
+from field_sales.api import mobile as _mobile  # loads field_sales.api.mobile with this package
 from field_sales.connectors import ConnectorError, get_connector
 from field_sales.field_sales.doctype.sales_rep.sales_rep import check_adoptable_user, sync_sales_rep_roles
 from field_sales.field_sales.doctype.visit.visit import get_geofence_radius
 from field_sales.permissions import (
+	ADMIN_ROLES,
+	MANAGER_ROLES,
 	RETAILER_ROLE,
 	STAFF_ROLES,
 	get_allowed_reps,
@@ -45,13 +47,23 @@ from field_sales.utils.geo import (
 	point_geojson,
 )
 from field_sales.utils.limits import SALES_REPS, check_limit
+from field_sales.utils.store import (
+	get_store_value,
+	in_store_of,
+	record_stores,
+	set_store_value,
+	store_mail_args,
+	store_today,
+	use_store,
+	user_is_reachable,
+)
 from field_sales.utils.urls import public_url
 
-VISIT_MANAGER_ROLES = {"Sales Manager", "System Manager"}
+VISIT_MANAGER_ROLES = MANAGER_ROLES
 # Roles a user may hold for a manager to reset their password (the rest are automatic roles).
 REP_ONLY_ROLES = {"Field Sales Rep", "All", "Guest", "Desk User"}
 # May manage a retailer's login (the Login Access card); mirrors Retailer's LOGIN_EDIT_ROLES.
-LOGIN_ROLES = {"Sales Manager", "System Manager"}
+LOGIN_ROLES = MANAGER_ROLES
 # A retailer login user holds the retailer role plus Frappe's automatic roles, nothing else.
 RETAILER_LOGIN_ROLES = {"Field Sales Retailer", "All", "Guest"}
 
@@ -68,10 +80,28 @@ def _retailer_login_url() -> str:
 
 
 @frappe.whitelist(methods=["POST"])
-def test_connection() -> dict:
+def test_connection(store: str | None = None) -> dict:
+	"""
+	Test the store's Shopify connection. ``store``: the Store form's own record (Desk, where vendor
+	staff have no store of their own); the app leaves it out and tests the user's store.
+	"""
+	frappe.only_for(list(ADMIN_ROLES))
+	with _in_store_of_form(store):
+		return _test_connection()
 
-	frappe.only_for("System Manager")
 
+def _in_store_of_form(store: str | None):
+	"""
+	Run inside ``store`` once the user may write that Store (vendor staff any, a store's admin
+	only their own: ``permissions.store_has_permission``); without ``store``, the user's own.
+	"""
+	if not store:
+		return nullcontext()
+	frappe.has_permission("Store", "write", store, throw=True)
+	return use_store(store)
+
+
+def _test_connection() -> dict:
 	conn = get_connector()
 	result = conn.test_connection()
 	if result.get("ok"):
@@ -84,7 +114,7 @@ def test_connection() -> dict:
 	if result.get("ok") and result.get("shop_name"):
 		# Kept for the page header pill; left untouched on a failure.
 		values["shop_name"] = result["shop_name"][:140]
-	frappe.db.set_single_value("Store Connection", values)
+	set_store_value(values)
 	return result
 
 
@@ -94,7 +124,11 @@ def _sync_shop_settings(result: dict) -> dict:
 
 	try:
 		return sync_shop_settings(
-			{"currency": result.get("currency"), "timezone": result.get("timezone"), "country": result.get("country")}
+			{
+				"currency": result.get("currency"),
+				"timezone": result.get("timezone"),
+				"country": result.get("country"),
+			}
 		)
 	except Exception:
 		frappe.log_error(title=_("Store currency and time zone sync failed"))
@@ -102,14 +136,15 @@ def _sync_shop_settings(result: dict) -> dict:
 
 
 @frappe.whitelist()
-def get_locations() -> list[dict]:
+def get_locations(store: str | None = None) -> list[dict]:
+	"""The shop's locations; ``store`` as for ``test_connection`` (the Store form passes its own)."""
+	frappe.only_for(list(ADMIN_ROLES))
 
-	frappe.only_for("System Manager")
-
-	try:
-		return get_connector().get_locations()
-	except ConnectorError as e:
-		frappe.throw(e.message, title=_("Could not fetch locations"))
+	with _in_store_of_form(store):
+		try:
+			return get_connector().get_locations()
+		except ConnectorError as e:
+			frappe.throw(e.message, title=_("Could not fetch locations"))
 
 
 @frappe.whitelist()
@@ -125,12 +160,11 @@ def get_sell_locations() -> list[dict]:
 
 @frappe.whitelist(methods=["POST"])
 def enqueue_product_sync() -> dict:
-
-	frappe.only_for(["System Manager", "Sales Manager"])
+	frappe.only_for(list(MANAGER_ROLES))
 
 	get_connector()
-	if not frappe.db.get_single_value("Store Connection", "default_location_id"):
-		frappe.throw(_("Set a Default Location on Store Connection before syncing products"))
+	if not get_store_value("default_location_id"):
+		frappe.throw(_("Set a Default Location on the Store before syncing products"))
 
 	if enqueue_sync():
 		return {"queued": True, "message": _("Sync started")}
@@ -140,9 +174,9 @@ def enqueue_product_sync() -> dict:
 @frappe.whitelist(methods=["POST"])
 def enqueue_customer_import() -> dict:
 	"""Queue an import of the store's customers as Retailers (``sync.customers.import_customers``)."""
-	frappe.only_for(["System Manager", "Sales Manager"])
+	frappe.only_for(list(MANAGER_ROLES))
 
-	get_connector()  # fails fast if Store Connection is disabled
+	get_connector()  # fails fast if the store is disabled
 	if enqueue_import():
 		return {"queued": True, "message": _("Customer import started")}
 	return {"queued": False, "message": _("A customer import is already running")}
@@ -214,7 +248,13 @@ def get_user_for_sales_rep(email: str) -> dict:
 	frappe.has_permission("Sales Rep", "create", throw=True)
 	email = (email or "").strip().lower()
 	user = frappe.db.get_value("User", email, ["name", "full_name"], as_dict=True)
-	user_roles = [r for r in frappe.get_roles(email) if r in ("Sales Manager", "Field Sales Rep", "Sales Rep")] if user else []
+	if user and not user_is_reachable(email):
+		user = None  # a user of another store is not shown, nor told apart from "no such user"
+	user_roles = (
+		[r for r in frappe.get_roles(email) if r in ("Sales Manager", "Field Sales Rep", "Sales Rep")]
+		if user
+		else []
+	)
 	return {
 		"exists": bool(user),
 		"full_name": user.full_name if user else None,
@@ -528,9 +568,9 @@ def create_retailer_login(retailer: str, email: str, send_invite: int = 1) -> di
 		if not user_doc.enabled:
 			if RETAILER_ROLE not in {row.role for row in user_doc.roles}:
 				frappe.throw(
-					_("{0} is a disabled account and cannot be a retailer login. Ask a System Manager.").format(
-						email
-					),
+					_(
+						"{0} is a disabled account and cannot be a retailer login. Ask a System Manager."
+					).format(email),
 					frappe.PermissionError,
 				)
 			# A login removed earlier, invited again: bring the user back.
@@ -573,9 +613,7 @@ def create_retailer_login(retailer: str, email: str, send_invite: int = 1) -> di
 
 def _store_display_name() -> str:
 	"""The customer-facing store name: the invoice company, the shop's own name, its domain, else the site."""
-	values = frappe.db.get_value(
-		"Store Connection", "Store Connection", ["company_name", "shop_name", "store_url"], as_dict=True
-	) or {}
+	values = get_store_value(["company_name", "shop_name", "store_url"], as_dict=True) or {}
 	if values.company_name:
 		return values.company_name
 	if values.shop_name:
@@ -596,6 +634,7 @@ def _send_retailer_invite(user: str, retailer: str) -> None:
 	link = frappe.get_doc("User", user)._reset_password(send_email=False)
 	store = _store_display_name()
 	frappe.sendmail(
+		**store_mail_args(frappe.db.get_value("Retailer", retailer, "store")),
 		recipients=[user],
 		subject=_("Welcome to {0}").format(store),
 		template="retailer_invite",
@@ -674,7 +713,6 @@ def revoke_retailer_login(retailer: str) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 def sync_retailers(names: str | list) -> dict:
-
 	names = frappe.parse_json(names) if isinstance(names, str) else names
 	if not names:
 		frappe.throw(_("Select at least one Retailer"))
@@ -682,14 +720,16 @@ def sync_retailers(names: str | list) -> dict:
 	for name in names:
 		frappe.has_permission("Retailer", "write", name, throw=True)
 
-	get_connector()  # fails fast if Store Connection is disabled
+	# Fails fast if a store is disabled: each retailer's own store (each push runs in it).
+	for store in record_stores("Retailer", names):
+		get_connector(store=store)
 	push_retailers(names)
 	return {"message": _("Sync to store queued for {0} retailer(s)").format(len(names))}
 
 
 def _check_visit_date(doc) -> None:
 	"""A visit can only be checked in to on its own date (in the system time zone)."""
-	visit_date, today = getdate(doc.visit_date), getdate(nowdate())
+	visit_date, today = getdate(doc.visit_date), store_today()
 	if visit_date > today:
 		frappe.throw(
 			_("This visit is planned for {0}. You can check in on that day.").format(formatdate(visit_date)),
@@ -697,16 +737,16 @@ def _check_visit_date(doc) -> None:
 		)
 	if visit_date < today:
 		frappe.throw(
-			_("This visit was planned for {0} and that day has passed. Ask your manager to move it to today.").format(
-				formatdate(visit_date)
-			),
+			_(
+				"This visit was planned for {0} and that day has passed. Ask your manager to move it to today."
+			).format(formatdate(visit_date)),
 			title=_("Visit Date Has Passed"),
 		)
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Visit", "visit")
 def check_in(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
-
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)
@@ -803,9 +843,12 @@ def check_out(
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)
+	doc.check_permission("write")
 	_check_visit_access(doc)
 	if doc.status != "In Progress":
-		frappe.throw(_("Only an In Progress visit can be checked out of. This visit is {0}.").format(_(doc.status)))
+		frappe.throw(
+			_("Only an In Progress visit can be checked out of. This visit is {0}.").format(_(doc.status))
+		)
 
 	if no_order_reason:
 		doc.no_order_reason = no_order_reason
@@ -914,11 +957,12 @@ RETRY_SYNC_MAX_ORDERS = 500
 
 
 @frappe.whitelist(methods=["POST"])
+@in_store_of("Field Order", "field_order")
 def retry_sync(field_order: str) -> dict:
 	"""Queue another push of a submitted Field Order whose sync failed."""
 	_check_retry(field_order)
 	frappe.has_permission("Field Order", "read", field_order, throw=True)
-	get_connector()  # fails fast if Store Connection is disabled
+	get_connector()  # fails fast if the store is disabled
 	enqueue_push_order(field_order)
 	return {"message": _("Sync to store queued")}
 
@@ -940,7 +984,9 @@ def retry_sync_orders(field_orders: str | list) -> dict:
 		frappe.throw(_("Retry at most {0} orders at a time").format(RETRY_SYNC_MAX_ORDERS))
 	for name in names:
 		_check_retry(name)
-	get_connector()  # fails fast if Store Connection is disabled
+	# Fails fast if a store is disabled: each order's own store (vendor staff may select several).
+	for store in record_stores("Field Order", names):
+		get_connector(store=store)
 	for name in names:
 		enqueue_push_order(name)
 	return {"queued": len(names), "message": _("Retry queued for {0} order(s)").format(len(names))}
@@ -955,20 +1001,24 @@ def _check_retry(field_order: str) -> None:
 		frappe.throw(_("Field Order {0} not found").format(field_order), frappe.DoesNotExistError)
 	frappe.has_permission("Field Order", "read", field_order, throw=True)
 	if not _is_rep_or_their_manager(order.sales_rep):
-		frappe.throw(_("Only the order's sales rep or their Sales Manager can retry the sync."), frappe.PermissionError)
+		frappe.throw(
+			_("Only the order's sales rep or their Sales Manager can retry the sync."), frappe.PermissionError
+		)
 	if order.docstatus != 1 or order.sync_status != "Failed":
 		frappe.throw(_("Only a submitted Field Order whose sync failed can be retried"))
 
 
 @frappe.whitelist()
+@in_store_of("Field Order", "field_order")
 def get_store_order_url(field_order: str) -> str | None:
 	"""Admin URL of the synced order (or its draft) on the store, for "Open in Store"."""
 	frappe.has_permission("Field Order", "read", field_order, throw=True)
-	doc = frappe.db.get_value("Field Order", field_order, ["external_order_id", "external_draft_id"], as_dict=True)
+	doc = frappe.db.get_value(
+		"Field Order", field_order, ["external_order_id", "external_draft_id"], as_dict=True
+	)
 	if not (doc.external_order_id or doc.external_draft_id):
 		return None
 	return get_connector().get_order_url(doc.external_order_id, doc.external_draft_id)
-
 
 
 SYNC_FAILURE_LIMIT = 500
@@ -986,7 +1036,15 @@ def get_sync_failures() -> dict:
 	orders = frappe.get_list(
 		"Field Order",
 		filters={"docstatus": 1, "sync_status": "Failed"},
-		fields=["name", "retailer", "retailer_name", "sales_rep", "last_sync_attempt", "sync_attempts", "sync_error"],
+		fields=[
+			"name",
+			"retailer",
+			"retailer_name",
+			"sales_rep",
+			"last_sync_attempt",
+			"sync_attempts",
+			"sync_error",
+		],
 		order_by="last_sync_attempt desc",
 		limit_page_length=SYNC_FAILURE_LIMIT,
 	)
@@ -999,15 +1057,19 @@ def get_sync_failures() -> dict:
 	)
 
 	reps = {r.sales_rep for r in orders + retailers if r.sales_rep}
-	rep_names = dict(
-		frappe.get_list(
-			"Sales Rep",
-			filters={"name": ("in", list(reps))},
-			fields=["name", "full_name"],
-			as_list=True,
-			limit_page_length=0,
+	rep_names = (
+		dict(
+			frappe.get_list(
+				"Sales Rep",
+				filters={"name": ("in", list(reps))},
+				fields=["name", "full_name"],
+				as_list=True,
+				limit_page_length=0,
+			)
 		)
-	) if reps else {}
+		if reps
+		else {}
+	)
 	for row in orders + retailers:
 		row.sales_rep_name = rep_names.get(row.sales_rep)
 
@@ -1022,13 +1084,16 @@ def retry_all_sync_failures() -> dict:
 	:return: ``{"orders": int, "retailers": int, "message": str}``
 	"""
 	frappe.only_for(MONITOR_ROLES)
-	get_connector()  # fails fast if Store Connection is disabled
+	get_connector()  # fails fast if the store is disabled
 
 	orders = frappe.get_list(
 		"Field Order", filters={"docstatus": 1, "sync_status": "Failed"}, pluck="name", limit_page_length=0
 	)
 	retailers = frappe.get_list(
-		"Retailer", filters=[["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")], pluck="name", limit_page_length=0
+		"Retailer",
+		filters=[["sync_status", "=", "Failed"], *hierarchy_filters("Retailer")],
+		pluck="name",
+		limit_page_length=0,
 	)
 
 	for name in orders:
@@ -1045,6 +1110,7 @@ def retry_all_sync_failures() -> dict:
 @frappe.whitelist()
 def get_sync_failure_count(filters: str | list | dict | None = None) -> dict:
 	"""Number card "Sync Failures": failed orders + retailers in the user's scope; opens the page."""
+
 	def rows_counted(doctype, filters):
 		# COUNT(*) in the database (permission rules still apply), not every name in memory.
 		rows = frappe.get_list(doctype, filters=filters, fields=[{"COUNT": "*", "as": "count"}])
@@ -1068,7 +1134,12 @@ def get_territories(txt: str | None = None) -> list[str]:
 	if txt:
 		filters["territory"] = ("like", f"%{txt}%")
 	return frappe.get_list(
-		"Sales Rep", filters=filters, pluck="territory", distinct=True, order_by="territory asc", limit_page_length=50
+		"Sales Rep",
+		filters=filters,
+		pluck="territory",
+		distinct=True,
+		order_by="territory asc",
+		limit_page_length=50,
 	)
 
 
@@ -1085,6 +1156,7 @@ def get_retailer_cities(txt: str | None = None) -> list[str]:
 
 
 @frappe.whitelist()
+@in_store_of("Retailer", "retailer")
 def get_retailer_summary(retailer: str) -> dict:
 	"""
 	Last 30 days at a retailer, for the summary bar on its form.
@@ -1093,7 +1165,7 @@ def get_retailer_summary(retailer: str) -> dict:
 	user may see (their hierarchy; a retailer login its own orders; admins everything).
 	"""
 	frappe.has_permission("Retailer", "read", retailer, throw=True)
-	since = frappe.utils.add_days(frappe.utils.nowdate(), -30)
+	since = frappe.utils.add_days(str(store_today()), -30)
 	user = frappe.session.user
 
 	from frappe.query_builder.functions import Count, Sum
@@ -1196,10 +1268,14 @@ def _check_own_visit(doc) -> None:
 	Only the visit's assigned rep checks in: the check-in records where that rep is, so
 	nobody else (a manager or System Manager included) can do it for them.
 	"""
-	rep = frappe.db.get_value("Sales Rep", doc.sales_rep, ["user", "full_name"], as_dict=True) or frappe._dict()
+	rep = (
+		frappe.db.get_value("Sales Rep", doc.sales_rep, ["user", "full_name"], as_dict=True) or frappe._dict()
+	)
 	if not rep.user or rep.user != frappe.session.user:
 		frappe.throw(
-			_("Only {0}, the rep assigned to this visit, can check in.").format(rep.full_name or doc.sales_rep),
+			_("Only {0}, the rep assigned to this visit, can check in.").format(
+				rep.full_name or doc.sales_rep
+			),
 			frappe.PermissionError,
 		)
 
@@ -1324,7 +1400,12 @@ def mobile_login(
 	  same pair (a password change or "sign out everywhere" rotates the secret).
 	"""
 	from frappe.auth import LoginManager, validate_ip_address
-	from frappe.twofactor import ExpiredLoginException, authenticate_for_2factor, confirm_otp_token, should_run_2fa
+	from frappe.twofactor import (
+		ExpiredLoginException,
+		authenticate_for_2factor,
+		confirm_otp_token,
+		should_run_2fa,
+	)
 
 	from field_sales.utils.credentials import issue_api_secret
 	from field_sales.www.fieldsales import has_app_access

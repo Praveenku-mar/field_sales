@@ -16,6 +16,8 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import nowdate
 from frappe.utils.password import update_password
 
+from field_sales.utils.store import set_store_value
+
 APP = __name__.split(".", 1)[0]
 api = importlib.import_module(f"{APP}.api")
 mobile = importlib.import_module(f"{APP}.api.mobile")
@@ -163,11 +165,13 @@ VISIT_DETAIL_KEYS = {
 class TestMobileContract(IntegrationTestCase):
 	def setUp(self):
 		frappe.set_user("Administrator")
-		frappe.db.set_single_value("Store Connection", {"enabled": 0, "enable_commission": 1})
+		set_store_value({"enabled": 0, "enable_commission": 1})
 		self.rep_user = self.make_user("contract.rep@example.com", ["Field Sales Rep"])
-		self.rep = frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user}).insert(
-			ignore_permissions=True
-		).name
+		self.rep = (
+			frappe.get_doc({"doctype": "Sales Rep", "user": self.rep_user})
+			.insert(ignore_permissions=True)
+			.name
+		)
 		self.retailer = (
 			frappe.get_doc(
 				{
@@ -329,9 +333,7 @@ class TestMobileContract(IntegrationTestCase):
 		}
 		order = frappe.get_doc(order_values).insert(ignore_permissions=True)
 		self.assertEqual(order.client_temp_key, "reuse-order-1")
-		self.assertEqual(
-			frappe.db.get_value("Field Order", order.name, "client_temp_key"), "reuse-order-1"
-		)
+		self.assertEqual(frappe.db.get_value("Field Order", order.name, "client_temp_key"), "reuse-order-1")
 
 		order.submit()
 		order.db_set("sync_status", "Draft")
@@ -363,9 +365,7 @@ class TestMobileContract(IntegrationTestCase):
 
 		reused_visit = frappe.get_doc(visit_values).insert(ignore_permissions=True)
 		self.assertEqual(reused_visit.client_temp_key, "reuse-visit-1")
-		self.assertEqual(
-			frappe.db.get_value("Visit", reused_visit.name, "client_temp_key"), "reuse-visit-1"
-		)
+		self.assertEqual(frappe.db.get_value("Visit", reused_visit.name, "client_temp_key"), "reuse-visit-1")
 
 	def test_legacy_duplicate_stays_savable(self):
 		"""Duplicates made before the unique key existed (left keyless by the patch) can still be saved."""
@@ -388,8 +388,12 @@ class TestMobileContract(IntegrationTestCase):
 				first = frappe.get_doc(values).insert(ignore_permissions=True).name
 				second = frappe.get_doc(values).insert(ignore_permissions=True).name
 				# As the patch leaves them: same id, only the oldest holds the key.
-				frappe.db.set_value(doctype, first, {"client_temp_id": "legacy-dup", "client_temp_key": "legacy-dup"})
-				frappe.db.set_value(doctype, second, {"client_temp_id": "legacy-dup", "client_temp_key": None})
+				frappe.db.set_value(
+					doctype, first, {"client_temp_id": "legacy-dup", "client_temp_key": "legacy-dup"}
+				)
+				frappe.db.set_value(
+					doctype, second, {"client_temp_id": "legacy-dup", "client_temp_key": None}
+				)
 
 				doc = frappe.get_doc(doctype, second)
 				doc.save(ignore_permissions=True)
@@ -458,45 +462,49 @@ class TestMobileContract(IntegrationTestCase):
 
 	def test_client_cannot_set_or_change_client_temp_key(self):
 		"""REST / client values for client_temp_key are always overwritten by the server."""
-		order = frappe.get_doc({
-			"doctype": "Field Order",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"order_date": nowdate(),
-			"client_temp_id": "client-order-1",
-			"client_temp_key": "spoofed-key",
-			"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
-		}).insert(ignore_permissions=True)
+		order = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"order_date": nowdate(),
+				"client_temp_id": "client-order-1",
+				"client_temp_key": "spoofed-key",
+				"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
+			}
+		).insert(ignore_permissions=True)
 		self.assertEqual(order.client_temp_key, "client-order-1")
-		self.assertEqual(
-			frappe.db.get_value("Field Order", order.name, "client_temp_key"), "client-order-1"
-		)
+		self.assertEqual(frappe.db.get_value("Field Order", order.name, "client_temp_key"), "client-order-1")
 
 		order.client_temp_key = "tampered-key"
 		order.save(ignore_permissions=True)
 		order.reload()
 		self.assertEqual(order.client_temp_key, "client-order-1")
 
-		order_no_id = frappe.get_doc({
-			"doctype": "Field Order",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"order_date": nowdate(),
-			"client_temp_key": "spoofed-no-id",
-			"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
-		}).insert(ignore_permissions=True)
+		order_no_id = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"order_date": nowdate(),
+				"client_temp_key": "spoofed-no-id",
+				"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
+			}
+		).insert(ignore_permissions=True)
 		self.assertIsNone(order_no_id.client_temp_key)
 		self.assertIsNone(frappe.db.get_value("Field Order", order_no_id.name, "client_temp_key"))
 
-		visit = frappe.get_doc({
-			"doctype": "Visit",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"visit_date": nowdate(),
-			"status": "Planned",
-			"client_temp_id": "client-visit-1",
-			"client_temp_key": "spoofed-visit-key",
-		}).insert(ignore_permissions=True)
+		visit = frappe.get_doc(
+			{
+				"doctype": "Visit",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"visit_date": nowdate(),
+				"status": "Planned",
+				"client_temp_id": "client-visit-1",
+				"client_temp_key": "spoofed-visit-key",
+			}
+		).insert(ignore_permissions=True)
 		self.assertEqual(visit.client_temp_key, "client-visit-1")
 		self.assertEqual(frappe.db.get_value("Visit", visit.name, "client_temp_key"), "client-visit-1")
 
@@ -505,14 +513,16 @@ class TestMobileContract(IntegrationTestCase):
 		visit.reload()
 		self.assertEqual(visit.client_temp_key, "client-visit-1")
 
-		visit_no_id = frappe.get_doc({
-			"doctype": "Visit",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"visit_date": nowdate(),
-			"status": "Planned",
-			"client_temp_key": "spoofed-no-id",
-		}).insert(ignore_permissions=True)
+		visit_no_id = frappe.get_doc(
+			{
+				"doctype": "Visit",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"visit_date": nowdate(),
+				"status": "Planned",
+				"client_temp_key": "spoofed-no-id",
+			}
+		).insert(ignore_permissions=True)
 		self.assertIsNone(visit_no_id.client_temp_key)
 		self.assertIsNone(frappe.db.get_value("Visit", visit_no_id.name, "client_temp_key"))
 
@@ -520,30 +530,36 @@ class TestMobileContract(IntegrationTestCase):
 		"""Patch fills client_temp_key for the oldest active row; duplicates and cancelled rows keep NULL."""
 		from field_sales.patches.v1_0.client_temp_key import execute as run_patch
 
-		o1 = frappe.get_doc({
-			"doctype": "Field Order",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"order_date": nowdate(),
-			"client_temp_id": "patch-dupe-order",
-			"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
-		}).insert(ignore_permissions=True)
+		o1 = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"order_date": nowdate(),
+				"client_temp_id": "patch-dupe-order",
+				"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
+			}
+		).insert(ignore_permissions=True)
 
-		o2 = frappe.get_doc({
-			"doctype": "Field Order",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"order_date": nowdate(),
-			"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
-		}).insert(ignore_permissions=True)
+		o2 = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"order_date": nowdate(),
+				"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
+			}
+		).insert(ignore_permissions=True)
 
-		o3 = frappe.get_doc({
-			"doctype": "Field Order",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"order_date": nowdate(),
-			"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
-		}).insert(ignore_permissions=True)
+		o3 = frappe.get_doc(
+			{
+				"doctype": "Field Order",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"order_date": nowdate(),
+				"items": [{"product": self.product.name, "qty": 1, "rate": 100}],
+			}
+		).insert(ignore_permissions=True)
 
 		frappe.db.set_value(
 			"Field Order",
@@ -554,40 +570,55 @@ class TestMobileContract(IntegrationTestCase):
 		frappe.db.set_value(
 			"Field Order",
 			o2.name,
-			{"client_temp_id": "patch-dupe-order", "creation": "2026-01-01 11:00:00", "client_temp_key": None},
+			{
+				"client_temp_id": "patch-dupe-order",
+				"creation": "2026-01-01 11:00:00",
+				"client_temp_key": None,
+			},
 			update_modified=False,
 		)
 		frappe.db.set_value(
 			"Field Order",
 			o3.name,
-			{"client_temp_id": "patch-dupe-order", "docstatus": 2, "creation": "2026-01-01 09:00:00", "client_temp_key": None},
+			{
+				"client_temp_id": "patch-dupe-order",
+				"docstatus": 2,
+				"creation": "2026-01-01 09:00:00",
+				"client_temp_key": None,
+			},
 			update_modified=False,
 		)
 
-		v1 = frappe.get_doc({
-			"doctype": "Visit",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"visit_date": nowdate(),
-			"status": "Planned",
-			"client_temp_id": "patch-dupe-visit",
-		}).insert(ignore_permissions=True)
+		v1 = frappe.get_doc(
+			{
+				"doctype": "Visit",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"visit_date": nowdate(),
+				"status": "Planned",
+				"client_temp_id": "patch-dupe-visit",
+			}
+		).insert(ignore_permissions=True)
 
-		v2 = frappe.get_doc({
-			"doctype": "Visit",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"visit_date": nowdate(),
-			"status": "Planned",
-		}).insert(ignore_permissions=True)
+		v2 = frappe.get_doc(
+			{
+				"doctype": "Visit",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"visit_date": nowdate(),
+				"status": "Planned",
+			}
+		).insert(ignore_permissions=True)
 
-		v3 = frappe.get_doc({
-			"doctype": "Visit",
-			"retailer": self.retailer,
-			"sales_rep": self.rep,
-			"visit_date": nowdate(),
-			"status": "Cancelled",
-		}).insert(ignore_permissions=True)
+		v3 = frappe.get_doc(
+			{
+				"doctype": "Visit",
+				"retailer": self.retailer,
+				"sales_rep": self.rep,
+				"visit_date": nowdate(),
+				"status": "Cancelled",
+			}
+		).insert(ignore_permissions=True)
 
 		frappe.db.set_value(
 			"Visit",
@@ -598,39 +629,39 @@ class TestMobileContract(IntegrationTestCase):
 		frappe.db.set_value(
 			"Visit",
 			v2.name,
-			{"client_temp_id": "patch-dupe-visit", "creation": "2026-01-01 11:00:00", "client_temp_key": None},
+			{
+				"client_temp_id": "patch-dupe-visit",
+				"creation": "2026-01-01 11:00:00",
+				"client_temp_key": None,
+			},
 			update_modified=False,
 		)
 		frappe.db.set_value(
 			"Visit",
 			v3.name,
-			{"client_temp_id": "patch-dupe-visit", "creation": "2026-01-01 09:00:00", "client_temp_key": None},
+			{
+				"client_temp_id": "patch-dupe-visit",
+				"creation": "2026-01-01 09:00:00",
+				"client_temp_key": None,
+			},
 			update_modified=False,
 		)
 
 		run_patch()
 
-		self.assertEqual(
-			frappe.db.get_value("Field Order", o1.name, "client_temp_key"), "patch-dupe-order"
-		)
+		self.assertEqual(frappe.db.get_value("Field Order", o1.name, "client_temp_key"), "patch-dupe-order")
 		self.assertIsNone(frappe.db.get_value("Field Order", o2.name, "client_temp_key"))
 		self.assertIsNone(frappe.db.get_value("Field Order", o3.name, "client_temp_key"))
 
-		self.assertEqual(
-			frappe.db.get_value("Visit", v1.name, "client_temp_key"), "patch-dupe-visit"
-		)
+		self.assertEqual(frappe.db.get_value("Visit", v1.name, "client_temp_key"), "patch-dupe-visit")
 		self.assertIsNone(frappe.db.get_value("Visit", v2.name, "client_temp_key"))
 		self.assertIsNone(frappe.db.get_value("Visit", v3.name, "client_temp_key"))
 
 		# Safe to re-run
 		run_patch()
-		self.assertEqual(
-			frappe.db.get_value("Field Order", o1.name, "client_temp_key"), "patch-dupe-order"
-		)
+		self.assertEqual(frappe.db.get_value("Field Order", o1.name, "client_temp_key"), "patch-dupe-order")
 		self.assertIsNone(frappe.db.get_value("Field Order", o2.name, "client_temp_key"))
-		self.assertEqual(
-			frappe.db.get_value("Visit", v1.name, "client_temp_key"), "patch-dupe-visit"
-		)
+		self.assertEqual(frappe.db.get_value("Visit", v1.name, "client_temp_key"), "patch-dupe-visit")
 		self.assertIsNone(frappe.db.get_value("Visit", v2.name, "client_temp_key"))
 
 	# -- push devices ------------------------------------------------------

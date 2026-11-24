@@ -6,7 +6,7 @@ import { APP_BASE } from '@/utils/base'
 
 // Roles that may open the app at all (checked again on the server). Field Sales
 // Retailer is the customer login: it reaches My Orders only (see the router guard).
-export const APP_ROLES = ['System Manager', 'Sales Manager', 'Field Sales Rep', 'Field Sales Retailer']
+export const APP_ROLES = ['System Manager', 'Store Admin', 'Sales Manager', 'Field Sales Rep', 'Field Sales Retailer']
 
 export function redirectToLogin() {
   const target = window.location.pathname + window.location.search
@@ -50,6 +50,15 @@ export const useSessionStore = defineStore('session', () => {
   const retailer = computed(() => data.value.retailer || null)
   // Settings → Commission; off for companies that pay no commission (missing = on).
   const commissionEnabled = computed(() => data.value.commission_enabled !== false)
+  // Vendor staff on the shared site: they work in one store at a time (VendorStorePicker).
+  const isVendor = computed(() => !!data.value.is_vendor)
+  const needsStore = computed(() => isVendor.value && !store.value.code)
+  // Shared site, right after a Shopify install: the merchant's admin email comes first, for the
+  // store's own Store Admin only (the install's Shopify sign-in). Vendor staff and the store's
+  // other users carry on: they must not name the merchant's admin for them.
+  const needsAdminSetup = computed(
+    () => !!store.value.needs_admin_setup && !isVendor.value && roles.value.includes('Store Admin'),
+  )
 
   function hasRole(...wanted) {
     return wanted.some((role) => roles.value.includes(role))
@@ -125,6 +134,9 @@ export const useSessionStore = defineStore('session', () => {
     ready,
     error,
     user,
+    isVendor,
+    needsStore,
+    needsAdminSetup,
     fullName,
     userImage,
     roles,

@@ -290,8 +290,8 @@
                 <dt class="text-polaris-secondary">Discount ({{ formatNumber(form.discount_percent || 0, 2) }}%)</dt>
                 <dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(form.discount_amount || 0) }}</dd>
               </div>
-              <!-- After the discount: GST is charged on the discounted value. -->
-              <div class="flex justify-between"><dt class="text-polaris-secondary">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.tax) }}</dd></div>
+              <!-- After the discount: GST is charged on the discounted value. None for a non-GST store. -->
+              <div v-if="session.store.tax_mode !== 'None'" class="flex justify-between"><dt class="text-polaris-secondary">GST {{ formatNumber(form.tax_percent, 2) }}%</dt><dd class="tabular-nums font-medium text-polaris-text">{{ formatCurrency(totals.tax) }}</dd></div>
               <div class="flex justify-between border-t border-[#e1e3e5] pt-3 text-sm font-bold text-polaris-text">
                 <dt>Grand Total</dt><dd class="tabular-nums text-base">{{ formatCurrency(totals.grand) }}</dd>
               </div>

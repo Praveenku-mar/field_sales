@@ -18,6 +18,11 @@ frappe.ui.form.on("Field Order", {
 
 	onload: function (frm) {
 		_listen_for_sync(frm);
+		// No "Today" default in the DocType (the server fills the store's date: fill_store_dates);
+		// Desk shows today in the user's time zone, which is the store's on the shared site.
+		if (frm.is_new() && !frm.doc.order_date) {
+			frm.set_value("order_date", frappe.datetime.get_today());
+		}
 	},
 
 	refresh: function (frm) {
@@ -433,7 +438,7 @@ function _listen_for_sync(frm) {
 	frappe.realtime.on("field_order_payment_updated", reload_if_open);
 }
 
-// Offer the Store Connection's "Sell from here" locations in the Location select.
+// Offer the Store's "Sell from here" locations in the Location select.
 function _set_location_options(frm) {
 	frappe.call({ method: "field_sales.api.get_sell_locations" }).then(function (r) {
 		var options = (r.message || []).map(function (loc) {

@@ -23,6 +23,7 @@ from field_sales.connectors.base import (
 	ConnectorError,
 )
 from field_sales.sync.webhooks import process_event
+from field_sales.utils.store import get_store, get_store_name, set_store_value
 
 SHOP = "test-shop.myshopify.com"
 SECRET = "test-webhook-secret"
@@ -33,8 +34,7 @@ INVENTORY = "5001"
 class TestWebhooks(IntegrationTestCase):
 	def setUp(self):
 		# set_single_value does not validate; everything rolls back after each test.
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
@@ -44,9 +44,9 @@ class TestWebhooks(IntegrationTestCase):
 				"shopify_auth_mode": "Client Credentials",
 				"default_location_id": LOCATION,
 				"shopify_client_secret": "*" * len(SECRET),
-			},
+			}
 		)
-		set_encrypted_password("Store Connection", "Store Connection", SECRET, "shopify_client_secret")
+		set_encrypted_password("Store", get_store_name(), SECRET, "shopify_client_secret")
 		# Earlier runs' (and the live store's) Sync Logs linger; tests assert on their own only.
 		frappe.db.delete("Sync Log")
 		self.conn = get_connector()
@@ -93,7 +93,9 @@ class TestWebhooks(IntegrationTestCase):
 		headers.update(overrides)
 		return {k: v for k, v in headers.items() if v is not None}
 
-	def stock_event(self, available=10, location=LOCATION, inventory=INVENTORY, updated_at="2026-10-14T10:00:00Z"):
+	def stock_event(
+		self, available=10, location=LOCATION, inventory=INVENTORY, updated_at="2026-10-14T10:00:00Z"
+	):
 		return {
 			"topic": STOCK_TOPIC,
 			"platform_topic": "inventory_levels/update",
@@ -134,7 +136,9 @@ class TestWebhooks(IntegrationTestCase):
 
 	def test_verify_webhook_rejects_missing_signature(self):
 		body = b"{}"
-		self.assertFalse(self.conn.verify_webhook(self.headers(body, **{"X-Shopify-Hmac-Sha256": None}), body))
+		self.assertFalse(
+			self.conn.verify_webhook(self.headers(body, **{"X-Shopify-Hmac-Sha256": None}), body)
+		)
 
 	def test_verify_webhook_rejects_wrong_shop(self):
 		body = b"{}"
@@ -147,7 +151,7 @@ class TestWebhooks(IntegrationTestCase):
 		self.assertTrue(self.conn.verify_webhook(headers, body))
 
 	def test_verify_webhook_rejects_without_secret(self):
-		frappe.db.delete("__Auth", {"doctype": "Store Connection", "fieldname": "shopify_client_secret"})
+		frappe.db.delete("__Auth", {"doctype": "Store", "fieldname": "shopify_client_secret"})
 		body = b"{}"
 		self.assertFalse(self.conn.verify_webhook(self.headers(body), body))
 
@@ -166,10 +170,10 @@ class TestWebhooks(IntegrationTestCase):
 			self.assertEqual(event["payload"]["id"], 1)
 
 	def test_handle_stock_event_normalizes(self):
-		result = self.conn.handle_stock_event({"inventory_item_id": 5001, "location_id": 100, "available": None})
-		self.assertEqual(
-			result, {"external_inventory_id": "5001", "location_id": "100", "available": 0.0}
+		result = self.conn.handle_stock_event(
+			{"inventory_item_id": 5001, "location_id": 100, "available": None}
 		)
+		self.assertEqual(result, {"external_inventory_id": "5001", "location_id": "100", "available": 0.0})
 		self.assertIsNone(self.conn.handle_stock_event({"foo": "bar"}))
 
 	# -- process_event -----------------------------------------------------
@@ -185,8 +189,8 @@ class TestWebhooks(IntegrationTestCase):
 
 	def test_stock_event_for_location_not_sold_from_is_ignored(self):
 		# 999 is not in the Locations table at all; 200 is, but unticked.
-		frappe.db.set_single_value("Store Connection", "default_location_id", LOCATION)
-		settings = frappe.get_doc("Store Connection")
+		set_store_value("default_location_id", LOCATION)
+		settings = get_store()
 		settings.append("locations", {"location_id": "200", "location_name": "Warehouse", "sell_from": 0})
 		settings.save(ignore_permissions=True)
 
@@ -258,14 +262,19 @@ class TestWebhooks(IntegrationTestCase):
 
 		with (
 			patch("field_sales.connectors.shopify.ShopifyConnector.get_product", return_value=[kept, new]),
-			patch("field_sales.connectors.shopify.ShopifyConnector.get_stock", return_value={INVENTORY: 6.0, "5008": 2.0}),
+			patch(
+				"field_sales.connectors.shopify.ShopifyConnector.get_stock",
+				return_value={INVENTORY: 6.0, "5008": 2.0},
+			),
 		):
 			result = process_event("Shopify", event)
 
 		self.assertEqual(result["created"], 1)
 		self.assertEqual(result["updated"], 1)
 		self.assertEqual(result["archived"], 1)
-		self.assertEqual(frappe.db.get_value("Platform Product", self.product.name, "product_title"), "Renamed")
+		self.assertEqual(
+			frappe.db.get_value("Platform Product", self.product.name, "product_title"), "Renamed"
+		)
 		self.assertEqual(self.qty(self.product), 6)
 		self.assertEqual(frappe.db.get_value("Platform Product", self.other.name, "status"), "Archived")
 		self.assertTrue(frappe.db.exists("Platform Product", "Shopify-8"))
@@ -321,7 +330,10 @@ class TestWebhooks(IntegrationTestCase):
 	def run_price_event(self, event, store_variants):
 		with (
 			patch("field_sales.connectors.shopify.ShopifyConnector.get_product", return_value=store_variants),
-			patch("field_sales.connectors.shopify.ShopifyConnector.get_stock", return_value={INVENTORY: 3.0, "5002": 7.0}),
+			patch(
+				"field_sales.connectors.shopify.ShopifyConnector.get_stock",
+				return_value={INVENTORY: 3.0, "5002": 7.0},
+			),
 			patch("field_sales.sync.webhooks.frappe.publish_realtime") as publish,
 		):
 			result = process_event("Shopify", event)
@@ -351,9 +363,12 @@ class TestWebhooks(IntegrationTestCase):
 		self.assertEqual(raised.exception.code, "BAD_PAYLOAD")
 
 	def test_price_change_is_written_and_published(self):
-		event = self.price_event([{"id": 1, "price": "12.50", "compare_at_price": "15.00"}, {"id": 2, "price": "5.00"}])
+		event = self.price_event(
+			[{"id": 1, "price": "12.50", "compare_at_price": "15.00"}, {"id": 2, "price": "5.00"}]
+		)
 		result, published = self.run_price_event(
-			event, [self.store_variant("1", price=12.5, compare_at_price=15.0), self.store_variant("2", "5002")]
+			event,
+			[self.store_variant("1", price=12.5, compare_at_price=15.0), self.store_variant("2", "5002")],
 		)
 
 		self.product.reload()
@@ -361,11 +376,16 @@ class TestWebhooks(IntegrationTestCase):
 		self.assertIsNotNone(self.product.last_synced)
 		self.assertEqual(result["price_changed"], 2)
 		messages = {c.args[1]["product"]: c.args[1] for c in published}
-		self.assertEqual(messages[self.product.name], {"product": self.product.name, "price": 12.5, "compare_at_price": 15.0})
+		self.assertEqual(
+			messages[self.product.name],
+			{"product": self.product.name, "price": 12.5, "compare_at_price": 15.0},
+		)
 		self.assertEqual(published[0].kwargs, {"doctype": "Platform Product", "after_commit": True})
 
 	def test_unchanged_price_is_not_written_or_published(self):
-		frappe.db.set_value("Platform Product", self.product.name, {"price": 5, "compare_at_price": 0, "last_synced": None})
+		frappe.db.set_value(
+			"Platform Product", self.product.name, {"price": 5, "compare_at_price": 0, "last_synced": None}
+		)
 		with patch("field_sales.sync.webhooks.frappe.db.set_value") as set_value:
 			from field_sales.sync.webhooks import _apply_prices
 
@@ -417,7 +437,12 @@ class TestWebhooks(IntegrationTestCase):
 
 	def test_receive_enqueues_valid_event_once(self):
 		body = json.dumps(
-			{"inventory_item_id": 5001, "location_id": 100, "available": 4, "updated_at": "2026-10-14T10:00:00Z"}
+			{
+				"inventory_item_id": 5001,
+				"location_id": 100,
+				"available": 4,
+				"updated_at": "2026-10-14T10:00:00Z",
+			}
 		).encode()
 		event_id = frappe.generate_hash(length=12)
 		self.fake_request(body, self.headers(body, webhook_id=event_id))
@@ -428,7 +453,8 @@ class TestWebhooks(IntegrationTestCase):
 			self.assertTrue(first["ok"])
 			enqueue.assert_called_once()
 			kwargs = enqueue.call_args.kwargs
-			self.assertEqual(enqueue.call_args.args[0], "field_sales.sync.webhooks.process_event")
+			self.assertEqual(kwargs["store_method"], "field_sales.sync.webhooks.process_event")
+			self.assertEqual(kwargs["store_name"], get_store_name())
 			self.assertEqual(kwargs["platform"], "Shopify")
 			self.assertEqual(kwargs["webhook"]["topic"], STOCK_TOPIC)
 			self.assertEqual(kwargs["webhook"]["event_id"], event_id)
@@ -443,7 +469,12 @@ class TestWebhooks(IntegrationTestCase):
 	def test_receive_job_kwargs_reach_process_event(self):
 		"""Run the real frappe.enqueue (inline) so reserved-kwarg clashes show up."""
 		body = json.dumps(
-			{"inventory_item_id": 5001, "location_id": 100, "available": 4, "updated_at": "2026-10-14T10:00:00Z"}
+			{
+				"inventory_item_id": 5001,
+				"location_id": 100,
+				"available": 4,
+				"updated_at": "2026-10-14T10:00:00Z",
+			}
 		).encode()
 		event_id = frappe.generate_hash(length=12)
 		self.fake_request(body, self.headers(body, webhook_id=event_id))
@@ -463,7 +494,7 @@ class TestWebhooks(IntegrationTestCase):
 		self.assertEqual(job.call_args.kwargs["webhook"]["event_id"], event_id)
 
 	def test_receive_ignores_when_disabled(self):
-		frappe.db.set_single_value("Store Connection", "enabled", 0)
+		set_store_value("enabled", 0)
 		body = b"{}"
 		self.fake_request(body, self.headers(body))
 

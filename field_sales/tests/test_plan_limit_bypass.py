@@ -15,6 +15,7 @@ from frappe.utils import add_days, add_months, get_first_day, now_datetime, nowd
 from field_sales.shopify import billing
 from field_sales.tests.test_data_protection import DataProtectionCase
 from field_sales.utils.limits import ORDERS_PER_MONTH, SALES_REPS
+from field_sales.utils.store import set_store_value
 
 PLAN = {"plan": "starter", "trial_ends_at": None, "known": True}
 
@@ -23,8 +24,7 @@ class TestPlanLimitBypass(DataProtectionCase):
 	def setUp(self):
 		super().setUp()
 		self.users = 0
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{"shopify_auth_mode": "OAuth", "store_url": "plan-shop.myshopify.com", "embedded_user": None},
 		)
 		patcher = patch.object(billing, "get_active_plan", return_value=PLAN)
@@ -37,7 +37,9 @@ class TestPlanLimitBypass(DataProtectionCase):
 	def user(self):
 		self.users += 1
 		email = f"plan.rep{self.users}@example.com"
-		user = frappe.get_doc({"doctype": "User", "email": email, "first_name": f"Plan{self.users}", "send_welcome_email": 0})
+		user = frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": f"Plan{self.users}", "send_welcome_email": 0}
+		)
 		user.insert(ignore_permissions=True)
 		user.add_roles("Field Sales Rep")
 		return email
@@ -80,7 +82,12 @@ class TestPlanLimitBypass(DataProtectionCase):
 		rep = self.rep(ignore_plan_limit=True)
 		name = (
 			frappe.get_doc(
-				{"doctype": "Field Order", "retailer": retailer, "sales_rep": rep.name, "order_date": order_date}
+				{
+					"doctype": "Field Order",
+					"retailer": retailer,
+					"sales_rep": rep.name,
+					"order_date": order_date,
+				}
 			)
 			.insert(ignore_permissions=True, ignore_mandatory=True)
 			.name

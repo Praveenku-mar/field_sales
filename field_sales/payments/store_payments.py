@@ -22,7 +22,14 @@ from datetime import timezone
 
 import frappe
 from frappe import _
-from frappe.utils import convert_utc_to_system_timezone, escape_html, flt, fmt_money, get_datetime, now_datetime
+from frappe.utils import (
+	convert_utc_to_system_timezone,
+	escape_html,
+	flt,
+	fmt_money,
+	get_datetime,
+	now_datetime,
+)
 
 from field_sales.payments import transactions
 from field_sales.payments.razorpay import (
@@ -36,6 +43,7 @@ from field_sales.payments.razorpay import (
 	get_settings,
 	notify_payment_received,
 )
+from field_sales.utils.store import store_filters
 
 
 def apply_store_payment(conn, external_order_id: str) -> dict:
@@ -45,7 +53,10 @@ def apply_store_payment(conn, external_order_id: str) -> dict:
 	:return: ``{"note": ...}`` when nothing changed, else ``{"field_order", "payment_status", "amount_paid"}``
 	"""
 	external_order_id = str(external_order_id or "")
-	name = frappe.db.get_value("Field Order", {"external_order_id": external_order_id, "docstatus": 1}, "name")
+	# Only the current store's order: an event of one shop never reaches another store's order.
+	name = frappe.db.get_value(
+		"Field Order", {**store_filters(), "external_order_id": external_order_id, "docstatus": 1}, "name"
+	)
 	if not name:
 		return {"note": "Ignored: not a submitted Field Sales order"}
 	state = frappe.db.get_value("Field Order", name, ["payment_status", "store_marked_paid_on"], as_dict=True)

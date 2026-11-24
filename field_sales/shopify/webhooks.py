@@ -22,8 +22,15 @@ import frappe
 from frappe.utils import get_datetime, now_datetime
 
 from field_sales.connectors.shopify import clear_oauth_tokens
-from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_durable
+from field_sales.field_sales.doctype.sync_log.sync_log import log_sync, log_sync_or_error
 from field_sales.shopify import config
+from field_sales.utils.store import (
+	enqueue_in_store,
+	get_store,
+	set_current_store,
+	set_store_value,
+	store_for_shop,
+)
 
 DEDUP_TTL_SECONDS = 24 * 60 * 60
 REJECTED_LOG_INTERVAL_SECONDS = 60
@@ -53,21 +60,25 @@ def receive():
 	"""
 	Verify and queue one webhook delivery.
 
-	401 for a bad or missing ``X-Shopify-Hmac-Sha256``; otherwise 200 (also for another shop,
-	a duplicate delivery or an unhandled topic) so Shopify does not retry.
+	401 for a bad or missing ``X-Shopify-Hmac-Sha256``; otherwise 200 (also for a shop that is
+	not one of this site's Stores, a duplicate delivery or an unhandled topic) so Shopify does
+	not retry. The delivery is recorded and queued for the Store of ``X-Shopify-Shop-Domain``.
 	"""
 	# Read first: the signature covers these exact bytes.
 	raw_body = frappe.request.get_data()
 	headers = frappe.request.headers
-	settings = frappe.get_single("Store Connection")
+	topic = (headers.get("X-Shopify-Topic") or "").strip()
+	shop = (headers.get("X-Shopify-Shop-Domain") or "").strip().lower()
+	store = store_for_shop(shop)
+	settings = get_store(store) if store else None
+	# The rest of the request (logs, the Privacy Request, the job) belongs to the shop's Store.
+	set_current_store(store)
 
 	if not config.verify_body_hmac(raw_body, headers.get("X-Shopify-Hmac-Sha256"), _secrets(settings)):
 		_log_throttled("INVALID_SIGNATURE", "Webhook signature did not match", 401)
 		return _respond(401, "invalid signature")
 
-	topic = (headers.get("X-Shopify-Topic") or "").strip()
-	shop = (headers.get("X-Shopify-Shop-Domain") or "").strip().lower()
-	if not settings.store_url or shop != settings.store_url.lower():
+	if not store:
 		_log_throttled("OTHER_SHOP", f"Ignored {topic} for {shop[:100]}: not this site's shop", 200)
 		return _respond(200, "ignored")
 	if topic != UNINSTALLED_TOPIC and topic not in COMPLIANCE_TOPICS:
@@ -87,23 +98,7 @@ def receive():
 		payload = {}
 
 	try:
-		if topic == UNINSTALLED_TOPIC:
-			frappe.enqueue(
-				"field_sales.shopify.webhooks.handle_uninstalled",
-				queue="short",
-				shop=shop,
-				triggered_at=headers.get("X-Shopify-Triggered-At"),
-			)
-		else:
-			# Recorded now, so the request is on file even if the job is lost.
-			request = _record_privacy_request(topic, shop, payload, webhook_id)
-			frappe.enqueue(
-				"field_sales.shopify.privacy.process",
-				queue="short" if topic != "shop/redact" else "long",
-				enqueue_after_commit=True,
-				privacy_request=request,
-				payload=payload,
-			)
+		_queue(topic, shop, payload, webhook_id, headers)
 	except Exception:
 		# Not queued: forget the id so Shopify's retry is accepted.
 		if key:
@@ -112,14 +107,36 @@ def receive():
 	return _respond(200, "ok")
 
 
+def _queue(topic: str, shop: str, payload: dict, webhook_id: str, headers) -> None:
+	"""Queue the job for one verified delivery, in the current store."""
+	if topic == UNINSTALLED_TOPIC:
+		enqueue_in_store(
+			"field_sales.shopify.webhooks.handle_uninstalled",
+			queue="short",
+			shop=shop,
+			triggered_at=headers.get("X-Shopify-Triggered-At"),
+		)
+		return
+	# Recorded now (with the current store), so the request is on file even if the job is lost.
+	request = _record_privacy_request(topic, shop, payload, webhook_id)
+	enqueue_in_store(
+		"field_sales.shopify.privacy.process",
+		queue="short" if topic != "shop/redact" else "long",
+		enqueue_after_commit=True,
+		privacy_request=request,
+		payload=payload,
+	)
+
+
 def handle_uninstalled(shop: str, triggered_at: str | None = None):
 	"""
-	Background job for ``app/uninstalled``: drop the tokens and disable the connection, so
+	Background job for ``app/uninstalled``: drop the shop's tokens and disable its Store, so
 	scheduled syncs stop. Ignored if the shop was (re)installed after the uninstall happened.
 	"""
-	settings = frappe.get_single("Store Connection")
-	if (settings.store_url or "").lower() != shop:
+	store = store_for_shop(shop)
+	if not store:
 		return
+	settings = get_store(store)
 	if triggered_at and settings.installed_on:
 		try:
 			uninstalled_at = get_datetime(_to_system_time(triggered_at))
@@ -136,15 +153,15 @@ def handle_uninstalled(shop: str, triggered_at: str | None = None):
 			return
 
 	now = now_datetime()
-	clear_oauth_tokens()
-	frappe.db.set_single_value(
-		"Store Connection",
+	clear_oauth_tokens(store)
+	set_store_value(
 		{
 			"enabled": 0,
 			"uninstalled_on": now,
 			"last_test_status": "Uninstalled from Shopify",
 			"last_tested_on": now,
 		},
+		store=store,
 	)
 	log_sync(platform="Shopify", operation="Uninstall", status="Success", external_id=shop)
 
@@ -185,11 +202,14 @@ def register_webhooks():
 
 
 def _secrets(settings) -> list[str]:
-	"""Keys a delivery may be signed with: the App Store app's, and the client credentials app's."""
-	return [
-		config.client_secret(),
-		settings.get_password("shopify_client_secret", raise_exception=False) or "",
-	]
+	"""
+	Keys a delivery may be signed with: the App Store app's, and the Store's client credentials
+	app's (``settings`` is ``None`` for a shop that is not one of this site's Stores).
+	"""
+	secrets = [config.client_secret()]
+	if settings:
+		secrets.append(settings.get_password("shopify_client_secret", raise_exception=False) or "")
+	return secrets
 
 
 def _record_privacy_request(topic: str, shop: str, payload: dict, webhook_id: str) -> str:
@@ -233,7 +253,7 @@ def _log_throttled(code: str, message: str, http_status: int) -> None:
 	"""Log a rejected or ignored delivery, at most once a minute per kind."""
 	key = frappe.cache.make_key(f"field_sales:shopify_app_webhook_logged:{code}")
 	if frappe.cache.set(key, 1, nx=True, ex=REJECTED_LOG_INTERVAL_SECONDS):
-		log_sync_durable(
+		log_sync_or_error(
 			platform="Shopify",
 			operation="Webhook",
 			status="Failed",

@@ -13,6 +13,7 @@ from field_sales.payments import razorpay
 from field_sales.sync import orders
 from field_sales.sync.orders import mark_store_order_paid, retry_store_payments
 from field_sales.tests import test_razorpay_links as links
+from field_sales.utils.store import set_store_value
 
 
 class TestStoreMarkPaid(IntegrationTestCase):
@@ -23,15 +24,14 @@ class TestStoreMarkPaid(IntegrationTestCase):
 
 	def setUp(self):
 		links.TestRazorpayLinks.setUp(self)
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
 				"store_url": "test-shop.myshopify.com",
 				"shopify_api_version": "2026-10",
 				"order_mode": "Confirmed",
-			},
+			}
 		)
 		frappe.db.set_value(
 			"Field Order",
@@ -57,10 +57,19 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		def graphql(conn, query, variables=None, operation="Other", ref=None):
 			self.calls.append((query, variables, operation))
 			if query == ORDER_PAYMENT_STATE:
-				order = {"id": variables["id"], "name": "#2001", "displayFinancialStatus": status, "canMarkAsPaid": can_mark}
+				order = {
+					"id": variables["id"],
+					"name": "#2001",
+					"displayFinancialStatus": status,
+					"canMarkAsPaid": can_mark,
+				}
 				return {"order": order}
 			if query == ORDER_MARK_AS_PAID:
-				return {"orderMarkAsPaid": {"order": {"id": variables["input"]["id"], "displayFinancialStatus": "PAID"}}}
+				return {
+					"orderMarkAsPaid": {
+						"order": {"id": variables["input"]["id"], "displayFinancialStatus": "PAID"}
+					}
+				}
 			raise AssertionError("unexpected query")
 
 		return patch.object(ShopifyConnector, "_graphql", autospec=True, side_effect=graphql)
@@ -81,7 +90,9 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		self.assertEqual(mutation[2], "Mark Order Paid")
 		self.assertIsNotNone(self.marked_on())
 		self.assertTrue(
-			frappe.db.exists("Comment", {"reference_name": self.order.name, "content": ("like", "%#2001 marked as paid%")})
+			frappe.db.exists(
+				"Comment", {"reference_name": self.order.name, "content": ("like", "%#2001 marked as paid%")}
+			)
 		)
 
 		with self.shopify():
@@ -102,12 +113,19 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		self.assertTrue(
 			frappe.db.exists(
 				"Sync Log",
-				{"operation": "Mark Order Paid", "status": "Failed", "error_code": "CANNOT_MARK_PAID", "reference_name": self.order.name},
+				{
+					"operation": "Mark Order Paid",
+					"status": "Failed",
+					"error_code": "CANNOT_MARK_PAID",
+					"reference_name": self.order.name,
+				},
 			)
 		)
 
 	def test_api_error_leaves_it_for_retry(self):
-		with patch.object(ShopifyConnector, "_graphql", side_effect=ConnectorError("down", code="NETWORK_ERROR")):
+		with patch.object(
+			ShopifyConnector, "_graphql", side_effect=ConnectorError("down", code="NETWORK_ERROR")
+		):
 			mark_store_order_paid(self.order.name)
 		self.assertIsNone(self.marked_on())
 
@@ -136,7 +154,7 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		self.assertIsNotNone(self.marked_on())
 
 	def test_store_connection_disabled_does_nothing(self):
-		frappe.db.set_single_value("Store Connection", "enabled", 0)
+		set_store_value("enabled", 0)
 		with self.shopify():
 			mark_store_order_paid(self.order.name)
 		self.assertEqual(self.calls, [])
@@ -177,7 +195,12 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		frappe.db.set_value(
 			"Field Order",
 			self.order.name,
-			{"external_draft_id": "777", "external_order_id": None, "sync_status": "Synced", "last_sync_attempt": now_datetime()},
+			{
+				"external_draft_id": "777",
+				"external_order_id": None,
+				"sync_status": "Synced",
+				"last_sync_attempt": now_datetime(),
+			},
 		)
 		conn = MagicMock()
 		conn.settings.platform = "Shopify"
@@ -185,11 +208,19 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		conn.get_store_payment.return_value = store_payment
 		quiet = [
 			patch.object(orders, name)
-			for name in ("enqueue_create_entries", "enqueue_order_confirmation", "notify_order_synced", "notify_sync_result")
+			for name in (
+				"enqueue_create_entries",
+				"enqueue_order_confirmation",
+				"notify_order_synced",
+				"notify_sync_result",
+			)
 		]
-		with patch.object(orders, "get_connector", return_value=conn), patch.object(frappe.db, "commit"), patch(
-			"field_sales.payments.store_payments.notify_payment_received"
-		), patch.object(orders, "enqueue_mark_store_paid") as enqueue:
+		with (
+			patch.object(orders, "get_connector", return_value=conn),
+			patch.object(frappe.db, "commit"),
+			patch("field_sales.payments.store_payments.notify_payment_received"),
+			patch.object(orders, "enqueue_mark_store_paid") as enqueue,
+		):
 			for p in quiet:
 				p.start()
 			try:
@@ -211,32 +242,51 @@ class TestStoreMarkPaid(IntegrationTestCase):
 		_conn, enqueue = self.link_draft(store_payment=payment)
 		self.assertIsNotNone(self.marked_on())  # the merchant marked it paid when completing the draft
 		enqueue.assert_not_called()
-		self.assertFalse(frappe.db.exists("Payment Transaction", {"reference_order": self.order.name, "source": "Store Checkout"}))
+		self.assertFalse(
+			frappe.db.exists(
+				"Payment Transaction", {"reference_order": self.order.name, "source": "Store Checkout"}
+			)
+		)
 
 	def test_draft_paid_on_store_checkout_marks_the_field_order_paid(self):
-		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})
+		frappe.db.set_value(
+			"Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None}
+		)
 		total = frappe.db.get_value("Field Order", self.order.name, "grand_total")
-		payment = {"amount": total, "currency": "INR", "method": "Razorpay", "reference": "991", "paid_at": "2026-11-17T05:00:00Z"}
+		payment = {
+			"amount": total,
+			"currency": "INR",
+			"method": "Razorpay",
+			"reference": "991",
+			"paid_at": "2026-11-17T05:00:00Z",
+		}
 		conn, enqueue = self.link_draft(store_payment=payment)
 		conn.get_store_payment.assert_called_once_with("5550001")
-		order = frappe.db.get_value("Field Order", self.order.name, ["payment_status", "store_marked_paid_on"], as_dict=True)
+		order = frappe.db.get_value(
+			"Field Order", self.order.name, ["payment_status", "store_marked_paid_on"], as_dict=True
+		)
 		self.assertEqual(order.payment_status, "Paid")
 		self.assertIsNotNone(order.store_marked_paid_on)  # paid on the store: nothing to mark there
 		enqueue.assert_not_called()
 		self.assertTrue(
 			frappe.db.exists(
-				"Payment Transaction", {"reference_order": self.order.name, "source": "Store Checkout", "method": "Razorpay"}
+				"Payment Transaction",
+				{"reference_order": self.order.name, "source": "Store Checkout", "method": "Razorpay"},
 			)
 		)
 
 	def test_draft_unpaid_everywhere_stays_unpaid(self):
-		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})
+		frappe.db.set_value(
+			"Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None}
+		)
 		_conn, enqueue = self.link_draft(store_payment=None)
 		self.assertEqual(frappe.db.get_value("Field Order", self.order.name, "payment_status"), "Unpaid")
 		enqueue.assert_not_called()
 
 	def test_store_error_reading_the_payment_still_links_the_draft(self):
-		frappe.db.set_value("Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None})
+		frappe.db.set_value(
+			"Field Order", self.order.name, {"payment_status": "Unpaid", "amount_paid": 0, "paid_on": None}
+		)
 		frappe.db.set_value("Field Order", self.order.name, {"external_draft_id": "777"})
 		conn = MagicMock()
 		conn.get_store_payment.side_effect = ConnectorError("down", code="NETWORK_ERROR")
@@ -273,7 +323,9 @@ class TestStoreMarkPaid(IntegrationTestCase):
 	def test_backfill_fills_missing_draft_numbers(self):
 		from field_sales.patches.v1_0 import backfill_store_draft_names
 
-		frappe.db.set_value("Field Order", self.order.name, {"external_draft_id": "777", "store_draft_name": None})
+		frappe.db.set_value(
+			"Field Order", self.order.name, {"external_draft_id": "777", "store_draft_name": None}
+		)
 
 		def graphql(conn, query, variables=None, operation="Other", ref=None):
 			return {"nodes": [{"id": i, "name": "#D5"} for i in variables["ids"] if i.endswith("/777")]}

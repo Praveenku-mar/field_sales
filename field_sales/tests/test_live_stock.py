@@ -8,6 +8,7 @@ from frappe.tests import IntegrationTestCase
 
 from field_sales.connectors import ConnectorError
 from field_sales.sync.stock import fetch_live_stock, live_stock_enabled
+from field_sales.utils.store import set_store_value
 
 LOCATION = "100"
 GET_STOCK = "field_sales.connectors.shopify.ShopifyConnector.get_stock"
@@ -15,15 +16,14 @@ GET_STOCK = "field_sales.connectors.shopify.ShopifyConnector.get_stock"
 
 class TestLiveStock(IntegrationTestCase):
 	def setUp(self):
-		frappe.db.set_single_value(
-			"Store Connection",
+		set_store_value(
 			{
 				"platform": "Shopify",
 				"enabled": 1,
 				"store_url": "test-shop.myshopify.com",
 				"shopify_api_version": "2026-10",
 				"default_location_id": LOCATION,
-			},
+			}
 		)
 		self.tracked = self.make_product("1", inventory_id="5001", qty=50, track=1)
 		self.untracked = self.make_product("2", inventory_id="5002", qty=0, track=0)
@@ -67,7 +67,9 @@ class TestLiveStock(IntegrationTestCase):
 
 		get_stock.assert_called_once_with(["5001"], LOCATION)
 		self.assertEqual(live, {self.tracked.name: 3})
-		saved = frappe.db.get_value("Platform Product", self.tracked.name, ["available_qty", "stock_updated_at"], as_dict=True)
+		saved = frappe.db.get_value(
+			"Platform Product", self.tracked.name, ["available_qty", "stock_updated_at"], as_dict=True
+		)
 		self.assertEqual(saved.available_qty, 3)
 		self.assertIsNotNone(saved.stock_updated_at)
 
@@ -78,7 +80,7 @@ class TestLiveStock(IntegrationTestCase):
 
 	def test_live_stock_enabled_reads_the_checkbox_as_a_number(self):
 		self.assertTrue(live_stock_enabled())
-		frappe.db.set_single_value("Store Connection", "enabled", 0)
+		set_store_value("enabled", 0)
 		# get_singles_dict without cast returns "0", which is truthy.
 		self.assertFalse(live_stock_enabled())
 
@@ -110,7 +112,7 @@ class TestLiveStock(IntegrationTestCase):
 		self.assertIn("Could not check live stock", str(ctx.exception))
 
 	def test_submit_check_uses_stored_stock_when_connection_disabled(self):
-		frappe.db.set_single_value("Store Connection", "enabled", 0)
+		set_store_value("enabled", 0)
 		doc = self.order(qty=10)
 		with patch(GET_STOCK) as get_stock:
 			doc.before_submit()  # synced 50 is enough

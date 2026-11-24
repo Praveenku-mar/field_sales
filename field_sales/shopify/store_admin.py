@@ -166,7 +166,8 @@ def _check_admin_candidate(email: str, store: str) -> None:
 	sign-in (``embedded_user``), so the store's Shopify admins would act as that person (support
 	staff, a website user, a disabled account) without their password, and it would be moved into
 	this store for good. Never Administrator, Guest, vendor staff, another store's user, or a user
-	holding a site-wide role (``can_be_embedded_user``).
+	holding a site-wide role (``can_be_embedded_user``). A disabled user of this store only if it
+	was the store's admin.
 	"""
 	refused = _("{0} cannot be this store's admin. Use another email.").format(email)
 	if email in ("administrator", "guest"):
@@ -175,6 +176,11 @@ def _check_admin_candidate(email: str, store: str) -> None:
 		return
 	if user_store(email) != store or not can_be_embedded_user(email, store):
 		frappe.throw(refused)
+	if not frappe.db.get_value("User", email, "enabled") and STORE_ADMIN_ROLE not in frappe.get_roles(email):
+		# Only this store's own admin comes back enabled (disabled by shop/redact, then the shop
+		# reinstalled): any other disabled user of the store, e.g. a rep the store let go, stays
+		# disabled. A replaced admin loses Store Admin (_remove_store_admin_role).
+		frappe.throw(_("{0} is disabled. Use another email.").format(email))
 
 
 def _remove_store_admin_role(user: str, store: str) -> None:

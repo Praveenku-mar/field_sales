@@ -181,7 +181,6 @@
    "fieldtype": "Data",
    "label": "External Variant ID",
    "reqd": 1,
-   "unique": 1,
    "description": "Shopify ProductVariant GID / Woo variation ID / Odoo product.product ID"
   },
   {
@@ -231,7 +230,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-23 16:00:00.000000",
+ "modified": "2026-11-24 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Platform Product",

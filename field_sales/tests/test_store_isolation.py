@@ -1649,6 +1649,14 @@ class TestStoreAdminOnboarding(StoreIsolationCase):
 			self.assertNotIn("Store Admin", frappe.get_roles(email))
 		self.assertEqual(frappe.db.get_value("User", disabled, "enabled"), 0)
 
+	def test_a_disabled_user_of_the_store_comes_back_only_as_its_former_admin(self):
+		rep = make_user("isob.former-rep@example.com", ["Field Sales Rep"])
+		assign_user_to_store(rep, self.store)
+		frappe.db.set_value("User", rep, "enabled", 0)
+		self.as_shopify_admin()
+		self.assertRaises(frappe.ValidationError, self.set_admin, rep)
+		self.assertEqual(frappe.db.get_value("User", rep, "enabled"), 0)
+
 	def test_a_store_user_holding_a_site_wide_role_cannot_be_the_admin(self):
 		user = make_user("isob.sysman@example.com", ["Sales Manager", "System Manager"])
 		assign_user_to_store(user, self.store)
@@ -1701,12 +1709,10 @@ class TestSharedSiteVendorRule(StoreIsolationCase):
 	def test_an_unassigned_user_never_falls_back_to_the_only_store(self):
 		from field_sales.utils.store import get_store_name
 
-		user = make_user("isolation.unassigned@example.com", ["Sales Manager"])
-		self.as_user(user)
-		# Even with a single Store on the site (early rollout).
-		with patch("field_sales.utils.store.frappe.get_all", return_value=["ISA"]):
-			self.assertIsNone(get_store_name())
-			self.assertRaises(frappe.PermissionError, get_store_name, required=True)
+		self.as_user(make_user("isolation.unassigned@example.com", ["Sales Manager"]))
+		# Before: the only Store, or NoStoreContext with several (as here). Now: none at all.
+		self.assertIsNone(get_store_name())
+		self.assertRaises(frappe.PermissionError, get_store_name, required=True)
 
 	def test_vendor_alerts_go_to_vendor_staff_only(self):
 		from field_sales.sync.notify import clear_role_users_cache, users_with_roles

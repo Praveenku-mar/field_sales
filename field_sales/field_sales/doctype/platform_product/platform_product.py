@@ -25,3 +25,17 @@ class PlatformProduct(Document):
 		# Product Stock links to the product, which would otherwise block the delete.
 		for name in frappe.get_all("Product Stock", filters={"product": self.name}, pluck="name"):
 			frappe.delete_doc("Product Stock", name, ignore_permissions=True, force=True)
+
+
+def on_doctype_update():
+	"""
+	One product per store and platform variant. Not ``unique`` on ``external_variant_id`` alone:
+	two stores may sell the same variant id (per-shop ids on WooCommerce / Odoo, one shop
+	connected as two Stores), and that index refused the second store's insert whatever the
+	name. Lookups filter on all three fields (``sync/products.py``, ``sync/webhooks.py``).
+	"""
+	frappe.db.add_unique(
+		"Platform Product",
+		["store", "platform", "external_variant_id"],
+		constraint_name="unique_store_platform_variant",
+	)

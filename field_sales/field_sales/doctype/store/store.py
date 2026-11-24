@@ -21,6 +21,7 @@ OAUTH_MODE = "OAuth"
 # Changed only by vendor staff: who embedded requests run as, and the connection credentials.
 VENDOR_ONLY_FIELDS = (
 	"embedded_user",
+	"suspended",
 	"platform",
 	"shopify_auth_mode",
 	"store_url",
@@ -37,6 +38,7 @@ class Store(Document):
 
 	def validate(self):
 		self._guard_vendor_fields()
+		self._apply_vendor_pause()
 		self._validate_embedded_user()
 		self._validate_store_code()
 		self._validate_order_mode()
@@ -93,6 +95,24 @@ class Store(Document):
 					_("Only a System Manager can change {0}").format(_(self.meta.get_label(field))),
 					frappe.PermissionError,
 				)
+
+	def _apply_vendor_pause(self):
+		"""
+		``suspended`` (Paused by Support) keeps the store disabled until vendor staff clear it.
+
+		Automatic disables (uninstall, shop/redact, a failed token refresh, a reset) write
+		``enabled`` directly and never pass here, so a reinstall or token exchange may turn those
+		stores back on (``oauth.save_installation``). A user who unticks Enabled on this form with
+		``can_change_connection()`` (vendor staff; a single-store site's System Manager) pauses the
+		store too, so opening the app from Shopify does not undo their disable. While paused, every
+		save, the install's included, leaves it disabled.
+		"""
+		before = None if self.is_new() else self.get_doc_before_save()
+		turned_off = bool(before and before.enabled and not self.enabled)
+		if turned_off and not self.flags.from_store_install and can_change_connection():
+			self.suspended = 1
+		if self.suspended:
+			self.enabled = 0
 
 	def _validate_embedded_user(self):
 		"""

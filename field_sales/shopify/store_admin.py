@@ -74,10 +74,13 @@ def set_store_admin(email: str) -> dict:
 	# Saved with ignore_permissions, never by switching to Administrator: frappe.set_user would
 	# overwrite this signed-in request's session (sid, session data, form data).
 	previous_admin = store_admin_email(store)
+	first_admin = needs_admin_setup(store)
 	_ensure_admin_user(email, store)
 	set_store_value("embedded_user", email, store)
 	if previous_admin and previous_admin != email:
 		_remove_store_admin_role(previous_admin, store)
+	if first_admin:
+		_retire_automatic_user(store, email)
 	send_admin_invite(email, store)
 	return {"email": email, "invited": True}
 
@@ -196,6 +199,33 @@ def _remove_store_admin_role(user: str, store: str) -> None:
 		return
 	user_doc.set("roles", kept)
 	user_doc.save(ignore_permissions=True)
+
+
+def _retire_automatic_user(store: str, admin: str) -> None:
+	"""
+	The merchant's admin took over from the install's automatic ``shopify-admin-<code>`` user:
+	it loses Store Admin and Sales Manager, and its Sales Rep is made inactive, so it holds no
+	rights and uses no rep of the store's plan (``billing.usage`` leaves out only the current
+	``embedded_user``). The user stays enabled and in the store: if the admin is ever unusable
+	(e.g. shop/redact), ``embedded.get_embedded_user`` signs Shopify in as it again and restores it.
+	"""
+	from field_sales.shopify.embedded import EMBEDDED_ROLES, embedded_email
+
+	user = embedded_email(store)
+	if user == admin or not frappe.db.exists("User", user):
+		return
+	rep_name = frappe.db.get_value("Sales Rep", {"user": user}, "name")
+	if rep_name:
+		rep = frappe.get_doc("Sales Rep", rep_name)
+		rep.update({"active": 0, "sales_manager": 0, "sales_rep": 0})
+		# No role left on purpose; on_update drops Sales Manager / Field Sales Rep from the user.
+		rep.flags.ignore_role_validation = True
+		rep.save(ignore_permissions=True)
+	user_doc = frappe.get_doc("User", user)
+	kept = [row for row in user_doc.roles if row.role not in EMBEDDED_ROLES]
+	if len(kept) != len(user_doc.roles):
+		user_doc.set("roles", kept)
+		user_doc.save(ignore_permissions=True)
 
 
 def _ensure_admin_user(email: str, store: str) -> None:

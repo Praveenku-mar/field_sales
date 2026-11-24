@@ -78,6 +78,12 @@ def is_connected(shop: str) -> bool:
 	return bool(settings.get_password("access_token", raise_exception=False)) and not settings.token_expiry
 
 
+def is_paused(shop: str) -> bool:
+	"""Vendor staff paused the shop's Store (``suspended``): it stays disabled until they clear it."""
+	store = store_for_shop(shop)
+	return bool(store and frappe.db.get_value("Store", store, "suspended"))
+
+
 def ensure_offline_token(shop: str, id_token: str) -> None:
 	"""
 	Exchange ``id_token`` for an expiring offline token and save it as the shop's installation
@@ -95,6 +101,12 @@ def ensure_offline_token(shop: str, id_token: str) -> None:
 			safe_commit()
 			if is_connected(shop):
 				return
+			if is_paused(shop):
+				# No exchange: it would save tokens for a store vendor staff keep switched off,
+				# on every request the merchant makes.
+				raise ConnectError(
+					_("Field Sales support has paused this store. Contact support to turn it back on.")
+				)
 			try:
 				check_shop_allowed(shop)
 			except InstallError as e:
@@ -205,11 +217,15 @@ def get_embedded_user() -> str:
 					"roles": [{"role": role} for role in EMBEDDED_ROLES],
 				}
 			).insert(ignore_permissions=True)
-		elif not frappe.db.get_value("User", email, "enabled"):
-			# Disabled by shop/redact after an uninstall: the reinstalled merchant's way back in.
-			frappe.db.set_value("User", email, "enabled", 1)
+		else:
+			# Disabled by shop/redact, or retired when a merchant admin took over
+			# (store_admin._retire_automatic_user): the reinstalled merchant's way back in.
+			_restore_automatic_user(email)
 		assign_user_to_store(email, store)
-		if not frappe.db.exists("Sales Rep", {"user": email}):
+		rep_name = frappe.db.get_value("Sales Rep", {"user": email}, "name")
+		if rep_name:
+			_reactivate_automatic_rep(rep_name)
+		else:
 			rep = frappe.get_doc(
 				{
 					"doctype": "Sales Rep",
@@ -227,6 +243,29 @@ def get_embedded_user() -> str:
 	finally:
 		frappe.set_user(previous_user)
 	return email
+
+
+def _restore_automatic_user(email: str) -> None:
+	"""The store's automatic Shopify user, enabled and with its ``EMBEDDED_ROLES`` again."""
+	user = frappe.get_doc("User", email)
+	have = {row.role for row in user.roles}
+	missing = [role for role in EMBEDDED_ROLES if role not in have]
+	if user.enabled and not missing:
+		return
+	user.enabled = 1
+	for role in missing:
+		user.append("roles", {"role": role})
+	user.save(ignore_permissions=True)
+
+
+def _reactivate_automatic_rep(rep_name: str) -> None:
+	"""The automatic user's Sales Rep, active and a manager again (not counted by ``billing.usage``)."""
+	rep = frappe.get_doc("Sales Rep", rep_name)
+	if rep.active and rep.sales_manager:
+		return
+	rep.update({"active": 1, "sales_manager": 1})
+	rep.flags.ignore_plan_limit = True
+	rep.save(ignore_permissions=True)
 
 
 # ----------------------------------------------------------------------

@@ -90,6 +90,7 @@ It changes nothing. Any `FAIL` line means the site must not take installs (`util
   - Scheduled Job Log failures;
   - `field-sales-check-shared` WARN lines for stores without currency, time zone or location.
 - **Support:** vendor staff open the app and pick a store (*Switch store*). Each switch is recorded as a comment on the Store.
+- **Pausing a store:** tick *Paused by Support* on the Store (unticking *Enabled* in the form does the same). A paused store stays disabled even when the merchant opens or reinstalls the app; untick it to let the store reconnect.
 - **Turning one store off:** untick **Enabled** on the Store. Its product syncs, order retries, draft linking and store webhooks stop. Its users can still sign in, and the daily summary, statements and anonymising still run for it. To also keep its users out, set **Uninstalled On**.
 - **Deploys:**
   - `bench --site <site> backup --with-files` before every `migrate`;

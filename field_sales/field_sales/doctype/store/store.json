@@ -9,7 +9,7 @@
  "in_create": 0,
  "issingle": 0,
  "links": [],
- "modified": "2026-11-23 18:00:00.000000",
+ "modified": "2026-11-24 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "Field Sales",
  "name": "Store",
@@ -109,6 +109,13 @@
    "fieldtype": "Check",
    "label": "Enabled",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "suspended",
+   "fieldtype": "Check",
+   "label": "Paused by Support",
+   "default": "0",
+   "description": "Set by vendor staff (also when they untick Enabled): the store stays disabled, and opening the app from Shopify does not turn it back on. Untick it to let the store reconnect."
   },
   {
    "fieldname": "store_url",
@@ -423,6 +430,7 @@
   "platform",
   "col_break_connection",
   "enabled",
+  "suspended",
   "store_url",
   "shopify_section",
   "shopify_auth_mode",

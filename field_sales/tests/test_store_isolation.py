@@ -1649,6 +1649,80 @@ class TestStoreAdminOnboarding(StoreIsolationCase):
 			self.assertNotIn("Store Admin", frappe.get_roles(email))
 		self.assertEqual(frappe.db.get_value("User", disabled, "enabled"), 0)
 
+	def test_the_first_admin_retires_the_automatic_user(self):
+		from field_sales.shopify import billing
+		from field_sales.shopify.embedded import embedded_email, get_embedded_user
+		from field_sales.utils.limits import SALES_REPS
+		from field_sales.utils.store import use_store
+
+		automatic = self.as_shopify_admin()
+		self.assertEqual(automatic, embedded_email(self.store))
+		self.set_admin("owner.retire@example.com")
+
+		self.as_user("Administrator")
+		roles = set(frappe.get_roles(automatic))
+		self.assertFalse({"Store Admin", "Sales Manager"} & roles, roles)
+		self.assertEqual(frappe.db.get_value("Sales Rep", {"user": automatic}, "active"), 0)
+		with use_store(self.store):
+			# Neither the admin (the embedded user) nor the retired automatic rep is counted.
+			self.assertEqual(billing.usage(SALES_REPS), 0)
+
+		# The admin unusable (as after shop/redact): Shopify signs in as the automatic user again.
+		frappe.db.set_value("User", "owner.retire@example.com", "enabled", 0)
+		reset_request_caches()
+		with use_store(self.store):
+			self.assertEqual(get_embedded_user(), automatic)
+		self.assertTrue({"Store Admin", "Sales Manager"} <= set(frappe.get_roles(automatic)))
+		self.assertEqual(frappe.db.get_value("Sales Rep", {"user": automatic}, "active"), 1)
+
+	def test_a_paused_store_stays_off_when_the_app_is_opened(self):
+		from field_sales.shopify import embedded, oauth
+
+		self.as_user(self.vendor)
+		doc = frappe.get_doc("Store", self.store)
+		doc.enabled = 0
+		doc.save()
+		self.assertEqual(frappe.db.get_value("Store", self.store, "suspended"), 1)
+
+		self.as_user("Administrator")
+		shop = frappe.db.get_value("Store", self.store, "store_url")
+		with patch.object(embedded, "_exchange") as exchange:
+			with self.assertRaises(embedded.ConnectError):
+				embedded.ensure_offline_token(shop, "id-token")
+			exchange.assert_not_called()
+		# A reinstall (OAuth callback) keeps it off too.
+		with patch.object(oauth, "save_oauth_tokens"), patch.object(oauth, "enqueue_in_store"):
+			oauth.save_installation(shop, {"scope": ""})
+		self.assertEqual(frappe.db.get_value("Store", self.store, "enabled"), 0)
+
+		# Vendor staff clear the pause: the next install turns it back on.
+		self.as_user(self.vendor)
+		doc = frappe.get_doc("Store", self.store)
+		doc.suspended = 0
+		doc.save()
+		self.as_user("Administrator")
+		with patch.object(oauth, "save_oauth_tokens"), patch.object(oauth, "enqueue_in_store"):
+			oauth.save_installation(shop, {"scope": ""})
+		self.assertEqual(frappe.db.get_value("Store", self.store, "enabled"), 1)
+
+	def test_an_automatic_disable_still_reconnects(self):
+		from field_sales.shopify import oauth
+		from field_sales.utils.store import set_store_value
+
+		# As a failed token refresh or an uninstall does: written directly, no pause.
+		set_store_value("enabled", 0, store=self.store)
+		shop = frappe.db.get_value("Store", self.store, "store_url")
+		with patch.object(oauth, "save_oauth_tokens"), patch.object(oauth, "enqueue_in_store"):
+			oauth.save_installation(shop, {"scope": ""})
+		self.assertEqual(frappe.db.get_value("Store", self.store, ["enabled", "suspended"]), (1, 0))
+
+	def test_a_merchant_cannot_lift_a_pause(self):
+		frappe.db.set_value("Store", self.store, {"enabled": 0, "suspended": 1})
+		self.as_shopify_admin()
+		doc = frappe.get_doc("Store", self.store)
+		doc.suspended = 0
+		self.assertRaises(frappe.PermissionError, doc.save, ignore_permissions=True)
+
 	def test_a_disabled_user_of_the_store_comes_back_only_as_its_former_admin(self):
 		rep = make_user("isob.former-rep@example.com", ["Field Sales Rep"])
 		assign_user_to_store(rep, self.store)

@@ -7,7 +7,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.model.naming import make_autoname
-from frappe.utils import flt, now_datetime
+from frappe.utils import escape_html, flt, now_datetime
 
 from field_sales.commission.engine import enqueue_create_entries
 from field_sales.connectors import ConnectorError, get_connector
@@ -388,7 +388,7 @@ class FieldOrder(Document):
 					_(
 						"Row {0}: Product <b>{1}</b> is already present in Row {2}. "
 						"Merge the quantities instead of adding a duplicate line."
-					).format(row.idx, row.product_title or row.product, seen[row.product])
+					).format(row.idx, escape_html(row.product_title or row.product), seen[row.product])
 				)
 			seen[row.product] = row.idx
 
@@ -453,7 +453,7 @@ class FieldOrder(Document):
 				frappe.throw(
 					_("Row {0}: <b>{1}</b> exceeds available stock — only {2} unit(s) available.").format(
 						row.idx,
-						row.product_title or row.product,
+						escape_html(row.product_title or row.product),
 						flt(row.available_qty),
 					)
 				)

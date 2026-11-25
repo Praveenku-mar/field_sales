@@ -18,7 +18,7 @@ gateway) is left alone, so nothing is counted twice.
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC, timezone
 
 import frappe
 from frappe import _
@@ -162,5 +162,5 @@ def _when(value):
 	except Exception:
 		return now_datetime()
 	if moment.tzinfo is None:
-		moment = moment.replace(tzinfo=timezone.utc)
+		moment = moment.replace(tzinfo=UTC)
 	return convert_utc_to_system_timezone(moment).replace(tzinfo=None)

@@ -127,7 +127,7 @@ def _changes(doc) -> list[dict]:
 			if not isinstance(change, list | tuple) or len(change) != 3:
 				continue
 			field, old, new = change
-			if field in HIDDEN_FIELDS or not meta.get_field(field) and field != "name":
+			if field in HIDDEN_FIELDS or (not meta.get_field(field) and field != "name"):
 				continue
 			changes.append({"label": _(meta.get_label(field)), "from": _value(old), "to": _value(new)})
 		if changes:

@@ -422,12 +422,14 @@ def payment_transaction_has_permission(doc, ptype: str | None = None, user: str 
 		return False
 	if is_admin(user):
 		return True
-	order = doc.reference_order
-	if not order and doc.store_order_id:
-		order = frappe.db.get_value("Field Order", {"external_order_id": doc.store_order_id}, "name")
-	if not order:
+	if doc.reference_order:
+		order_filters = {"name": doc.reference_order}
+	elif doc.store_order_id:
+		# Store order ids are unique per store, not across stores: match only this row's store.
+		order_filters = {"external_order_id": doc.store_order_id, "store": doc.store}
+	else:
 		return False
-	return _rep_in_allowed(frappe.db.get_value("Field Order", order, "sales_rep"), user)
+	return _rep_in_allowed(frappe.db.get_value("Field Order", order_filters, "sales_rep"), user)
 
 
 def store_query(user: str | None = None) -> str:

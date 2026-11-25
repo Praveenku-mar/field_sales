@@ -5,7 +5,12 @@ from frappe import _
 from frappe.utils import escape_html, flt, now_datetime
 
 from field_sales.payments import transactions
-from field_sales.payments.razorpay import cancel_payment_link, fetch_payment_link, get_settings, notify_payment_received
+from field_sales.payments.razorpay import (
+	cancel_payment_link,
+	fetch_payment_link,
+	get_settings,
+	notify_payment_received,
+)
 from field_sales.sync.orders import enqueue_mark_store_paid
 from field_sales.utils.money import record_currency
 

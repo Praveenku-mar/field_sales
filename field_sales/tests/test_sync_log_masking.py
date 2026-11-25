@@ -134,3 +134,14 @@ class TestSyncLogRetention(IntegrationTestCase):
 		with patch.object(frappe.db, "commit"):
 			clear_old_logs()
 		self.assertTrue(frappe.db.exists("Sync Log", kept))
+
+	def test_old_logs_are_purged_in_batches(self):
+		from field_sales.field_sales.doctype.sync_log import sync_log
+
+		old = [self.log("Success", 40) for _ in range(3)]
+		recent = self.log("Success", 5)
+		with patch.object(sync_log, "PURGE_BATCH_SIZE", 2), patch.object(frappe.db, "commit") as commit:
+			sync_log.clear_old_logs()
+		self.assertFalse(any(frappe.db.exists("Sync Log", name) for name in old))
+		self.assertTrue(frappe.db.exists("Sync Log", recent))
+		self.assertGreaterEqual(commit.call_count, 2)  # one per batch

@@ -260,7 +260,7 @@ doc_events = {
 # ---------------
 
 scheduler_events = {
-	# Purge Success Sync Logs older than 30 days; Failed logs are kept forever.
+	# Purge Success Sync Logs after 30 days, Failed / Retrying after failed_log_retention_days.
 	"daily": [
 		"field_sales.field_sales.doctype.sync_log.sync_log.clear_old_logs",
 		# Keep the site's currency and time zone the same as the store's.

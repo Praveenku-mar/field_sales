@@ -50,12 +50,14 @@ from field_sales.utils.limits import SALES_REPS, check_limit
 from field_sales.utils.store import (
 	get_store_value,
 	in_store_of,
+	is_multi_store,
 	record_stores,
 	set_store_value,
 	store_mail_args,
 	store_today,
 	use_store,
 	user_is_reachable,
+	user_store,
 )
 from field_sales.utils.urls import public_url
 
@@ -248,8 +250,8 @@ def get_user_for_sales_rep(email: str) -> dict:
 	frappe.has_permission("Sales Rep", "create", throw=True)
 	email = (email or "").strip().lower()
 	user = frappe.db.get_value("User", email, ["name", "full_name"], as_dict=True)
-	if user and not user_is_reachable(email):
-		user = None  # a user of another store is not shown, nor told apart from "no such user"
+	if user and not _visible_to_rep_dialog(email):
+		user = None  # not shown, nor told apart from "no such user"
 	user_roles = (
 		[r for r in frappe.get_roles(email) if r in ("Sales Manager", "Field Sales Rep", "Sales Rep")]
 		if user
@@ -261,6 +263,25 @@ def get_user_for_sales_rep(email: str) -> dict:
 		"sales_rep": frappe.db.exists("Sales Rep", email) if user else None,
 		"roles": user_roles,
 	}
+
+
+def _visible_to_rep_dialog(user: str) -> bool:
+	"""
+	Whether the New Sales Rep dialog may say ``user`` exists: never a user of another store, and
+	on the shared site never a user of no store that this manager could not adopt
+	(``check_adoptable_user``: vendor staff, support, other merchants' unclaimed accounts), so a
+	store's manager cannot learn who else has an account there.
+	"""
+	if not user_is_reachable(user):
+		return False
+	if not is_multi_store() or user_store(user):
+		return True
+	try:
+		check_adoptable_user(user)
+	except frappe.PermissionError:
+		frappe.clear_last_message()
+		return False
+	return True
 
 
 @frappe.whitelist(methods=["POST"])

@@ -263,6 +263,28 @@ class TestEndpointIsolation(StoreIsolationCase):
 		with self.assertRaises(frappe.PermissionError):
 			create_sales_rep(user=self.b.spare, full_name="Hijack")
 
+	def test_rep_lookup_hides_accounts_of_no_store_the_admin_cannot_adopt(self):
+		from field_sales.api import get_user_for_sales_rep
+
+		unclaimed = make_user("isolation.unclaimed@example.com", ["Field Sales Rep"])
+		self.as_user(self.a.admin)
+		with patch.dict(frappe.conf, MULTI):
+			# Vendor staff hold site-wide roles: a store must not learn they have an account,
+			# nor see the refusal that hid it.
+			frappe.clear_messages()
+			self.assertFalse(get_user_for_sales_rep(self.vendor)["exists"])
+			self.assertFalse(frappe.get_message_log())
+			# A plain account of no store may still be adopted, so it is shown.
+			self.assertTrue(get_user_for_sales_rep(unclaimed)["exists"])
+
+	def test_mobile_rep_filter_outside_the_team_matches_nothing(self):
+		from field_sales.api import mobile
+
+		self.as_user(self.a.rep_user)
+		self.assertTrue(mobile.get_visits_list(sales_rep=self.a.rep)["items"])
+		# Not narrowed to the manager's visits by dropping the filter: none at all.
+		self.assertEqual(mobile.get_visits_list(sales_rep=self.a.manager_rep)["items"], [])
+
 	def test_commission_plans_with_the_same_name_live_in_both_stores(self):
 		self.assertEqual(frappe.db.get_value("Commission Plan", self.a.plan, "plan_name"), "Standard")
 		self.assertEqual(frappe.db.get_value("Commission Plan", self.b.plan, "plan_name"), "Standard")

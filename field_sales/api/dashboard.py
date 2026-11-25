@@ -13,8 +13,8 @@ from frappe.utils import add_days, date_diff, flt, get_first_day, get_first_day_
 
 from field_sales.frontend_api import get_attention_presets
 from field_sales.permissions import MANAGER_ROLES
-from field_sales.www.fieldsales import has_app_access
 from field_sales.utils.store import store_today
+from field_sales.www.fieldsales import has_app_access
 
 PERIODS = ("today", "week", "month", "last_month", "custom")
 TOP_REPS = 10

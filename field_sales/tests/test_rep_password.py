@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 import frappe
 from frappe.core.doctype.user.user import User, update_password
 from frappe.tests import IntegrationTestCase
-from frappe.utils.password import check_password, update_password as set_user_password
+from frappe.utils.password import check_password
+from frappe.utils.password import update_password as set_user_password
 
 from field_sales.api import send_sales_rep_password_reset, set_sales_rep_password
 

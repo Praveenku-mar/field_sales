@@ -7,6 +7,7 @@ from functools import partial
 import frappe
 from frappe import _
 from frappe.model.document import Document
+
 from field_sales.utils.db import safe_commit
 
 SERVICE_ACCOUNT_KEYS = ("type", "project_id", "private_key", "client_email")

@@ -38,6 +38,8 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
 MAX_SEARCH_SUGGESTIONS = 20
 MIN_SEARCH_LENGTH = 2
+# Column and alias names the keyset SQL may name (they are spliced in, so never anything else).
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -134,16 +136,36 @@ def _build_keyset_condition(
 
 def _sort_expr(col: str, nullable: frozenset[str], table: str = "") -> str:
 	"""A keyset sort column as SQL; a nullable one sorts and compares as ``''``."""
-	column = f"{table}`{col}`"
+	column = f"{table}`{_sql_identifier(col)}`"
 	return f"IFNULL({column}, '')" if col in nullable else column
 
 
+def _sql_identifier(name: str) -> str:
+	"""A column or alias name for the keyset SQL; anything but a plain identifier is refused."""
+	name = name.strip()
+	if not _IDENTIFIER_RE.fullmatch(name):
+		frappe.throw(_("Invalid field name: {0}").format(name))
+	return name
+
+
 def _format_field(doctype: str, field: str) -> str:
-	field = field.strip()
-	if " as " in field.lower():
-		parts = field.split(" as ", 1)
-		return f"`tab{doctype}`.`{parts[0].strip()}` as `{parts[1].strip()}`"
-	return f"`tab{doctype}`.`{field}`"
+	"""``field`` or ``field as alias`` as a backticked column of ``doctype``."""
+	column, _sep, alias = field.strip().partition(" as ")
+	sql = f"`tab{doctype}`.`{_sql_identifier(column)}`"
+	return f"{sql} as `{_sql_identifier(alias)}`" if alias else sql
+
+
+def _filter_by_rep(doctype: str, sales_rep: str, user: str, where: list[str], params: dict) -> None:
+	"""
+	Narrow a list to one rep's records. A rep outside the user's team matches nothing: dropping
+	the filter instead would show the whole team under that rep's name.
+	"""
+	rep = sales_rep.strip()
+	if not (is_admin(user) or rep in get_allowed_reps(user)):
+		where.append("1=0")
+		return
+	where.append(f"`tab{doctype}`.`sales_rep` = %(f_rep)s")
+	params["f_rep"] = rep
 
 
 def _execute_keyset_query(
@@ -296,10 +318,7 @@ def get_orders_list(
 		params["f_payment_status"] = payment_status.strip()
 
 	if sales_rep and not is_retailer_user(user):
-		allowed = get_allowed_reps(user)
-		if is_admin(user) or sales_rep.strip() in allowed:
-			where.append("`tabField Order`.`sales_rep` = %(f_rep)s")
-			params["f_rep"] = sales_rep.strip()
+		_filter_by_rep("Field Order", sales_rep, user, where, params)
 
 	if date_from:
 		where.append("`tabField Order`.`order_date` >= %(f_date_from)s")
@@ -395,10 +414,7 @@ def get_visits_list(
 		params["f_retailer"] = retailer.strip()
 
 	if sales_rep:
-		allowed = get_allowed_reps(user)
-		if is_admin(user) or sales_rep.strip() in allowed:
-			where.append("`tabVisit`.`sales_rep` = %(f_rep)s")
-			params["f_rep"] = sales_rep.strip()
+		_filter_by_rep("Visit", sales_rep, user, where, params)
 
 	if date_from:
 		where.append("`tabVisit`.`visit_date` >= %(f_date_from)s")
@@ -518,10 +534,9 @@ def get_customers_list(
 			params["f_city"] = city.strip()
 
 		if sales_rep:
-			allowed = get_allowed_reps(user)
-			if is_admin(user) or sales_rep.strip() in allowed:
-				where.append("`tabRetailer`.`sales_rep` = %(f_rep)s")
-				params["f_rep"] = sales_rep.strip()
+			# Staff read every retailer of the store (retailer_query), so any rep's shops may be listed.
+			where.append("`tabRetailer`.`sales_rep` = %(f_rep)s")
+			params["f_rep"] = sales_rep.strip()
 
 		if preset:
 			where.extend(_preset_conditions("Retailer", preset))
@@ -771,10 +786,7 @@ def get_commission_statements_list(
 		params["f_status"] = status.strip()
 
 	if sales_rep:
-		allowed = get_allowed_reps(user)
-		if is_admin(user) or sales_rep.strip() in allowed:
-			where.append("`tabCommission Statement`.`sales_rep` = %(f_rep)s")
-			params["f_rep"] = sales_rep.strip()
+		_filter_by_rep("Commission Statement", sales_rep, user, where, params)
 
 	decoded_cursor = decode_cursor(cursor, ("period_start", "name"))
 	return _execute_keyset_query(

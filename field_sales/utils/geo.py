@@ -23,7 +23,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 	Return the great-circle distance in **metres** between two GPS points.
 
 	    a = sin²(Δφ/2) + cos(φ1)·cos(φ2)·sin²(Δλ/2)
-	    d = 2R · atan2(√a, √(1−a))
+	    d = 2R · atan2(√a, √(1-a))
 
 	where φ = latitude, λ = longitude, R = mean Earth radius.
 	"""

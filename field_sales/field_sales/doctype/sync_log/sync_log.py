@@ -6,8 +6,12 @@ import re
 import frappe
 from frappe.model.document import Document
 from frappe.utils import add_days, cint, nowdate
+
 from field_sales.utils.db import safe_commit
 from field_sales.utils.store import NoStoreContext, get_store_name
+
+# Sync Logs deleted per statement (and commit) by clear_old_logs.
+PURGE_BATCH_SIZE = 5000
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -239,6 +243,9 @@ def clear_old_logs() -> None:
 	"""
 	Scheduled daily job — purge Success Sync Logs older than 30 days, and Failed / Retrying
 	ones older than Store Connection ``failed_log_retention_days`` (default 180; 0 keeps them).
+	The retention is vendor-wide (one value for every store on a shared site). Rows go in
+	batches of ``PURGE_BATCH_SIZE`` with a commit between, so a large backlog never holds
+	one long lock on the table.
 
 	Called via::
 
@@ -249,20 +256,12 @@ def clear_old_logs() -> None:
 	try:
 		cutoff: str = add_days(nowdate(), -30)
 
-		frappe.db.delete(
-			"Sync Log",
-			{
-				"status": "Success",
-				"creation": ["<", cutoff],
-			},
-		)
+		_purge_logs({"status": "Success", "creation": ["<", cutoff]})
 		failed_days = cint(frappe.db.get_single_value("Store Connection", "failed_log_retention_days"))
 		if failed_days > 0:
-			frappe.db.delete(
-				"Sync Log",
-				{"status": ["in", ["Failed", "Retrying"]], "creation": ["<", add_days(nowdate(), -failed_days)]},
+			_purge_logs(
+				{"status": ["in", ["Failed", "Retrying"]], "creation": ["<", add_days(nowdate(), -failed_days)]}
 			)
-		safe_commit()
 	except Exception:
 		# Keep a record of the failure (the job rolls back), then fail the job as before.
 		frappe.db.rollback()
@@ -270,3 +269,11 @@ def clear_old_logs() -> None:
 		safe_commit()
 		raise
 
+
+def _purge_logs(filters: dict) -> None:
+	"""Delete the Sync Logs matching ``filters``, ``PURGE_BATCH_SIZE`` at a time, committing each batch."""
+	while names := frappe.get_all("Sync Log", filters=filters, pluck="name", limit=PURGE_BATCH_SIZE):
+		frappe.db.delete("Sync Log", {"name": ["in", names]})
+		safe_commit()
+		if len(names) < PURGE_BATCH_SIZE:
+			break

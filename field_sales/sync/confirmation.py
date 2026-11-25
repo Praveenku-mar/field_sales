@@ -112,7 +112,10 @@ def send_order_confirmation(field_order: str, resend: bool = False) -> str:
 
 @frappe.whitelist(methods=["POST"])
 def resend_order_confirmation(name: str) -> dict:
-	# Sends an email to the retailer: for the order's rep and their managers, not read-only users.
+	"""
+	Send the order confirmation email (with invoice) to the retailer again, in a background job.
+	Only for users who may edit the order (its rep and their managers), once the store has the order.
+	"""
 	frappe.has_permission("Field Order", "write", name, throw=True)
 	doc = frappe.db.get_value("Field Order", name, ["docstatus", "external_order_id", "store"], as_dict=True)
 	if doc.docstatus != 1 or not doc.external_order_id:

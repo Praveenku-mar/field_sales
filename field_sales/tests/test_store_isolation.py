@@ -19,6 +19,7 @@ from field_sales.utils.store import (
 	assign_user_to_store,
 	clear_store_cache,
 	is_vendor,
+	set_current_store,
 	store_scope,
 	user_store,
 )
@@ -69,6 +70,9 @@ class StoreIsolationCase(IntegrationTestCase):
 
 	def setUp(self):
 		frappe.set_user("Administrator")
+		# A request sets its store for good (e.g. api/webhooks.receive); tests share one process,
+		# so an earlier test's store must not become this one's.
+		set_current_store(None)
 		clear_store_cache()
 		reset_request_caches()
 

@@ -49,6 +49,30 @@ class TestPlanLimitBypass(DataProtectionCase):
 		doc.flags.update(flags)
 		return doc.insert(ignore_permissions=True)
 
+	def test_a_limit_check_locks_the_store_row_before_counting(self):
+		"""Two submits at once wait on the Store row, so both cannot take the last free slot."""
+		self.limit(orders_per_month=billing.usage(ORDERS_PER_MONTH) + 1)
+		calls = []
+		real_get_value = frappe.db.get_value
+
+		def spy(doctype, *args, **kwargs):
+			if doctype == "Store" and kwargs.get("for_update"):
+				calls.append("lock")
+			return real_get_value(doctype, *args, **kwargs)
+
+		with (
+			patch.object(billing.frappe.db, "get_value", side_effect=spy),
+			patch.object(billing, "usage", side_effect=lambda kind: calls.append("count") or 0),
+		):
+			billing.check_limit(ORDERS_PER_MONTH)
+		self.assertEqual(calls, ["lock", "count"])
+
+	def test_no_lock_without_a_limit(self):
+		frappe.db.set_single_value("Store Connection", "plan_limits", None)
+		with patch.object(billing.frappe.db, "get_value", wraps=frappe.db.get_value) as get_value:
+			billing.check_limit(ORDERS_PER_MONTH)
+		self.assertFalse([c for c in get_value.call_args_list if c.kwargs.get("for_update")])
+
 	# -- Sales reps ------------------------------------------------------------------
 
 	def test_a_rep_inserted_directly_is_counted(self):

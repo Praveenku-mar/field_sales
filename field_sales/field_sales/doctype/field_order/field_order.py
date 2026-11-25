@@ -98,9 +98,11 @@ class FieldOrder(Document):
 		# Server time, never the client's: the plan's monthly order limit counts by it, and order_date
 		# is an ordinary editable date (an order dated last month would escape this month's count).
 		self.submitted_on = now_datetime()
-		check_limit(ORDERS_PER_MONTH)
 		self._apply_live_stock()
 		self._block_on_stock_warning()
+		# Last: a plan limit locks the store's row until commit (billing.check_limit), so the
+		# live stock call above is not made while other submits wait on it.
+		check_limit(ORDERS_PER_MONTH)
 
 	@in_own_store
 	def on_update(self):

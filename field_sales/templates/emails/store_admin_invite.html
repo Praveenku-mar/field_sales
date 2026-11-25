@@ -1,16 +1,16 @@
 <p>{{ _("Hello,") }}</p>
 
-<p>{{ _("You are the admin of {0} in Agamsale. Your account manages the store's reps, orders, visits and settings.").format(store_name) }}</p>
+<p>{{ _("You are the admin of {0} in Agamsale. Your account manages the store's reps, orders, visits and settings.").format(store_name|e) }}</p>
 
-<p>{{ _("Your login ID is:") }} <b>{{ user }}</b></p>
+<p>{{ _("Your login ID is:") }} <b>{{ user|e }}</b></p>
 
-<p>{{ _("Set your password below, then sign in at {0}. The same account also opens Agamsale inside your Shopify admin and in the mobile app.").format(login_url) }}</p>
+<p>{{ _("Set your password below, then sign in at {0}. The same account also opens Agamsale inside your Shopify admin and in the mobile app.").format(login_url|e) }}</p>
 
 <div style="margin: 20px 0; padding: 16px; border: 1px solid #d1d5db; border-radius: 8px; text-align: center;">
-	<a href="{{ link }}" style="display: inline-block; padding: 10px 24px; background: #171717; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold;">{{ _("Set your password") }}</a>
+	<a href="{{ link|e }}" style="display: inline-block; padding: 10px 24px; background: #171717; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold;">{{ _("Set your password") }}</a>
 	<p style="margin: 12px 0 0; color: #6b7280; font-size: 13px;">
 		{{ _("Or copy and paste this link:") }}<br />
-		<a href="{{ link }}" style="color: #2563eb; word-break: break-all;">{{ link }}</a>
+		<a href="{{ link|e }}" style="color: #2563eb; word-break: break-all;">{{ link|e }}</a>
 	</p>
 </div>
 

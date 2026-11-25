@@ -41,6 +41,8 @@ from field_sales.utils.store import (
 from field_sales.www.fieldsales import APP_ROLES, has_app_access
 
 SEARCH_LIMIT = 6
+# Stores the vendor store picker lists at once; it searches for the rest.
+VENDOR_STORES_LIMIT = 50
 MISSED_VISIT_DAYS = 7
 NOT_VISITED_DAYS = 30
 
@@ -712,13 +714,23 @@ def payment_history(doc) -> list[dict]:
 
 
 @frappe.whitelist(methods=["GET"])
-def get_vendor_stores() -> list[dict]:
-	"""Vendor staff on the shared site: every Store, for the app's store picker."""
+def get_vendor_stores(txt: str | None = None, limit: int = VENDOR_STORES_LIMIT) -> list[dict]:
+	"""
+	Vendor staff on the shared site: Stores for the app's store picker, matched on code, shop name
+	or shop domain by ``txt``, at most ``limit`` (capped at ``VENDOR_STORES_LIMIT``), so the
+	picker stays light however many merchants the site serves.
+	"""
 	_require_vendor()
+	or_filters = None
+	if txt := (txt or "").strip():
+		like = f"%{escape_like(txt)}%"
+		or_filters = {"name": ("like", like), "shop_name": ("like", like), "store_url": ("like", like)}
 	return frappe.get_all(
 		"Store",
 		fields=["name", "shop_name", "store_url", "enabled", "uninstalled_on"],
+		or_filters=or_filters,
 		order_by="shop_name asc, name asc",
+		limit=min(max(cint(limit), 1), VENDOR_STORES_LIMIT),
 	)
 
 

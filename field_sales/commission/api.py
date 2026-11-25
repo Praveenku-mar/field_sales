@@ -31,6 +31,7 @@ from field_sales.utils.money import store_currency
 from field_sales.utils.store import in_store_of, store_today
 
 PERIODS = ("this_month", "last_month", "this_year", "all")
+DEFAULT_PAGE_LENGTH = 20
 MAX_PAGE_LENGTH = 2500
 
 
@@ -111,7 +112,9 @@ def get_team_commission(period: str = "this_month") -> list[dict]:
 
 
 @frappe.whitelist()
-def get_commission_entries(filters: dict | str | None = None, page: int = 1, page_length: int = 20) -> dict:
+def get_commission_entries(
+	filters: dict | str | None = None, page: int = 1, page_length: int = DEFAULT_PAGE_LENGTH
+) -> dict:
 	"""
 	One page of Commission Entries the user may see, newest first.
 
@@ -126,8 +129,8 @@ def get_commission_entries(filters: dict | str | None = None, page: int = 1, pag
 	_check_access()
 	if isinstance(filters, str):
 		filters = json.loads(filters or "{}")
-	page = max(1, int(page))
-	page_length = min(MAX_PAGE_LENGTH, max(1, int(page_length)))
+	page = max(1, cint(page))
+	page_length = min(MAX_PAGE_LENGTH, max(1, cint(page_length) or DEFAULT_PAGE_LENGTH))
 
 	total = frappe.get_list("Commission Entry", filters=filters or {}, fields=[{"COUNT": "*", "as": "total"}])
 	entries = frappe.get_list(
@@ -168,7 +171,7 @@ def get_commission_entries(filters: dict | str | None = None, page: int = 1, pag
 
 @frappe.whitelist()
 def get_commission_statements(
-	filters: dict | str | None = None, page: int = 1, page_length: int = 20
+	filters: dict | str | None = None, page: int = 1, page_length: int = DEFAULT_PAGE_LENGTH
 ) -> dict:
 	"""
 	One page of Commission Statements the user may see, newest period first.
@@ -184,8 +187,8 @@ def get_commission_statements(
 	_check_access()
 	if isinstance(filters, str):
 		filters = json.loads(filters or "{}")
-	page = max(1, int(page))
-	page_length = min(MAX_PAGE_LENGTH, max(1, int(page_length)))
+	page = max(1, cint(page))
+	page_length = min(MAX_PAGE_LENGTH, max(1, cint(page_length) or DEFAULT_PAGE_LENGTH))
 
 	total = frappe.get_list(
 		"Commission Statement", filters=filters or {}, fields=[{"COUNT": "*", "as": "total"}]

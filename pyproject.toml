@@ -9,6 +9,16 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     # "frappe~=16.0.0" # Installed and managed by bench.
+    # Imported directly by this app. Frappe also installs them today; declared here so the app
+    # does not break if Frappe drops one. Ranges are kept wide to stay inside Frappe's own pins.
+    "google-auth>=2.30,<3",
+    "openpyxl>=3.1,<4",
+    "phonenumbers>=8.13,<10",
+    "psutil>=5.9,<8",
+    "pycountry>=24.6",
+    "PyJWT>=2.8,<3",
+    "requests>=2.32,<3",
+    "XlsxWriter>=3.2,<4",
 ]
 
 [build-system]

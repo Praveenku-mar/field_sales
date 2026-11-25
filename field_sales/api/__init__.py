@@ -162,6 +162,12 @@ def get_sell_locations() -> list[dict]:
 
 @frappe.whitelist(methods=["POST"])
 def enqueue_product_sync() -> dict:
+	"""
+	Queue a product and stock sync of the current store (managers and admins). Needs a working
+	connection and a Default Location.
+
+	:return: ``{"queued": bool, "message": str}``; ``queued`` is False when one is already running.
+	"""
 	frappe.only_for(list(MANAGER_ROLES))
 
 	get_connector()
@@ -734,6 +740,12 @@ def revoke_retailer_login(retailer: str) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 def sync_retailers(names: str | list) -> dict:
+	"""
+	Queue a push of the given Retailers to the store as customers. Each needs write permission,
+	and each retailer's store must have an enabled connection.
+
+	:param names: Retailer names, as a list or a JSON list.
+	"""
 	names = frappe.parse_json(names) if isinstance(names, str) else names
 	if not names:
 		frappe.throw(_("Select at least one Retailer"))
@@ -768,6 +780,10 @@ def _check_visit_date(doc) -> None:
 @frappe.whitelist(methods=["POST"])
 @in_store_of("Visit", "visit")
 def check_in(visit: str, latitude: float, longitude: float, accuracy: float | None = None) -> dict:
+	"""
+	Check the rep in to their own Planned visit, dated today, at this GPS position. Refused while
+	the rep has another visit In Progress. Outside the geofence the check-in is kept, with a warning.
+	"""
 	latitude, longitude, accuracy = _parse_position(latitude, longitude, accuracy)
 
 	doc = frappe.get_doc("Visit", visit, for_update=True)

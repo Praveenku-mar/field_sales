@@ -156,6 +156,9 @@ def check_limit(kind: str) -> None:
 	if limit in (None, ""):
 		return
 	limit = cint(limit)
+	# Count with the store's row locked until this transaction ends: two orders (or reps) added at
+	# once would otherwise both count the same usage and both pass the last free slot.
+	frappe.db.get_value("Store", get_store_name(), "name", for_update=True)
 	used = usage(kind)
 	if used < limit:
 		return

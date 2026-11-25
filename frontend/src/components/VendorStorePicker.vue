@@ -7,7 +7,7 @@
     </p>
     <TextInput v-model="search" class="mt-4" placeholder="Search by shop or code" :debounce="150" />
 
-    <div v-if="stores.loading" class="flex justify-center py-10 text-ink-gray-5">
+    <div v-if="stores.loading && !stores.data" class="flex justify-center py-10 text-ink-gray-5">
       <LoadingIndicator class="size-5" />
     </div>
     <div v-else-if="stores.error" class="mt-4 text-sm text-ink-red-4">{{ errorText }}</div>
@@ -34,27 +34,27 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { LoadingIndicator, TextInput, createResource } from 'frappe-ui'
 import { callMethod } from '@/utils/api'
 
 const search = ref('')
 const switching = ref(null)
 
+// The server searches (and caps the list), so a site with many merchants stays quick to open.
 const stores = createResource({
   url: 'field_sales.frontend_api.get_vendor_stores',
   method: 'GET',
+  makeParams: () => ({ txt: search.value.trim() }),
   auto: true,
 })
 
+// TextInput already debounces the typing.
+watch(search, () => stores.reload())
+
 const errorText = computed(() => String(stores.error?.messages?.[0] || stores.error || ''))
 
-const shown = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  const rows = stores.data || []
-  if (!q) return rows
-  return rows.filter((s) => [s.name, s.shop_name, s.store_url].some((v) => (v || '').toLowerCase().includes(q)))
-})
+const shown = computed(() => stores.data || [])
 
 async function pick(store) {
   switching.value = store
